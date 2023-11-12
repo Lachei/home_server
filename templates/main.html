@@ -8,17 +8,39 @@
       h1 {
         text-align: center;
       }
+      /* Full-width input fields */
+      input[type=text], input[type=password] {
+        width: 100%;
+        padding: 12px 20px;
+        margin: 8px 0;
+        display: inline-block;
+        border: 1px solid #ccc;
+        box-sizing: border-box;
+      }
+      button {
+        background-color: #04AA6D;
+        color: white;
+        padding: 14px 20px;
+        margin: 8px 0;
+        border: none;
+        cursor: pointer;
+        width: 100%;
+      }
+      button:hover {
+        opacity: 0.8;
+      }
+      .container {
+        padding: 16p;
+        margin: auto;
+        max-width: 500px;
+      }
+
     </style>
   </head>
   <body>
     <h1>Wilkommen auf Lacheis web server</h1>
-    <p> Login </p>
+    <p>  </p>
     <form class="" action="/overview" method="post">
-      <div class="imgcontainer">
-        <span onclick="document.getElementById('id01').style.display='none'" class="close" title="Close Modal">&times;</span>
-        <img src="img_avatar2.png" alt="Avatar" class="avatar">
-      </div>
-  
       <div class="container">
         <label for="uname"><b>Username</b></label>
         <input type="text" placeholder="Enter Username" name="uname" required>

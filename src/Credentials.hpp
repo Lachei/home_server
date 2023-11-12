@@ -33,7 +33,7 @@ public:
     };
 
     // if user is not yet known generates a new entry in the map and a new salt
-    std::string_view get_user_salt(const std::string& name) {
+    std::string_view get_or_create_user_salt(const std::string& name) {
         if(name == admin_name) 
             return admin_salt;
         
@@ -54,6 +54,16 @@ public:
             std::ofstream credentials_json_file(_credentials_file.data(), std::ios_base::binary);
             credentials_json_file << _credentials.dump();
         }
+
+        return crow::json::wvalue_reader{_credentials[name]["salt"]}.get(std::string());
+    }
+
+    std::string_view get_user_salt(const std::string& name) {
+        if(name == admin_name) 
+            return admin_salt;
+    
+        if(!_credentials.count(name))
+            return {};
 
         return crow::json::wvalue_reader{_credentials[name]["salt"]}.get(std::string());
     }

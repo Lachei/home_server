@@ -13,8 +13,13 @@ int main() {
         return main_page_text;
     });
     
-    CROW_ROUTE(app, "/get_salt/<string>")([&credentials](std::string user){
+    CROW_ROUTE(app, "/get_salt/<string>")([&credentials](const std::string& user){
         return std::string(credentials.get_user_salt(user));
+    });
+
+    CROW_ROUTE(app, "/get_create_salt/<string>")([&credentials](const std::string& user){
+        // TODO: should only be doable by the admin, maybe delete functionality
+        return std::string(credentials.get_or_create_user_salt(user));
     });
     
     const std::string overview_page_admin = crow::mustache::load_text("overview_admin.html");
