@@ -27,6 +27,6 @@ int main() {
             return overview_page_user;
     });
 
-    app.bindaddr("127.0.0.22").port(18080).multithreaded().run();
+    app.port(18080).multithreaded().run();
     return 0;
 }
