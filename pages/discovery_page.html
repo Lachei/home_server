@@ -16,7 +16,7 @@
     </style>
   </head>
   <body>
-    <h1>Es wird nach dem Lachei server im local network geschaut</h1>
+    <h1>Es wird nach dem Lachei server im local network gesucht</h1>
     <div class = "content">
         <p>Derzeitig getesteter IP Port:</p>
         <div id = "ip"></div>
@@ -26,9 +26,16 @@
     let id = document.getElementById("ip");
     if (!id)
         console.log("Error getting element id")
-    id.innerHTML = "Scan startet ....";
-    while (true) {
-        
-    }
+    id.innerHTML = "Scanne locale addressen";
+    let cur_ip = 1;
+    let base_ip = "192.168.178.";
+    let requests = [...Array(255).keys()].map(n => fetch("http://" + base_ip + (n + 1).toString() + ":18080"));
+    (function loop(){
+    Promise.any(requests)
+      .then(response => {
+        window.location.replace(response.url);
+      })
+      .catch(error => setTimeout(loop));
+    }());
   </script>
 </html>

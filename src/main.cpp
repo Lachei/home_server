@@ -3,8 +3,20 @@
 
 #include "Credentials.hpp"
 
+struct AccessControlHeader{
+    struct context{};
+    
+    void before_handle(crow::request& req, crow::response& res, context& ctx){}
+    void after_handle(crow::request& req, crow::response& res, context& ctx){
+        res.add_header("Access-Control-Allow-Origin", "*");
+        res.add_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        res.add_header("Access-Control-Allow-Headers", "Content-Type");
+        res.add_header("Access-Control-Allow-Credentials", "true");
+    }
+};
+
 int main() {
-    crow::SimpleApp app;
+    crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
 
@@ -14,12 +26,12 @@ int main() {
     });
     
     CROW_ROUTE(app, "/get_salt/<string>")([&credentials](const std::string& user){
-        return std::string(credentials.get_user_salt(user));
+        return credentials.get_user_salt(user);
     });
 
     CROW_ROUTE(app, "/get_create_salt/<string>")([&credentials](const std::string& user){
         // TODO: should only be doable by the admin, maybe delete functionality
-        return std::string(credentials.get_or_create_user_salt(user));
+        return credentials.get_or_create_user_salt(user);
     });
     
     const std::string overview_page_admin = crow::mustache::load_text("overview_admin.html");
