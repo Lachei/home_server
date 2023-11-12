@@ -34,3 +34,4 @@
 # build folder and vscode folder
 build/
 .vscode/
+credentials/
