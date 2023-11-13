@@ -8,10 +8,13 @@ struct AccessControlHeader{
     
     void before_handle(crow::request& req, crow::response& res, context& ctx){}
     void after_handle(crow::request& req, crow::response& res, context& ctx){
-        res.add_header("Access-Control-Allow-Origin", "*");
-        res.add_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        res.add_header("Access-Control-Allow-Headers", "Content-Type");
-        res.add_header("Access-Control-Allow-Credentials", "true");
+        // only add access control allow for login/main page
+        if(req.url.find("18080") - req.url.size() <= 1) {
+            res.add_header("Access-Control-Allow-Origin", "*");
+            res.add_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            res.add_header("Access-Control-Allow-Headers", "Content-Type");
+            res.add_header("Access-Control-Allow-Credentials", "true");
+        }
     }
 };
 
@@ -34,15 +37,72 @@ int main() {
         return credentials.get_or_create_user_salt(user);
     });
     
-    const std::string overview_page_admin = crow::mustache::load_text("overview_admin.html");
-    const std::string overview_page_user = crow::mustache::load_text("overview_page_user.html");
-    CROW_ROUTE(app, "/overview")([&overview_page_admin, &overview_page_user](){
-        bool is_admin = true;
-        if (is_admin)
-            return overview_page_admin;
-        else
-            return overview_page_user;
+    CROW_ROUTE(app, "/change_password/<string>")([&credentials](const crow::request& req, const std::string& user){
+        auto cred = req.headers.find("credentials");        
+        auto new_pwd = req.headers.find("new_pwd");
+        if (cred == req.headers.end() || new_pwd == req.headers.end() || !credentials.contains(user))
+            return std::string("Missing header infos");
+
+        std::string_view creds = cred->second;
+        auto [username, sha] = extract_credentials(creds);
+        if (!credentials.check_credential(std::string(username), sha)){
+            return std::string("Credentials are invalid, maybe credentials were changed in the meantime. Try relogging.");
+        }
+        
+        if(username != user && username != admin_name) {
+            return std::string("Only admin can change password of other users");;
+        }
+            
+        bool success = credentials.set_credential(user, new_pwd->second);
+        if (success)
+            return std::string("success");
+        else 
+            return std::string("failed");
     });
+    
+    CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user){
+        auto cred = req.headers.find("credentials");
+        if (cred == req.headers.end())
+            return std::string("Missing header infos");
+            
+        std::string_view creds = cred->second;
+        auto [username, sha] = extract_credentials(creds);
+        if (username != admin_name || !credentials.check_credential(std::string(username), sha))
+            return std::string("Credentials are invalid");
+        
+        bool success = credentials.delete_credential(user);
+        if (success)
+            return std::string("success");
+        else
+            return std::string("error");
+    });
+    
+    const auto overview_page = crow::mustache::load("overview.html");
+    CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
+        auto submitted_creds = std::string_view(req.url_params.get("credentials"));
+        auto [username, sha] = extract_credentials(submitted_creds);
+        
+        if (!credentials.check_credential(std::string(username), sha)){
+            CROW_LOG_INFO << "Credential check failed for username " << username << sha;
+            return main_page_text;
+        }
+
+        bool is_admin = username == admin_name;
+        using op = std::pair<std::string const, crow::json::wvalue>;
+        if (is_admin)
+            return overview_page.render_string(crow::mustache::context{op{"user_specific_css", "admin.css"}, op{"benutzername", "admin"}});
+        else
+            return overview_page.render_string(crow::mustache::context{op{"user_specific_css", "user.css"}, op{"benutzername", std::string(username)}});
+    });
+    
+    const std::string admin_css = crow::mustache::load_text("admin.css");
+    const std::string user_css = crow::mustache::load_text("user.css");
+    const std::string general_css = crow::mustache::load_text("general.css");
+    const std::string sha_js = crow::mustache::load_text("sha256.js");
+    CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
+    CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
+    CROW_ROUTE(app, "/general.css")([&general_css](){return general_css;});
+    CROW_ROUTE(app, "/sha256.js")([&sha_js](){return sha_js;});
 
     app.port(18080).multithreaded().run();
     return 0;

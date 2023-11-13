@@ -1,55 +1,99 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <style>
-      html *{
-        font-family: Arial, Helvetica, sans-serif;
-      }
-      h1 {
-        text-align: center;
-      }
-      /* Full-width input fields */
-      input[type=text], input[type=password] {
-        width: 100%;
-        padding: 12px 20px;
-        margin: 8px 0;
-        display: inline-block;
-        border: 1px solid #ccc;
-        box-sizing: border-box;
-      }
-      button {
-        background-color: #04AA6D;
-        color: white;
-        padding: 14px 20px;
-        margin: 8px 0;
-        border: none;
-        cursor: pointer;
-        width: 100%;
-      }
-      button:hover {
-        opacity: 0.8;
-      }
-      .container {
-        padding: 16p;
-        margin: auto;
-        max-width: 500px;
-      }
 
-    </style>
-  </head>
-  <body>
-    <h1>Wilkommen auf Lacheis web server</h1>
-    <p>  </p>
-    <form class="" action="/overview" method="post">
-      <div class="container">
-        <label for="uname"><b>Username</b></label>
-        <input type="text" placeholder="Enter Username" name="uname" required>
-  
-        <label for="psw"><b>Password</b></label>
-        <input type="password" placeholder="Enter Password" name="psw" required>
-          
-        <button type="submit">Login</button>
-      </div>
-    </form>
-  </body>
+<head>
+  <style>
+    html * {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    h1 {
+      text-align: center;
+    }
+
+    /* Full-width input fields */
+    input[type=text],
+    input[type=password] {
+      width: 100%;
+      padding: 12px 20px;
+      margin: 8px 0;
+      display: inline-block;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #04AA6D;
+      color: white;
+      padding: 14px 20px;
+      margin: 8px 0;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    button:hover {
+      opacity: 0.8;
+    }
+
+    .container {
+      padding: 16p;
+      margin: auto;
+      max-width: 500px;
+    }
+
+    .errors {
+      color: red;
+    }
+  </style>
+
+  <script type="text/javascript" src="sha256.js"></script>
+  <script>
+    let errors;
+    let username;
+    let password;
+    window.onload = function () {
+      if(window.location.search.length !== 0)
+        window.location.replace(window.location.origin);
+      errors = document.getElementById("errors");
+      username = document.getElementById("uname");
+      password = document.getElementById("password");
+    };
+
+    const login = function () {
+      // first get salt
+      fetch(window.location.pathname + "get_salt/" + username.value).then(response => {
+        response.text().then(text => {
+          if (text.length === 0)
+            errors.innerHTML = "Benutzer ist nicht bekannt. Vertippt?";
+          else {
+            errors.innerHTML = "";
+            console.log(text);
+            let sha = sha256(password.value + text);
+            console.log(sha);
+            window.location = window.location.pathname + "overview?credentials=" + username.value + ":" + sha;
+          }
+        })
+      });
+    };
+
+  </script>
+</head>
+
+<body>
+  <h1>Wilkommen auf Lacheis web server</h1>
+  <div class="container">
+    <div id="errors" class="errors">
+
+    </div>
+    <label for="uname"><b>Benutzername</b></label>
+    <input id="uname" type="text" placeholder="Benutzernamen" name="uname" required>
+
+    <label for="psw"><b>Passwort</b></label>
+    <input id="password" type="password" placeholder="Passwort" name="psw" required>
+
+    <button onclick="login()">Login</button>
+  </div>
+</body>
+
 </html>

@@ -33,7 +33,7 @@
     (function loop(){
     Promise.any(requests)
       .then(response => {
-        window.location.replace(response.url);
+        window.location = response.url;
       })
       .catch(error => setTimeout(loop));
     }());

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link rel="stylesheet" href="{{user_specific_css}}">
+    <style>
+        html * {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        /* Full-width input fields */
+        input[type=text],
+        input[type=password] {
+            width: 100%;
+            padding: 12px 20px;
+            margin: 8px 0;
+            display: inline-block;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: #04AA6D;
+            color: white;
+            padding: 14px 20px;
+            margin: 8px 0;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            opacity: 0.8;
+        }
+
+        .container {
+            padding: 16p;
+            margin: auto;
+            max-width: 90%;
+        }
+
+        .tab {
+            overflow: hidden;
+            border: 1px solid #ccc;
+            background-color: #f1f1f1;
+        }
+
+        .tab button {
+            color: black;
+            background-color: inherit;
+            float: left;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            transition: 0.3s;
+        }
+
+        .tab button:hover {
+            background-color: #ddd;
+        }
+
+        .tab button.active {
+            background-color: #ccc;
+        }
+
+        .tabcontent {
+            display: none;
+            padding: 6px 12px;
+            border: 1px solid #ccc;
+            border-top: none;
+        }
+
+        .tabcontentactive {
+            display: block;
+        }
+
+        .tabactive {
+            border-bottom-style: solid;
+            border-bottom-color: blue;
+            border-bottom-width: 5px;
+        }
+        .inset {
+            margin-left: 5%;
+        }
+
+        #logout {
+            float: right;
+            display: flex;
+        }
+    </style>
+
+    <script type="text/javascript" src="sha256.js"></script>
+    <script>
+        const openTab = function (event, tab_id) {
+            // disabling all tabs
+            let tablinks = document.getElementsByClassName("tablinks");
+            for (let tablink of tablinks)
+                tablink.classList.remove("tabactive");
+            let tabcontents = document.getElementsByClassName("tabcontent");
+            for (let tabcontent of tabcontents)
+                tabcontent.classList.remove("tabcontentactive");
+
+            // activating the selected tab
+            document.getElementById(tab_id + "button").classList.add("tabactive");
+            document.getElementById(tab_id).classList.add("tabcontentactive");
+        };
+
+        const change_pwd = function () {
+            let username = document.getElementById("uname").value;
+            if (!username || username.length === 0)
+                username = "{{benutzername}}";
+            let password = document.getElementById("password").value;
+            if (password.length === 0) {
+                // TODO
+            }
+
+            fetch(window.location.origin + "/get_create_salt/" + username).then((response => {
+                response.text().then(text => {
+                    if (text.length === 0) {
+                        console.log("Error at getting the salt");
+                    }
+                    else {
+                        let sha = sha256(password + text);
+                        fetch(location.origin + "/change_password/" + username, {
+                            headers: { "credentials": location.search.substr(location.search.indexOf("=") + 1), "new_pwd": sha }
+                        })
+                            .then(response => {
+                                response.text().then(res => {
+                                    console.log(res);
+                                    if (username == "{{benutzername}}") {
+                                        window.location = window.location.pathname + "?credentials={{benutzername}}:" + sha;
+                                    }
+                                });
+                            });
+                    }
+                })
+            }));
+        }
+        
+        const delete_user = function(uname) {
+            fetch(window.location.origin + "/delete_user/" + uname,
+                {headers: {"credentials": location.search.substr(window.location.search.indexOf("=") + 1)}})
+            .then(response => {
+                response.text().then(text => {
+                    console.log(text);
+                })
+            });
+        }
+    </script>
+</head>
+
+<body>
+    <div style="contain: content;">
+        <div id="logout">
+            <p>Eingeloggt als <b>{{benutzername}}</b></p>
+            <div style="width: 10px"></div>
+            <button onclick="window.location = window.location.origin;">Logout</button>
+        </div>
+    </div>
+    <h1>Lacheis kleiner Minifutziserver</h1>
+    <div class="container">
+
+        <div class="tab">
+            <button id="Uebersichtbutton" class="tablinks tabactive"
+                onclick="openTab(event, 'Uebersicht')"><b>Uebersicht</b></button>
+            <button id="Vorhabenbutton" class="tablinks" onclick="openTab(event, 'Vorhaben')"><b>Vorhaben</b></button>
+            <button id="Einstellungenbutton" class="tablinks"
+                onclick="openTab(event, 'Einstellungen')"><b>Einstellungen</b></button>
+        </div>
+
+        <div id="Uebersicht" class="tabcontent tabcontentactive">
+            In baelde wirds hier was.
+        </div>
+        <div id="Vorhaben" class="tabcontent">
+            Noch nix
+        </div>
+        <div id="Einstellungen" class="tabcontent">
+            <p><b>Passwort &auml;ndern:</b><p>
+            <div class="inset">
+                <div class="admin">
+                    <label for="uname"><b>Benutzername</b></label>
+                    <input id="uname" type="text" placeholder="Benutzername" name="uname">
+                </div>
+
+                <label for="psw"><b>Passwort</b></label>
+                <input id="password" type="password" placeholder="Passwort" name="psw" required>
+
+                <button onclick="change_pwd()">Passwort &Auml;ndern</button>
+
+            </div>
+            <div class="admin">
+                <p><b>Benutzer l&ouml;schen:</b></p>
+                <div class="inset">
+                    <label for="deletename"><b>Benutzername</b></label>
+                    <input id="deleteuname" type="text" placeholder="Benuztername" name="deletename">
+                    
+                    <button onclick="delete_user(getElementById('deleteuname').value)">Benutzer l&ouml;schen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</div>
+
+</html>
