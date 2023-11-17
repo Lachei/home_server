@@ -107,48 +107,6 @@
             document.getElementById(tab_id + "button").classList.add("tabactive");
             document.getElementById(tab_id).classList.add("tabcontentactive");
         };
-
-        const change_pwd = function () {
-            let username = document.getElementById("uname").value;
-            if (!username || username.length === 0)
-                username = "{{benutzername}}";
-            let password = document.getElementById("password").value;
-            if (password.length === 0) {
-                // TODO
-            }
-
-            fetch(window.location.origin + "/get_create_salt/" + username).then((response => {
-                response.text().then(text => {
-                    if (text.length === 0) {
-                        console.log("Error at getting the salt");
-                    }
-                    else {
-                        let sha = sha256(password + text);
-                        fetch(location.origin + "/change_password/" + username, {
-                            headers: { "credentials": location.search.substr(location.search.indexOf("=") + 1), "new_pwd": sha }
-                        })
-                            .then(response => {
-                                response.text().then(res => {
-                                    console.log(res);
-                                    if (username == "{{benutzername}}") {
-                                        window.location = window.location.pathname + "?credentials={{benutzername}}:" + sha;
-                                    }
-                                });
-                            });
-                    }
-                })
-            }));
-        }
-        
-        const delete_user = function(uname) {
-            fetch(window.location.origin + "/delete_user/" + uname,
-                {headers: {"credentials": location.search.substr(window.location.search.indexOf("=") + 1)}})
-            .then(response => {
-                response.text().then(text => {
-                    console.log(text);
-                })
-            });
-        }
     </script>
 </head>
 
@@ -164,45 +122,35 @@
     <div class="container">
 
         <div class="tab">
-            <button id="Uebersichtbutton" class="tablinks tabactive"
-                onclick="openTab(event, 'Uebersicht')"><b>Uebersicht</b></button>
-            <button id="Vorhabenbutton" class="tablinks" onclick="openTab(event, 'Vorhaben')"><b>Vorhaben</b></button>
+            <button id="Arbeitsplanungbutton" class="tablinks tabactive"
+                onclick="openTab(event, 'Arbeitsplanung')"><b>Arbeitsplanung</b></button>
+            <button id="Stempeluhrbutton" class="tablinks" onclick="openTab(event, 'Stempeluhr')"><b>Stempeluhr</b></button>
+            <button id="Datenbutton" class="tablinks" onclick="openTab(event, 'Daten')"><b>Daten</b></button>
             <button id="Einstellungenbutton" class="tablinks"
                 onclick="openTab(event, 'Einstellungen')"><b>Einstellungen</b></button>
         </div>
 
-        <div id="Uebersicht" class="tabcontent tabcontentactive">
-            In baelde wirds hier was.
-        </div>
-        <div id="Vorhaben" class="tabcontent">
-            Noch nix
-        </div>
-        <div id="Einstellungen" class="tabcontent">
-            <p><b>Passwort &auml;ndern:</b><p>
-            <div class="inset">
-                <div class="admin">
-                    <label for="uname"><b>Benutzername</b></label>
-                    <input id="uname" type="text" placeholder="Benutzername" name="uname">
-                </div>
-
-                <label for="psw"><b>Passwort</b></label>
-                <input id="password" type="password" placeholder="Passwort" name="psw" required>
-
-                <button onclick="change_pwd()">Passwort &Auml;ndern</button>
-
-            </div>
-            <div class="admin">
-                <p><b>Benutzer l&ouml;schen:</b></p>
-                <div class="inset">
-                    <label for="deletename"><b>Benutzername</b></label>
-                    <input id="deleteuname" type="text" placeholder="Benuztername" name="deletename">
-                    
-                    <button onclick="delete_user(getElementById('deleteuname').value)">Benutzer l&ouml;schen</button>
-                </div>
-            </div>
-        </div>
+        <div id="Arbeitsplanung" class="tabcontent tabcontentactive" content="/tabs/arbeitsplanung.html"> </div>
+        <div id="Stempeluhr" class="tabcontent" content="/tabs/stempeluhr.html"> </div>
+        <div id="Daten" class="tabcontent" content="/tabs/daten.html"> </div>
+        <div id="Einstellungen" class="tabcontent" content="/tabs/einstellungen.html"> </div>
     </div>
+    <script>
+        // loading all needed html pages
+        let tabcontents = [...document.getElementsByClassName("tabcontent")];
+        Promise.all(tabcontents.map(e => fetch(window.location.origin + e.attributes["content"].value)))
+            .then(contents => {
+                for(let i = 0; i < tabcontents.length; ++i) {
+                    contents[i].text().then(t => {
+                        tabcontents[i].innerHTML = t
+                        scripts = [...tabcontents[i].getElementsByTagName('script')];
+                        scripts.map(
+                            s => window.eval(s.innerHTML)
+                        );
+                    });
+                }
+            });
+    </script>
 </body>
-</div>
 
 </html>

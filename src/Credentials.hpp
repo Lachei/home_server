@@ -8,6 +8,7 @@
 
 #include "AdminCredentials.hpp"
 #include "util.hpp"
+#include "nlohmann/json.hpp"
 
 // this class manages the credentials and keeps all credentials in memory and on harddisk to be quicker
 // at checking a credential
@@ -30,7 +31,7 @@ public:
         std::ifstream credentials_json_file(credentials_file.data(), std::ios_base::binary);
         std::string credentials_json_string{std::istream_iterator<char>(credentials_json_file), std::istream_iterator<char>()};
         if (credentials_json_string.size())
-            _credentials = crow::json::load(credentials_json_string);
+            _credentials = nlohmann::json::parse(credentials_json_string);
     }
     
     ~Credentials(){
@@ -48,7 +49,7 @@ public:
         if (name == admin_name)
             return std::string(admin_salt);
 
-        if (!_credentials.count(name))
+        if (!_credentials.contains(name))
         {
             // create new credential salt
             std::string new_salt(SALT_LENGTH, ' ');
@@ -62,12 +63,12 @@ public:
                     new_salt[i] = static_cast<char>('a' + n - 10);
             }
             using op = std::pair<std::string const, crow::json::wvalue>;
-            _credentials[name] = crow::json::wvalue({op{"salt", new_salt}, op{"sha256", ""}});
+            _credentials[name] = nlohmann::json{{"salt", new_salt}, {"sha256", ""}};
             CROW_LOG_INFO << "Added new user salt pair: " << name << ": " << new_salt;
             safe_credentials();
         }
 
-        return crow::json::wvalue_reader{_credentials[name]["salt"]}.get(std::string());
+        return _credentials[name]["salt"].get<std::string>();
     }
 
     std::string get_user_salt(const std::string &name)
@@ -78,7 +79,7 @@ public:
         if (!_credentials.count(name))
             return {};
 
-        return crow::json::wvalue_reader{_credentials[name]["salt"]}.get(std::string());
+        return _credentials[name]["salt"].get<std::string>();
     }
 
     bool check_credential(const std::string &name, std::string_view sha256) const
@@ -88,7 +89,7 @@ public:
         if (!_credentials.count(name))
             return false;
 
-        auto sha_user = crow::json::wvalue_reader{_credentials[name]["sha256"]}.get(std::string());
+        auto sha_user = _credentials[name]["sha256"].get<std::string>();
         return sha_user == sha256;
     }
 
@@ -105,7 +106,7 @@ public:
         if (!_credentials.count(user))
             return false;
         auto alt = crow::json::wvalue::object();
-        crow::json::wvalue_reader{_credentials}.get(alt).erase(user);
+        _credentials.erase(user);
         safe_credentials();
         return  true;
     }
@@ -118,7 +119,7 @@ public:
 
 private:
     std::string_view _credentials_file;
-    crow::json::wvalue _credentials;
+    nlohmann::json _credentials;
 
     std::random_device _r{};
     std::uniform_int_distribution<int> _dist{0, ('z' - 'a') + 10};

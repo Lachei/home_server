@@ -99,10 +99,18 @@ int main() {
     const std::string user_css = crow::mustache::load_text("user.css");
     const std::string general_css = crow::mustache::load_text("general.css");
     const std::string sha_js = crow::mustache::load_text("sha256.js");
+    const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
+    const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
+    const std::string tab_data = crow::mustache::load_text("tabs/data.html");
+    const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
     CROW_ROUTE(app, "/general.css")([&general_css](){return general_css;});
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){return sha_js;});
+    CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
+    CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
+    CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
+    CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
 
     app.port(18080).multithreaded().run();
     return 0;

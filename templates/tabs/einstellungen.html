@@ -1,0 +1,71 @@
+<script>
+    console.log("Yep, is executed");
+    function change_pwd(){
+        let username = document.getElementById("uname").value;
+        if (!username || username.length === 0)
+            username = "{{benutzername}}";
+        let password = document.getElementById("password").value;
+        if (password.length === 0) {
+            // TODO
+        }
+
+        fetch(window.location.origin + "/get_create_salt/" + username).then((response => {
+            response.text().then(text => {
+                if (text.length === 0) {
+                    console.log("Error at getting the salt");
+                }
+                else {
+                    let sha = sha256(password + text);
+                    fetch(location.origin + "/change_password/" + username, {
+                        headers: { "credentials": location.search.substr(location.search.indexOf("=") + 1), "new_pwd": sha }
+                    })
+                        .then(response => {
+                            response.text().then(res => {
+                                console.log(res);
+                                if (username == "{{benutzername}}") {
+                                    window.location = window.location.pathname + "?credentials={{benutzername}}:" + sha;
+                                }
+                            });
+                        });
+                }
+            })
+        }));
+    }
+    
+    function delete_user(uname) {
+        fetch(window.location.origin + "/delete_user/" + uname,
+            {headers: {"credentials": location.search.substr(window.location.search.indexOf("=") + 1)}})
+        .then(response => {
+            response.text().then(text => {
+                console.log(text);
+            })
+        });
+    }
+    
+    function test(){
+        console.log("works");
+    }
+    test();
+</script>
+<p><b>Passwort &auml;ndern:</b><p>
+<div class="inset">
+    <div class="admin">
+        <label for="uname"><b>Benutzername</b></label>
+        <input id="uname" type="text" placeholder="Benutzername" name="uname">
+    </div>
+
+    <label for="psw"><b>Passwort</b></label>
+    <input id="password" type="password" placeholder="Passwort" name="psw" required>
+
+    <button onclick="change_pwd()">Passwort &Auml;ndern</button>
+
+</div>
+<div class="admin">
+    <p><b>Benutzer l&ouml;schen:</b></p>
+    <div class="inset">
+        <label for="deletename"><b>Benutzername</b></label>
+        <input id="deleteuname" type="text" placeholder="Benuztername" name="deletename">
+        
+        <button onclick="delete_user(getElementById('deleteuname').value)">Benutzer l&ouml;schen</button>
+    </div>
+</div>
