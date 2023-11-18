@@ -94,6 +94,8 @@
 
     <script type="text/javascript" src="sha256.js"></script>
     <script>
+        const parent_uname = "{{benutzername}}";
+
         const openTab = function (event, tab_id) {
             // disabling all tabs
             let tablinks = document.getElementsByClassName("tablinks");
@@ -142,7 +144,8 @@
             .then(contents => {
                 for(let i = 0; i < tabcontents.length; ++i) {
                     contents[i].text().then(t => {
-                        tabcontents[i].innerHTML = t
+                        // replacing all instances of username in t
+                        tabcontents[i].innerHTML = t.replaceAll("{" + "{benutzername}}", parent_uname);
                         scripts = [...tabcontents[i].getElementsByTagName('script')];
                         scripts.map(
                             s => window.eval(s.innerHTML)

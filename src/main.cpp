@@ -38,19 +38,14 @@ int main() {
     });
     
     CROW_ROUTE(app, "/change_password/<string>")([&credentials](const crow::request& req, const std::string& user){
-        auto cred = req.headers.find("credentials");        
-        auto new_pwd = req.headers.find("new_pwd");
-        if (cred == req.headers.end() || new_pwd == req.headers.end() || !credentials.contains(user))
-            return std::string("Missing header infos");
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        std::string_view creds = cred->second;
-        auto [username, sha] = extract_credentials(creds);
-        if (!credentials.check_credential(std::string(username), sha)){
-            return std::string("Credentials are invalid, maybe credentials were changed in the meantime. Try relogging.");
-        }
+        auto new_pwd = req.headers.find("new_pwd");
+        if (new_pwd == req.headers.end() || !credentials.contains(user))
+            return std::string("Missing new_pwd in header infos or user is not available");
         
         if(username != user && username != admin_name) {
-            return std::string("Only admin can change password of other users");;
+            return std::string("Only admin can change password of other users");
         }
             
         bool success = credentials.set_credential(user, new_pwd->second);
@@ -61,14 +56,7 @@ int main() {
     });
     
     CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user){
-        auto cred = req.headers.find("credentials");
-        if (cred == req.headers.end())
-            return std::string("Missing header infos");
-            
-        std::string_view creds = cred->second;
-        auto [username, sha] = extract_credentials(creds);
-        if (username != admin_name || !credentials.check_credential(std::string(username), sha))
-            return std::string("Credentials are invalid");
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
         
         bool success = credentials.delete_credential(user);
         if (success)
@@ -79,23 +67,24 @@ int main() {
     
     const auto overview_page = crow::mustache::load("overview.html");
     CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
-        auto submitted_creds = std::string_view(req.url_params.get("credentials"));
-        auto [username, sha] = extract_credentials(submitted_creds);
+        EXTRACT_CREDENTIALS(req);
         
         if (!credentials.check_credential(std::string(username), sha)){
-            CROW_LOG_INFO << "Credential check failed for username " << username << sha;
+            CROW_LOG_INFO << "Credential check failed for username " << username << ':' << sha;
             return main_page_text;
         }
 
         bool is_admin = username == admin_name;
         using op = std::pair<std::string const, crow::json::wvalue>;
-        auto crow_context = crow::mustache::context{op{"user_specific_css", "admin.css"}};
+        crow::mustache::context crow_context{};
         if (is_admin) {
             crow_context["benutzername"] = "admin";
+            crow_context["user_specific_css"] = "admin.css";
             return overview_page.render_string(crow_context);
         }
         else {
             crow_context["benutzername"] = std::string(username);
+            crow_context["user_specific_css"] = "user.css";
             return overview_page.render_string(crow_context);
         }
     });

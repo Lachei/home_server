@@ -40,7 +40,7 @@ public:
 
     bool contains(const std::string &user)
     {
-        return _credentials.count(user);
+        return _credentials.contains(user);
     }
 
     // if user is not yet known generates a new entry in the map and a new salt
@@ -76,7 +76,7 @@ public:
         if (name == admin_name)
             return std::string(admin_salt);
 
-        if (!_credentials.count(name))
+        if (!_credentials.contains(name))
             return {};
 
         return _credentials[name]["salt"].get<std::string>();
@@ -86,7 +86,7 @@ public:
     {
         if (name == admin_name)
             return sha256 == admin_sha256;
-        if (!_credentials.count(name))
+        if (!_credentials.contains(name))
             return false;
 
         auto sha_user = _credentials[name]["sha256"].get<std::string>();
@@ -95,7 +95,7 @@ public:
 
     bool set_credential(const std::string &user, std::string_view sha256)
     {
-        if (!_credentials.count(user))
+        if (!_credentials.contains(user))
             return false;
         _credentials[user]["sha256"] = std::string(sha256);
         safe_credentials();
@@ -103,7 +103,7 @@ public:
     }
     
     bool delete_credential(const std::string &user) {
-        if (!_credentials.count(user))
+        if (!_credentials.contains(user))
             return false;
         auto alt = crow::json::wvalue::object();
         _credentials.erase(user);

@@ -1,5 +1,5 @@
 <script>
-    console.log("Yep, is executed");
+    console.log("Yep, is executed", parent_uname);
     function change_pwd(){
         let username = document.getElementById("uname").value;
         if (!username || username.length === 0)
@@ -41,11 +41,6 @@
             })
         });
     }
-    
-    function test(){
-        console.log("works");
-    }
-    test();
 </script>
 <p><b>Passwort &auml;ndern:</b><p>
 <div class="inset">
