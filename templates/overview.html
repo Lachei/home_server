@@ -138,6 +138,12 @@
         <div id="Einstellungen" class="tabcontent" content="/tabs/einstellungen.html"> </div>
     </div>
     <script>
+        function reattach_script(script_node) {
+            let new_script_node = document.createElement("script");
+            new_script_node.innerHTML = script_node.innerHTML;
+            [...script_node.attributes].forEach(a => new_script_node.setAttribute(a.nodeName, a.nodeValue));
+            script_node.parentNode.replaceChild(new_script_node, script_node);
+        }
         // loading all needed html pages
         let tabcontents = [...document.getElementsByClassName("tabcontent")];
         Promise.all(tabcontents.map(e => fetch(window.location.origin + e.attributes["content"].value)))
@@ -148,7 +154,7 @@
                         tabcontents[i].innerHTML = t.replaceAll("{" + "{benutzername}}", parent_uname);
                         scripts = [...tabcontents[i].getElementsByTagName('script')];
                         scripts.map(
-                            s => window.eval(s.innerHTML)
+                            s => reattach_script(s)//window.eval(s.innerHTML)
                         );
                     });
                 }
