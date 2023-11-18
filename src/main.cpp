@@ -1,5 +1,5 @@
 #include <iostream>
-#include <crow.h>
+#include "crow/crow.h"
 
 #include "Credentials.hpp"
 
@@ -89,10 +89,15 @@ int main() {
 
         bool is_admin = username == admin_name;
         using op = std::pair<std::string const, crow::json::wvalue>;
-        if (is_admin)
-            return overview_page.render_string(crow::mustache::context{op{"user_specific_css", "admin.css"}, op{"benutzername", "admin"}});
-        else
-            return overview_page.render_string(crow::mustache::context{op{"user_specific_css", "user.css"}, op{"benutzername", std::string(username)}});
+        auto crow_context = crow::mustache::context{op{"user_specific_css", "admin.css"}};
+        if (is_admin) {
+            crow_context["benutzername"] = "admin";
+            return overview_page.render_string(crow_context);
+        }
+        else {
+            crow_context["benutzername"] = std::string(username);
+            return overview_page.render_string(crow_context);
+        }
     });
     
     const std::string admin_css = crow::mustache::load_text("admin.css");
