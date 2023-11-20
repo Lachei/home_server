@@ -2,6 +2,7 @@
 #include "crow/crow.h"
 
 #include "Credentials.hpp"
+#include "Database.hpp"
 
 struct AccessControlHeader{
     struct context{};
@@ -22,6 +23,7 @@ int main() {
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
+    Database event_database;
 
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){
@@ -63,6 +65,10 @@ int main() {
             return std::string("success");
         else
             return std::string("error");
+    });
+    
+    CROW_ROUTE(app, "/get_events/<string>")([&credentials, &event_database](const crow::request& req, const std::string& user){
+
     });
     
     const auto overview_page = crow::mustache::load("overview.html");

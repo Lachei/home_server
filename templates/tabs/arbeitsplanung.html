@@ -14,7 +14,9 @@
             ],
             allDayContent: "Ganztags",
             buttonText: {close: 'Schliessen', dayGridMonth: 'Monat', listDay: 'Liste', listMonth: 'List', listWeek: 'List', listYear: 'List', resourceTimeGridDay: 'Tag', resourceTimeGridWeek: 'Woche', timeGridDay: 'Tag', timeGridWeek: 'Woche', today: 'Heute'},
-            date: new Date().toLocaleDateString('de-DE')
+            //date: new Date().toISOString()
+            dayHeaderFormat: date => new Intl.DateTimeFormat('de-DE', {weekday: 'short', month: 'numeric', day: 'numeric'}).format(date),
+            editable: true
         });
     }
 </script>
