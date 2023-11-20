@@ -20,6 +20,7 @@ struct AccessControlHeader{
 };
 
 int main() {
+    std::chrono::system_clock::now();
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
@@ -68,7 +69,7 @@ int main() {
     });
     
     CROW_ROUTE(app, "/get_events/<string>")([&credentials, &event_database](const crow::request& req, const std::string& user){
-
+        return std::string("");
     });
     
     const auto overview_page = crow::mustache::load("overview.html");
