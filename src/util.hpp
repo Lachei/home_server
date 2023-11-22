@@ -14,6 +14,9 @@
         auto [username, sha] = *req_creds; \
         if (!credentials.check_credential(std::string(username), sha)) return std::string("Credential check failed. Relogging might fix the issue.");
 
+template<class... Ts>
+struct overloaded : Ts... { using Ts::operator()...; };
+
 inline auto i_range(auto&& end) {return std::ranges::iota_view(std::remove_reference_t<decltype(end)>{}, end);}
 
 inline std::pair<std::string_view, std::string_view> extract_credentials(std::string_view cred) {
