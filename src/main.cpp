@@ -24,7 +24,7 @@ int main() {
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
-    Database event_database;
+    Database event_database("data/events");
 
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){

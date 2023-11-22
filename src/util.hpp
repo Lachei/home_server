@@ -1,6 +1,9 @@
 #pragma once
 #include <ranges>
 #include <optional>
+#include <source_location>
+
+#include "crow/crow.h"
 
 #define EXTRACT_CREDENTIALS(req) auto req_creds = extract_credentials_from_req(req);\
         if (!req_creds) return std::string("Credentials missing"); \
@@ -31,4 +34,8 @@ inline std::optional<std::pair<std::string_view, std::string_view>> extract_cred
         creds = cred->second;
 
     return std::optional{extract_credentials(creds)};
+}
+
+inline std::string log_msg(std::string_view message, const std::source_location& loc = std::source_location::current()){
+    return loc.file_name() + ':' + std::to_string(loc.line()) + '|' + std::string(message);
 }

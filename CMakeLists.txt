@@ -5,3 +5,6 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 file(GLOB SRC "src/*")
 add_executable(home_server ${SRC})
+
+include(CTest)
+add_subdirectory(tests)
