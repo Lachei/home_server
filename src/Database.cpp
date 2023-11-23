@@ -5,6 +5,7 @@
 #include <numeric>
 
 #include "util.hpp"
+#include "type_serialization.hpp"
 
 using src_loc = std::source_location;
 using Types =  std::vector<uint32_t>;
@@ -50,9 +51,16 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             
 
             // load data (can be loaded without seeking, as they are in the storage sequentially)
+            loaded_data.resize(header.num_columns);
             for(auto i: i_range(header.num_columns)) {
                 switch(types[i]){
                 case type_id<float>():
+                    std::vector<float> d(header.num_columns);
+                    if (data_file.tellg(data_file.beg) != offset_sizes[i].first || d.size() * sizeof(d[0]) != offset_sizes[i].second)
+                        throw std::runtime_error{log_msg("Data offset size mismatch on readout. Maybe data file is corrupt")};
+                    data_file.read(reinterpret_cast<char*>(d.data()), offset_sizes[i].second);
+                    loaded_data[i] = std::move(d);
+                    break;
                 case type_id<double>():
                 case type_id<int32_t>():
                 case type_id<int64_t>():
@@ -92,21 +100,8 @@ void Database::Table::store_cache() {
     for(auto i: i_range(column_infos.num_columns()))
         types[i] = loaded_data[i].index();
     std::vector<uint64_t> column_sizes(column_infos.num_columns());
-    for(auto i: i_range(column_infos.num_columns())) {
-        column_sizes[i] = std::visit(overloaded{
-            [](const std::vector<std::string>& v) { 
-                // strings are still null terminated (simply supplies best storage space)
-                return std::accumulate(v.begin(), v.end(), size_t{}, [](size_t a, const std::string& s){return a + s.size();});
-            },
-            [](const std::vector<std::vector<std::byte>>& v) {
-                // for each vector there is the byte size of the vec given as uint32_t at the beginning of the array
-                return std::accumulate(v.begin(), v.end(), size_t{}, [](size_t a, const std::vector<std::byte>& v){return a + v.size() + sizeof(uint64_t);});
-            },
-            [](auto&& v){
-                return v.size() * sizeof(v[0]);
-            }
-        }, loaded_data[i]);
-    }
+    for(const auto& data: loaded_data)
+        column_sizes[i] = std::visit([](auto&& v){ return serialized_size(v);}, data);
     
     // filling header infos
     GeneralHeader general_header{
@@ -115,6 +110,7 @@ void Database::Table::store_cache() {
     };
     HeaderDataColumnar header{
         .num_columns = column_infos.num_columns(),
+        .num_rows = num_rows(),
         .id_column = column_infos.id_column,
         .column_names_offset = static_cast<uint32_t>(sizeof(GeneralHeader) + sizeof(HeaderDataColumnar)),
         .column_names_len = static_cast<uint32_t>(names_string.length()),
@@ -134,32 +130,10 @@ void Database::Table::store_cache() {
     file.write(reinterpret_cast<char*>(&general_header), sizeof(general_header));
     file.write(reinterpret_cast<char*>(&header), sizeof(header));
     file.write(names_string.data(), names_string.length() * sizeof(names_string[0]));
-    file.write(reinterpret_cast<char*>(types.data()), types.size() * sizeof(types[0]));
-    file.write(reinterpret_cast<char*>(offset_lengths.data()), offset_lengths.size() * sizeof(offset_lengths[0]));
-    for (auto i: i_range(column_infos.num_columns())) {
-        std::visit(overloaded{
-            [&file, &column_sizes, i](const std::vector<std::string>& v) {
-                // gathering all the strings in a single buffer for submission
-                std::vector<char> data(column_sizes[i]);
-                size_t cur_offset{};
-                for (const auto& s: v){
-                    std::copy(s.data(), s.data() + s.size(), data.data() + cur_offset);
-                    cur_offset += s.size();
-                }
-                file.write(data.data(), data.size() * sizeof(data[0]));
-            },
-            [&file, &column_sizes, &i](const std::vector<std::vector<std::byte>>& v) {
-                std::vector<std::byte> data(column_sizes[i]);
-                size_t cur_offset{};
-                for (const auto& b: v) {
-                    *reinterpret_cast<uint64_t*>(data.data() + cur_offset) = b.size();
-                    cur_offset += sizeof(uint64_t);
-                    std::copy(b.begin(), b.end(), data.begin() + cur_offset);
-                }
-            },
-            [&file](auto&& v) { file.write(reinterpret_cast<char*>(v.data()), v.size() * sizeof(v[0])); }
-        }, loaded_data[i]);
-    }
+    serialize_type(file, types);
+    serialize_type(file, offset_lengths);
+    for (const auto& data: loaded_data)
+        std::visit([&file](auto&& data){serialize_type(file, data);}, data);
 }
 
 

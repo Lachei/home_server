@@ -40,6 +40,7 @@ public:
             // ColumnOffsetsLengths: columns_offset_lengths_offset (for each column one offset + length exists here)
             // Columns
             uint32_t num_columns;
+            uin64_t  num_rows;
             uint32_t id_column;
             uint32_t column_names_offset;
             uint32_t column_names_len;
@@ -64,6 +65,7 @@ public:
         ~Table() {store_cache();}
         
         void store_cache();
+        void num_rows() const { if (loaded_data.empty()) return size_t(0); return std::visit([](auto&& v){return v.size();}, loaded_data[0]);}
     };
     
     Database(std::string_view storage_location);
