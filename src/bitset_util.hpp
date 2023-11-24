@@ -83,7 +83,7 @@ public:
       : index{ static_cast<std::size_t>(-1) }
       , bitset{ bitset }
     {}
-    const_iterator& operator=(const const_iterator& o) {*this = o; return *this;}
+    const_iterator& operator=(const const_iterator& o) {std::copy(&o, &o + 1, this); return *this;}
 
     /**
      * @brief      Prefix increment.

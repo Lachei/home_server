@@ -17,6 +17,15 @@
 template<class... Ts>
 struct overloaded : Ts... { using Ts::operator()...; };
 
+template <typename T, typename... Ts>
+constexpr std::size_t variant_index_impl(std::variant<Ts...>**)
+{
+    std::size_t i = 0; ((!std::is_same_v<T, Ts> && ++i) && ...); return i;
+}
+
+template <typename T, typename V>
+constexpr std::size_t variant_index_v = variant_index_impl<T>(static_cast<V**>(nullptr));
+
 inline auto i_range(auto&& end) {return std::ranges::iota_view(std::remove_reference_t<decltype(end)>{}, end);}
 
 inline std::pair<std::string_view, std::string_view> extract_credentials(std::string_view cred) {

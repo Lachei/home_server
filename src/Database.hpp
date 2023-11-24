@@ -53,15 +53,15 @@ public:
             uint32_t column_types_offset;
             uint32_t columns_offsets_lengths;
         };
-        template<typename T> static constexpr size_t type_id() {constexpr ColumnType t{std::vector<T>{}}; return t.index();}
+        template<typename T> static constexpr size_t type_id = variant_index_v<std::vector<T>, ColumnType>; 
         std::string storage_location{};
         std::vector<ColumnType> loaded_data{};  // this is only the data cache, might be missing part of the data in the file
         uint64_t loaded_data_offset{};
         struct ColumnInfos{
             std::vector<std::string> column_names{};
-            uint id_column{};
+            uint32_t id_column{};
             
-            bool operator<=>(const ColumnInfos&) const = default;
+            bool operator==(const ColumnInfos&) const = default;
             uint32_t num_columns() const {return column_names.size();}
         } column_infos{};
         

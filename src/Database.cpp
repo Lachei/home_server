@@ -54,23 +54,23 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             loaded_data.resize(header.num_columns);
             for(auto i: i_range(header.num_columns)) {
                 switch(types[i]){
-                case type_id<float>():
+                case type_id<float>:
                     loaded_data[i] = deserialize_type<float>(data_file, offset_sizes[i]);   break;
-                case type_id<double>():
+                case type_id<double>:
                     loaded_data[i] = deserialize_type<double>(data_file, offset_sizes[i]);  break;
-                case type_id<int32_t>():
+                case type_id<int32_t>:
                     loaded_data[i] = deserialize_type<int32_t>(data_file, offset_sizes[i]); break;
-                case type_id<int64_t>():
+                case type_id<int64_t>:
                     loaded_data[i] = deserialize_type<int64_t>(data_file, offset_sizes[i]); break;
-                case type_id<uint32_t>():
+                case type_id<uint32_t>:
                     loaded_data[i] = deserialize_type<uint32_t>(data_file, offset_sizes[i]);break;
-                case type_id<uint64_t>():
+                case type_id<uint64_t>:
                     loaded_data[i] = deserialize_type<uint64_t>(data_file, offset_sizes[i]);break;
-                case type_id<std::string>():
+                case type_id<std::string>:
                     loaded_data[i] = deserialize_type<std::string>(data_file, offset_sizes[i], header.num_rows);break;
-                case type_id<Date>():
+                case type_id<Date>:
                     loaded_data[i] = deserialize_type<Date>(data_file, offset_sizes[i]);    break;
-                case type_id<std::vector<std::byte>>():
+                case type_id<std::vector<std::byte>>:
                     loaded_data[i] = deserialize_type<std::vector<std::byte>>(data_file, offset_sizes[i], header.num_rows);break;
                 }
             }

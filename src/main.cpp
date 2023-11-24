@@ -20,7 +20,6 @@ struct AccessControlHeader{
 };
 
 int main() {
-    std::chrono::system_clock::now();
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");

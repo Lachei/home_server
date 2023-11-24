@@ -4,11 +4,15 @@ project(home_server)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
-find_package(Boost REQUIRED)
+find_package(Boost COMPONENTS REQUIRED)
 
 file(GLOB SRC "src/*")
+if(WIN32)
+    add_compile_definitions(_WIN32_WINNT=0x0601)
+    include_directories(${Boost_INCLUDE_DIR})
+endif()
 add_executable(home_server ${SRC})
-target_link_libraries(home_server Boost::boost)
+target_link_libraries(home_server PRIVATE Boost::boost Boost::headers)
 
 include(CTest)
 add_subdirectory(tests)

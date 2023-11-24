@@ -136,7 +136,7 @@ public:
         return c;
     }
     
-    bool operator<=>(const Bitset& o) const = default;
+    bool operator==(const Bitset& o) const = default;
     Bitset& operator&=(const Bitset& o) {
         _blocks.resize(std::min(_blocks.size(), o._blocks.size()));
         
@@ -238,9 +238,9 @@ private:
     struct EmptyBlock{};
     struct FullBlock{};
     using Block = std::variant<std::unique_ptr<std::bitset<block_size>>, EmptyBlock, FullBlock>;
-    static constexpr uint32_t bitset_index = 0;
-    static constexpr uint32_t empty_index = Block{EmptyBlock{}}.index();
-    static constexpr uint32_t full_index = Block{FullBlock{}}.index();
+    static constexpr uint32_t bitset_index = variant_index_v<std::unique_ptr<std::bitset<block_size>>, Block>;
+    static constexpr uint32_t empty_index = variant_index_v<EmptyBlock, Block>;
+    static constexpr uint32_t full_index = variant_index_v<FullBlock, Block>;
     std::vector<Block> _blocks;
 };
 
