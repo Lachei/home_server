@@ -30,6 +30,7 @@ public:
                                     std::vector<std::string>, 
                                     std::vector<Date>, 
                                     std::vector<std::vector<std::byte>>>;
+    static constexpr std::array<std::string_view, 9> column_type_names{"f32", "f64", "i32", "i64", "u32", "u64", "str", "date", "bytes"};
     struct Table{
         // there might be more header datas coming, currently only columnar is available
         struct GeneralHeader{
@@ -59,6 +60,7 @@ public:
         uint64_t loaded_data_offset{};
         struct ColumnInfos{
             std::vector<std::string> column_names{};
+            std::vector<std::string> column_types{};    // this vector is only allowed to contain values from the 
             uint32_t id_column{};
             
             bool operator==(const ColumnInfos&) const = default;
@@ -76,6 +78,7 @@ public:
         void insert_row(const nlohmann::json& element);
         // same as insert_row but requires the elements to be an array or a set of valid element objects
         void insert_rows(const nlohmann::json& elements);
+        void insert_rows(const std::vector<ColumnType>& data);
         
         // filter_args must have the following structure: {column_name, check_operation}
         Bitset get_active_bitset(const nlohmann::json& filter_args);
@@ -87,6 +90,9 @@ public:
     ~Database() { store_table_caches(); }
 
     void store_table_caches() const; 
+    void create_table(std::string_view table_name, const Table::ColumnInfos& column_infos);
+    void insert_rows(std::string_view table, const std::vector<ColumnType>& data);
+    const std::vector<ColumnType>& get_table_data(std::string_view table);
 private:
     std::string _storage_location;
     robin_hood::unordered_map<std::string, std::unique_ptr<Table>> _tables;

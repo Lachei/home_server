@@ -11,6 +11,20 @@ using src_loc = std::source_location;
 using Types =  std::vector<uint32_t>;
 using OffsetSizes = std::vector<std::pair<uint64_t, uint64_t>>;
 
+// Database utility functions -------------------------------------------------------------
+
+bool same_data_layout(const std::vector<Database::ColumnType>& a, const std::vector<Database::ColumnType>& b) {
+    if (a.size() != b.size())
+        return false;
+        
+    for (auto i: i_range(a.size()))
+        if (a[i].index() != b[i].index())
+            return false;
+        
+    return true;
+}
+// ----------------------------------------------------------------------------------------
+
 Database::Table::Table(std::string_view storage_location, const std::optional<ColumnInfos>& column_infos):
     storage_location(std::string(storage_location))
 {
@@ -85,6 +99,20 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             throw std::runtime_error{log_msg("The column names for a new table are not allowed to contain spaces.")};
     this->column_infos = *column_infos;
     this->loaded_data.resize(this->column_infos.column_names.size());
+    for (auto i: i_range(column_infos->num_columns())){
+        const size_t v_idx = std::find(column_type_names.begin(), column_type_names.end(), column_infos->column_names[i].data()) - column_type_names.begin();
+        switch (v_idx) {
+        case type_id<float>:
+        case type_id<double>:
+        case type_id<int32_t>:
+        case type_id<int64_t>:
+        case type_id<uint32_t>:
+        case type_id<uint64_t>:
+        case type_id<std::string>:
+        case type_id<Date>:
+        case type_id<std::vector<std::byte>>: break;
+        }
+    }
     
     store_cache();
 }
@@ -139,6 +167,18 @@ void Database::Table::store_cache() const {
         std::visit([&file](auto&& data){serialize_type(file, data);}, data);
 }
 
+void Database::Table::insert_rows(const std::vector<ColumnType>& data) {
+    if (!same_data_layout(data, loaded_data))
+        throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+        
+    for (auto i: i_range(data.size())) {
+        std::visit([&data, &i](auto&& d) {
+            using T = std::decay_t<decltype(d)>;
+            const auto& data_v = std::get<T>(data[i]);
+            d.insert(d.end(), data_v.begin(), data_v.end());
+        }, loaded_data[i]);
+    }
+}
 
 Database::Database(std::string_view storage_location):
     _storage_location(storage_location)
@@ -171,4 +211,22 @@ void Database::store_table_caches() const {
     nlohmann::json config_json{{"tables", std::move(tables)}};
     std::ofstream config_file(_storage_location + "/config.json");
     config_file << config_json.dump();
+}
+
+void Database::create_table(std::string_view table_name, const Table::ColumnInfos& column_infos) {
+    const std::string table_name_s(table_name);
+    if (_tables.contains(table_name_s)){
+        if (column_infos != _tables.at(table_name_s)->column_infos)
+            throw std::runtime_error(log_msg("A table with the same name and different columns already exists"));
+    }
+    else {
+        _tables[table_name_s] = std::make_unique<Table>(_storage_location + '/' + table_name_s, std::optional<Table::ColumnInfos>{column_infos});
+    }
+}
+
+const std::vector<Database::ColumnType>& Database::get_table_data(std::string_view table) {
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error(log_msg("The table from which the data should be returned does not exist"));
+    return _tables.at(table_s)->loaded_data;
 }
