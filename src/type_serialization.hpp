@@ -17,7 +17,7 @@ template<> uint64_t serialized_size<std::vector<std::vector<std::byte>>>(const s
 
 template<typename T>
 void serialize_type(std::ofstream& data_file, const T& data){
-    file.write(reinterpret_cast<char*>(data.data()), data.size() * sizeof(data[0]));
+    data_file.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(data[0]));
 }
 template<> void serialize_type<std::vector<std::string>>(std::ofstream& data_file, const std::vector<std::string>& data){
     std::vector<char> d(serialized_size(data));
@@ -32,7 +32,7 @@ template<> void serialize_type<std::vector<std::vector<std::byte>>>(std::ofstrea
     std::vector<std::byte> d(serialized_size(data));
     size_t cur_offset{};
     for (const auto& e: data)  {
-        *reinterpret_cast<uint64_t*>(d.data() + cur_offset) = e.size();
+        reinterpret_cast<uint64_t&>(d[cur_offset]) = e.size();
         cur_offset += sizeof(uint64_t);
         std::copy(e.begin(), e.end(), d.begin() + cur_offset);
         cur_offset += e.size();
@@ -42,7 +42,7 @@ template<> void serialize_type<std::vector<std::vector<std::byte>>>(std::ofstrea
 
 template<typename T>
 std::vector<T> deserialize_type(std::ifstream& data_file, const std::pair<uint64_t, uint64_t>& offset_size, uint64_t num_rows = 0){
-    if (data_file.tellg(data_file.beg) != offset_size.first)
+    if (data_file.tellg() != offset_size.first)
         throw std::runtime_error{log_msg("The given data_file has its read pointer not at the offset value of offset_size")};
     std::vector<T> res(offset_size.second / sizeof(T));
     data_file.read(reinterpret_cast<char*>(res.data()), offset_size.second);
@@ -65,6 +65,13 @@ template<> std::vector<std::vector<std::byte>> deserialize_type<std::vector<std:
     std::vector<std::vector<std::byte>> res(num_rows);
     size_t cur_offset{};
     for (auto i: i_range(num_rows)) {
-        uint64_t cur_size = *
+        uint64_t cur_size = reinterpret_cast<uint64_t&>(res[cur_offset]);
+        cur_offset += sizeof(cur_size);
+        res[i].resize(cur_size);
+        std::copy(bytes.begin() + cur_offset, bytes.begin() + cur_offset + cur_size, res[i].begin());
+        cur_offset += cur_size;
     }
+    if (cur_offset != bytes.size())
+        throw std::runtime_error{log_msg("Error at deserializing byte vectors")};
+    return res;
 }

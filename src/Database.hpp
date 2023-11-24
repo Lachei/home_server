@@ -7,6 +7,12 @@
 #include <array>
 #include <chrono>
 #include <inttypes.h>
+#include <memory>
+#include <unordered_map>
+
+#include "nlohmann/json.hpp"
+#include "Bitset.hpp"
+#include "robin_hood/robin_hood.h"
 
 constexpr uint64_t DBTABLEMAGICNUM = 0x409ca93b33af;
 constexpr uint32_t DBTABLEKINDSTRINGLEN = 4;
@@ -40,7 +46,7 @@ public:
             // ColumnOffsetsLengths: columns_offset_lengths_offset (for each column one offset + length exists here)
             // Columns
             uint32_t num_columns;
-            uin64_t  num_rows;
+            uint64_t num_rows;
             uint32_t id_column;
             uint32_t column_names_offset;
             uint32_t column_names_len;
@@ -56,7 +62,7 @@ public:
             uint id_column{};
             
             bool operator<=>(const ColumnInfos&) const = default;
-            uint32_t num_columns() {return column_names.size();}
+            uint32_t num_columns() const {return column_names.size();}
         } column_infos{};
         
         // If column_infos is empty, the table layout is loaded from the stored data.
@@ -64,13 +70,24 @@ public:
         Table(std::string_view storage_location, const std::optional<ColumnInfos>& column_infos = {});
         ~Table() {store_cache();}
         
-        void store_cache();
-        void num_rows() const { if (loaded_data.empty()) return size_t(0); return std::visit([](auto&& v){return v.size();}, loaded_data[0]);}
+        void store_cache() const;
+        size_t num_rows() const { if (loaded_data.empty()) return size_t{}; return std::visit([](auto&& v){return v.size();}, loaded_data[0]);}
+
+        void insert_row(const nlohmann::json& element);
+        // same as insert_row but requires the elements to be an array or a set of valid element objects
+        void insert_rows(const nlohmann::json& elements);
+        
+        // filter_args must have the following structure: {column_name, check_operation}
+        Bitset get_active_bitset(const nlohmann::json& filter_args);
+        nlohmann::json get_elements(const Bitset& filter_args);
+        nlohmann::json get_elements(const nlohmann::json& filter_args);
     };
     
     Database(std::string_view storage_location);
+    ~Database() { store_table_caches(); }
 
+    void store_table_caches() const; 
 private:
     std::string _storage_location;
-
+    robin_hood::unordered_map<std::string, std::unique_ptr<Table>> _tables;
 };

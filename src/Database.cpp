@@ -55,20 +55,23 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             for(auto i: i_range(header.num_columns)) {
                 switch(types[i]){
                 case type_id<float>():
-                    std::vector<float> d(header.num_columns);
-                    if (data_file.tellg(data_file.beg) != offset_sizes[i].first || d.size() * sizeof(d[0]) != offset_sizes[i].second)
-                        throw std::runtime_error{log_msg("Data offset size mismatch on readout. Maybe data file is corrupt")};
-                    data_file.read(reinterpret_cast<char*>(d.data()), offset_sizes[i].second);
-                    loaded_data[i] = std::move(d);
-                    break;
+                    loaded_data[i] = deserialize_type<float>(data_file, offset_sizes[i]);   break;
                 case type_id<double>():
+                    loaded_data[i] = deserialize_type<double>(data_file, offset_sizes[i]);  break;
                 case type_id<int32_t>():
+                    loaded_data[i] = deserialize_type<int32_t>(data_file, offset_sizes[i]); break;
                 case type_id<int64_t>():
+                    loaded_data[i] = deserialize_type<int64_t>(data_file, offset_sizes[i]); break;
                 case type_id<uint32_t>():
+                    loaded_data[i] = deserialize_type<uint32_t>(data_file, offset_sizes[i]);break;
                 case type_id<uint64_t>():
+                    loaded_data[i] = deserialize_type<uint64_t>(data_file, offset_sizes[i]);break;
                 case type_id<std::string>():
+                    loaded_data[i] = deserialize_type<std::string>(data_file, offset_sizes[i], header.num_rows);break;
                 case type_id<Date>():
-                case type_id<std::vector<std::byte>>(): return;
+                    loaded_data[i] = deserialize_type<Date>(data_file, offset_sizes[i]);    break;
+                case type_id<std::vector<std::byte>>():
+                    loaded_data[i] = deserialize_type<std::vector<std::byte>>(data_file, offset_sizes[i], header.num_rows);break;
                 }
             }
         }
@@ -86,7 +89,7 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
     store_cache();
 }
 
-void Database::Table::store_cache() {
+void Database::Table::store_cache() const {
     // TODO put into an extra worker thread which does the export in the background
 
     std::ofstream file(storage_location, std::ios_base::binary);
@@ -100,8 +103,8 @@ void Database::Table::store_cache() {
     for(auto i: i_range(column_infos.num_columns()))
         types[i] = loaded_data[i].index();
     std::vector<uint64_t> column_sizes(column_infos.num_columns());
-    for(const auto& data: loaded_data)
-        column_sizes[i] = std::visit([](auto&& v){ return serialized_size(v);}, data);
+    for(auto i: i_range(column_infos.num_columns()))
+        column_sizes[i] = std::visit([](auto&& v){ return serialized_size(v);}, loaded_data[i]);
     
     // filling header infos
     GeneralHeader general_header{
@@ -137,6 +140,35 @@ void Database::Table::store_cache() {
 }
 
 
-Database::Database(std::string_view storage_location){
+Database::Database(std::string_view storage_location):
+    _storage_location(storage_location)
+{
+    // checking for the config json in the storage location, if not available create
+    // the config json contains infos about the already created tables and maybe additional future information
+    
+    if (!std::filesystem::exists(_storage_location))
+        std::filesystem::create_directory(_storage_location);
+    
+    std::string config_file = _storage_location + "/config.json";
+    if (std::filesystem::exists(config_file)) {
+        // loading the json
+        std::ifstream json_file(config_file);
+        auto config_json = nlohmann::json::parse(json_file);
+        if (config_json.contains("tables") && config_json["tables"].is_array()) {
+            for(const auto& table: config_json["tables"].get<std::vector<std::string>>())
+                _tables[table] = std::make_unique<Table>(_storage_location + "/" + table);
+        }
+    }
+}
 
+void Database::store_table_caches() const {
+    for(const auto& [n, t]: _tables)
+        t->store_cache();
+    std::vector<std::string> tables(_tables.size());
+    size_t i{};
+    for (const auto& [n, t]: _tables)
+        tables[i++] = n;
+    nlohmann::json config_json{{"tables", std::move(tables)}};
+    std::ofstream config_file(_storage_location + "/config.json");
+    config_file << config_json.dump();
 }

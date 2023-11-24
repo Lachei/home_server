@@ -2,7 +2,6 @@
 #include "../src/Bitset.hpp"
 
 namespace result{
-    constexpr int success = 0;
     constexpr int wrong_count = 1;
     constexpr int wrong_indices = 2;
 };
