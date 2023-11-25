@@ -159,6 +159,46 @@ void Database::Table::store_cache() const
                    data);
 }
 
+template <typename T>
+inline T get_free_id_impl(const std::vector<T> &v)
+{
+    auto m = std::ranges::max_element(v);
+    if (m == v.end())
+        return T{};
+    else
+        return (*m) + T{1};
+}
+template <>
+inline Database::Date get_free_id_impl<Database::Date>(const std::vector<Database::Date> &v)
+{
+    auto m = std::ranges::max_element(v);
+    if (m == v.end())
+        return std::chrono::system_clock::now();
+    else
+    {
+        auto t = *m;
+        return ++t;
+    }
+}
+template <>
+inline std::string get_free_id_impl<std::string>(const std::vector<std::string> &v)
+{
+    throw std::runtime_error{log_msg("There is no next free id for string. Only numeric types can be queried for next id")};
+    return {};
+}
+template <>
+inline std::vector<std::byte> get_free_id_impl<std::vector<std::byte>>(const std::vector<std::vector<std::byte>> &v)
+{
+    throw std::runtime_error{log_msg("There is no next free id for byte vectors. Only numeric types can be queried for next id")};
+    return {};
+}
+Database::ElementType Database::Table::get_free_id() const
+{
+    return std::visit([this](auto &&v)
+                      { return ElementType{get_free_id_impl(v)}; },
+                      loaded_data[column_infos.id_column]);
+}
+
 void Database::Table::insert_row(const std::vector<ElementType> &data)
 {
     if (!same_data_layout(data, loaded_data))
@@ -168,7 +208,7 @@ void Database::Table::insert_row(const std::vector<ElementType> &data)
     {
         std::visit([&data, &i](auto &&d)
                    {
-                       using T = std::decay_t<decltype(d)>;
+                       using T = std::decay_t<decltype(d)>::value_type;
                        const auto &e = std::get<T>(data[i]);
                        d.emplace_back(e);
                    },
@@ -190,6 +230,72 @@ void Database::Table::insert_rows(const std::vector<ColumnType> &data)
                        d.insert(d.end(), data_v.begin(), data_v.end());
                    },
                    loaded_data[i]);
+    }
+}
+
+void Database::Table::delete_row(const ElementType &id)
+{
+    if (id.index() != loaded_data[column_infos.id_column].index())
+        throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+
+    size_t del_idx{};
+    std::visit([this, &del_idx](auto &&id)
+               {
+                   using T = std::vector<std::decay_t<decltype(id)>>;
+                   auto &v = std::get<T>(this->loaded_data[this->column_infos.id_column]);
+                   auto p = std::ranges::find(v, id);
+                   if (p == v.end())
+                       throw std::runtime_error{log_msg("The id to delete is not in the table")};
+                   del_idx = p - v.begin();
+               },
+               id);
+    for (auto &data : loaded_data)
+    {
+        std::visit([&del_idx](auto &&v)
+                   { v.erase(v.begin() + del_idx); },
+                   data);
+    }
+}
+
+void Database::Table::delete_rows(const std::vector<ElementType> &ids)
+{
+    if (ids.empty())
+        return;
+    if (ids[0].index() != loaded_data[column_infos.id_column].index())
+        throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+
+    robin_hood::unordered_set<size_t> del_idx{};
+    for (const auto &id : ids)
+    {
+        std::visit([this, &del_idx](auto &&id)
+                   {
+                       using T = std::vector<std::decay_t<decltype(id)>>;
+                       auto &v = std::get<T>(this->loaded_data[this->column_infos.id_column]);
+                       auto p = std::ranges::find(v, id);
+                       del_idx.insert(p - v.begin());
+                   },
+                   id);
+    }
+    if (del_idx.empty())
+        throw std::runtime_error{log_msg("The ids to delete were not in the table")};
+    if (del_idx.size() != ids.size())
+        CROW_LOG_WARNING << log_msg("Not all ids to delete were found in the table");
+
+    for (auto &data : loaded_data)
+    {
+        std::visit([del_idx](auto &&v)
+                   {
+                       size_t cur_write{};
+                       for (auto i : i_range(v.size()))
+                       {
+                           if (!del_idx.contains(i))
+                           {
+                               v[cur_write++] = v[i];
+                           }
+                       }
+                       v.resize(cur_write);
+                   },
+                   data);
     }
 }
 
@@ -240,6 +346,14 @@ void Database::create_table(std::string_view table_name, const Table::ColumnInfo
     }
 }
 
+Database::ElementType Database::get_free_id(std::string_view table) const
+{
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table for which the next id should be acquired does not exits")};
+    return _tables.at(table_s)->get_free_id();
+}
+
 const std::vector<Database::ColumnType> &Database::get_table_data(std::string_view table)
 {
     const std::string table_s(table);
@@ -262,4 +376,20 @@ void Database::insert_row(std::string_view table, const std::vector<ElementType>
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
     _tables.at(table_s)->insert_row(data);
+}
+
+void Database::delete_row(std::string_view table, const ElementType &id)
+{
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+    _tables.at(table_s)->delete_row(id);
+}
+
+void Database::delete_rows(std::string_view table, const std::vector<ElementType> &ids)
+{
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+    _tables.at(table_s)->delete_rows(ids);
 }

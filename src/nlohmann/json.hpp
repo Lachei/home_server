@@ -165,7 +165,7 @@
 #include <string> // string
 #include <tuple> // tuple, make_tuple
 #include <type_traits> // is_arithmetic, is_same, is_enum, underlying_type, is_convertible
-#include <unordered_map> // unordered_map
+#include "../robin_hood/robin_hood.h" // unordered_map
 #include <utility> // pair, declval
 #include <valarray> // valarray
 

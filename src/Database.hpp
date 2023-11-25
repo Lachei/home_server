@@ -77,7 +77,7 @@ public:
                                     std::vector<std::string>,
                                     std::vector<Date>,
                                     std::vector<std::vector<std::byte>>>;
-    using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType**>(nullptr)))>;
+    using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType **>(nullptr)))>;
     template <typename T>
     static constexpr std::string_view column_type_name_v = database_internal::column_type_name<T>();
     template <typename Callable>
@@ -145,12 +145,16 @@ public:
                               { return v.size(); },
                               loaded_data[0]);
         }
+        ElementType get_free_id() const;
 
         void insert_row(const nlohmann::json &element);
         void insert_row(const std::vector<ElementType> &data);
         // same as insert_row but requires the elements to be an array or a set of valid element objects
         void insert_rows(const nlohmann::json &elements);
         void insert_rows(const std::vector<ColumnType> &data);
+        
+        void delete_row(const ElementType& id);
+        void delete_rows(const std::vector<ElementType>& ids);
 
         // filter_args must have the following structure: {column_name, check_operation}
         Bitset get_active_bitset(const nlohmann::json &filter_args);
@@ -163,8 +167,11 @@ public:
 
     void store_table_caches() const;
     void create_table(std::string_view table_name, const Table::ColumnInfos &column_infos);
+    ElementType get_free_id(std::string_view table_name) const;
     void insert_row(std::string_view table, const std::vector<ElementType> &row);
     void insert_rows(std::string_view table, const std::vector<ColumnType> &data);
+    void delete_row(std::string_view table, const ElementType &id);
+    void delete_rows(std::string_view table, const std::vector<ElementType> &ids);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
 
 private:
