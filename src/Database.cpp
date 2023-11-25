@@ -13,7 +13,8 @@ using OffsetSizes = std::vector<std::pair<uint64_t, uint64_t>>;
 
 // Database utility functions -------------------------------------------------------------
 
-bool same_data_layout(const std::vector<Database::ColumnType> &a, const std::vector<Database::ColumnType> &b)
+template <typename T>
+bool same_data_layout(const std::vector<T> &a, const std::vector<Database::ColumnType> &b)
 {
     if (a.size() != b.size())
         return false;
@@ -158,6 +159,23 @@ void Database::Table::store_cache() const
                    data);
 }
 
+void Database::Table::insert_row(const std::vector<ElementType> &data)
+{
+    if (!same_data_layout(data, loaded_data))
+        throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+
+    for (auto i : i_range(data.size()))
+    {
+        std::visit([&data, &i](auto &&d)
+                   {
+                       using T = std::decay_t<decltype(d)>;
+                       const auto &e = std::get<T>(data[i]);
+                       d.emplace_back(e);
+                   },
+                   loaded_data[i]);
+    }
+}
+
 void Database::Table::insert_rows(const std::vector<ColumnType> &data)
 {
     if (!same_data_layout(data, loaded_data))
@@ -230,9 +248,18 @@ const std::vector<Database::ColumnType> &Database::get_table_data(std::string_vi
     return _tables.at(table_s)->loaded_data;
 }
 
-void Database::insert_rows(std::string_view table, const std::vector<ColumnType> &data){
+void Database::insert_rows(std::string_view table, const std::vector<ColumnType> &data)
+{
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
     _tables.at(table_s)->insert_rows(data);
+}
+
+void Database::insert_row(std::string_view table, const std::vector<ElementType> &data)
+{
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+    _tables.at(table_s)->insert_row(data);
 }

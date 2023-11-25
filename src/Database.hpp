@@ -25,7 +25,7 @@ namespace database_internal
     template <typename T>
     constexpr std::string_view column_type_name()
     {
-        static_assert(always_false_v<T>, "there is an instantiation of column_type_name missing.");
+        static_assert(always_false_v<T>, "Missing a column_type_name for a type.");
         return "error_type";
     };
     template <>
@@ -59,6 +59,7 @@ namespace database_internal
         size_t i{};
         ((idx != i++ || (c((typename Ts::value_type){}), false)) && ...);
     }
+
 }
 
 // Class to store all kinds of tabular data, data is stored in column major format
@@ -76,6 +77,7 @@ public:
                                     std::vector<std::string>,
                                     std::vector<Date>,
                                     std::vector<std::vector<std::byte>>>;
+    using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType**>(nullptr)))>;
     template <typename T>
     static constexpr std::string_view column_type_name_v = database_internal::column_type_name<T>();
     template <typename Callable>
@@ -145,6 +147,7 @@ public:
         }
 
         void insert_row(const nlohmann::json &element);
+        void insert_row(const std::vector<ElementType> &data);
         // same as insert_row but requires the elements to be an array or a set of valid element objects
         void insert_rows(const nlohmann::json &elements);
         void insert_rows(const std::vector<ColumnType> &data);
@@ -160,6 +163,7 @@ public:
 
     void store_table_caches() const;
     void create_table(std::string_view table_name, const Table::ColumnInfos &column_infos);
+    void insert_row(std::string_view table, const std::vector<ElementType> &row);
     void insert_rows(std::string_view table, const std::vector<ColumnType> &data);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
 

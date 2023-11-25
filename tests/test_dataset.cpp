@@ -1,4 +1,4 @@
-#include "test_util.hpp"
+#include "utils.hpp"
 #include "../src/Database.hpp"
 
 constexpr std::string_view test_data_folder{"data/test"};

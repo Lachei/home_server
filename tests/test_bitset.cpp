@@ -1,4 +1,4 @@
-#include "test_util.hpp"
+#include "utils.hpp"
 #include "../src/Bitset.hpp"
 
 namespace result{
