@@ -9,7 +9,7 @@ uint64_t serialized_size(const T& data) {
     return data.size() * sizeof(data[0]);
 }
 template<> uint64_t serialized_size<std::vector<std::string>>(const std::vector<std::string>& data){
-    return std::accumulate(data.begin(), data.end(), size_t{}, [](size_t a, const std::string& s){return a + s.size();});
+    return std::accumulate(data.begin(), data.end(), size_t{}, [](size_t a, const std::string& s){return a + s.length() + 1;});
 }
 template<> uint64_t serialized_size<std::vector<std::vector<std::byte>>>(const std::vector<std::vector<std::byte>>& data){
     return std::accumulate(data.begin(), data.end(), size_t{}, [](size_t a, const std::vector<std::byte>& e){return a + sizeof(uint64_t) + e.size();});
@@ -23,8 +23,8 @@ template<> void serialize_type<std::vector<std::string>>(std::ofstream& data_fil
     std::vector<char> d(serialized_size(data));
     size_t cur_offset{};
     for (const auto& s: data) {
-        std::copy(s.data(), s.data() + s.size(), d.data() + cur_offset);
-        cur_offset += s.size();
+        std::copy(s.data(), s.data() + s.length() + 1, d.data() + cur_offset);
+        cur_offset += s.length() + 1;
     }
     serialize_type(data_file, d);
 }
@@ -55,8 +55,10 @@ template<> std::vector<std::string> deserialize_type<std::string>(std::ifstream&
     size_t cur_offset{};
     for (auto i: i_range(num_rows)){
         res[i] = chars.data() + cur_offset;
-        cur_offset += res[i].size();
+        cur_offset += res[i].length() + 1;
     }
+    if (cur_offset != chars.size())
+        throw std::runtime_error{log_msg("Error at deserializing strings")};
     return res;
 }
 template<> std::vector<std::vector<std::byte>> deserialize_type<std::vector<std::byte>>(std::ifstream& data_file, const std::pair<uint64_t, uint64_t>& offset_size, uint64_t num_rows){
@@ -65,7 +67,7 @@ template<> std::vector<std::vector<std::byte>> deserialize_type<std::vector<std:
     std::vector<std::vector<std::byte>> res(num_rows);
     size_t cur_offset{};
     for (auto i: i_range(num_rows)) {
-        uint64_t cur_size = reinterpret_cast<uint64_t&>(res[cur_offset]);
+        uint64_t cur_size = reinterpret_cast<uint64_t&>(bytes[cur_offset]);
         cur_offset += sizeof(cur_size);
         res[i].resize(cur_size);
         std::copy(bytes.begin() + cur_offset, bytes.begin() + cur_offset + cur_size, res[i].begin());

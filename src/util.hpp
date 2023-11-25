@@ -22,7 +22,6 @@ constexpr std::size_t variant_index_impl(std::variant<Ts...>**)
 {
     std::size_t i = 0; ((!std::is_same_v<T, Ts> && ++i) && ...); return i;
 }
-
 template <typename T, typename V>
 constexpr std::size_t variant_index_v = variant_index_impl<T>(static_cast<V**>(nullptr));
 
@@ -49,5 +48,5 @@ inline std::optional<std::pair<std::string_view, std::string_view>> extract_cred
 }
 
 inline std::string log_msg(std::string_view message, const std::source_location& loc = std::source_location::current()){
-    return loc.file_name() + ':' + std::to_string(loc.line()) + '|' + std::string(message);
+    return std::string(loc.file_name()) + ": " + std::to_string(loc.line()) + "| " + std::string(message);
 }
