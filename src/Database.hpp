@@ -21,6 +21,17 @@ constexpr uint32_t DBTABLEKINDSTRINGLEN = 4;
 namespace database_internal
 {
     using Date = std::chrono::utc_clock::time_point;
+    using ColumnType = std::variant<std::vector<float>,
+                                    std::vector<double>,
+                                    std::vector<int32_t>,
+                                    std::vector<int64_t>,
+                                    std::vector<uint32_t>,
+                                    std::vector<uint64_t>,
+                                    std::vector<char>,
+                                    std::vector<std::string>,
+                                    std::vector<Date>,
+                                    std::vector<std::vector<std::byte>>>;
+    using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType **>(nullptr)))>;
     template <typename T>
     inline constexpr bool always_false_v = false;
     template <typename T>
@@ -67,7 +78,12 @@ namespace database_internal
         std::string event_table_name;
         std::string query_person;
     };
-    using QueryType = std::variant<EventQuery>;
+    struct IDQuery
+    {
+        std::string table_name;
+        ElementType id;
+    };
+    using QueryType = std::variant<EventQuery, IDQuery>;
 }
 
 template <>
@@ -98,19 +114,11 @@ class Database
 {
 public:
     using Date = database_internal::Date;
-    using ColumnType = std::variant<std::vector<float>,
-                                    std::vector<double>,
-                                    std::vector<int32_t>,
-                                    std::vector<int64_t>,
-                                    std::vector<uint32_t>,
-                                    std::vector<uint64_t>,
-                                    std::vector<char>,
-                                    std::vector<std::string>,
-                                    std::vector<Date>,
-                                    std::vector<std::vector<std::byte>>>;
-    using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType **>(nullptr)))>;
+    using ColumnType = database_internal::ColumnType;
+    using ElementType = database_internal::ElementType;
     using QueryType = database_internal::QueryType;
     using EventQuery = database_internal::EventQuery;
+    using IDQuery = database_internal::IDQuery;
     template <typename T>
     static constexpr std::string_view column_type_name_v = database_internal::column_type_name<T>();
     template <typename Callable>
@@ -186,6 +194,7 @@ public:
             return _num_columns();
         }
         ElementType get_free_id() const;
+        ColumnType get_free_ids(uint32_t num_ids) const;
 
         void create_index();
         void reset_index()
@@ -200,8 +209,8 @@ public:
         void insert_rows(const nlohmann::json &elements);
         void insert_rows(const std::span<ColumnType> &data);
 
-        void insert_row_without_id(const std::span<ElementType> &data);
-        void insert_rows_without_id(const std::span<ColumnType> &data);
+        ElementType insert_row_without_id(const std::span<ElementType> &data);
+        ColumnType insert_rows_without_id(const std::span<ColumnType> &data);
 
         void delete_row(const ElementType &id);
         void delete_rows(const std::span<ElementType> &ids);
@@ -216,6 +225,7 @@ public:
                               loaded_data[0]);
         }
         uint32_t _num_columns() const { return column_infos.column_names.size(); }
+        void _create_index();
     };
 
     Database(std::string_view storage_location);
@@ -226,12 +236,12 @@ public:
     ElementType get_free_id(std::string_view table_name) const;
     void insert_row(std::string_view table, const std::span<ElementType> &row);
     void insert_rows(std::string_view table, const std::span<ColumnType> &data);
-    void insert_row_without_id(std::string_view table, const std::span<ElementType> &data);
-    void insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data);
+    ElementType insert_row_without_id(std::string_view table, const std::span<ElementType> &data);
+    ColumnType insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data);
     void delete_row(std::string_view table, const ElementType &id);
     void delete_rows(std::string_view table, const std::span<ElementType> &ids);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
-    std::vector<ColumnType> query_database(const QueryType& query);
+    std::vector<ColumnType> query_database(const QueryType& query) const;
 
 private:
     std::string _storage_location;
@@ -239,5 +249,5 @@ private:
     mutable std::shared_mutex _mutex; // is locked unique upon table creation, deletion and storing. for everything else it is locked shared
 
     template<typename T>
-    std::vector<ColumnType> _query_database(const T& query);
+    std::vector<ColumnType> _query_database(const T& query) const;
 };

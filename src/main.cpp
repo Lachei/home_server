@@ -3,6 +3,7 @@
 
 #include "Credentials.hpp"
 #include "Database.hpp"
+#include "database_util.hpp"
 
 struct AccessControlHeader{
     struct context{};
@@ -24,6 +25,7 @@ int main() {
     
     Credentials credentials("credentials/cred.json");
     Database event_database("data/events");
+    database_util::setup_event_table(event_database);
 
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){
@@ -67,8 +69,33 @@ int main() {
             return std::string("error");
     });
     
-    CROW_ROUTE(app, "/get_events/<string>")([&credentials, &event_database](const crow::request& req, const std::string& user){
-        return std::string("");
+    CROW_ROUTE(app, "/get_events")([&credentials, &event_database](const crow::request& req){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        auto events = database_util::get_events(event_database, username);
+        return events.dump();
+    });
+    CROW_ROUTE(app, "/add_event")([&credentials, &event_database](const crow::request& req){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        try{
+            const auto& event = nlohmann::json::parse(req.body);
+            const auto& creator = event["creator"].get<std::string>();
+            if (creator != username && creator != admin_name)
+                return nlohmann::json{{"error", "can not create event for other players, only admin can do that"}}.dump();
+                
+            auto result = database_util::add_event(event_database, nlohmann::json::parse(req.body));
+            return result.dump();
+        } catch(nlohmann::json::parse_error e){
+            return nlohmann::json{{"error", e.what()}}.dump();
+        }
+        
+        return std::string{};
+    });
+    CROW_ROUTE(app, "/update_event")([&credentials, &event_database](const crow::request& req){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        return std::string{};
     });
     
     const auto overview_page = crow::mustache::load("overview.html");

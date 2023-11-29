@@ -77,6 +77,9 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
 
             Types types(header.num_columns);
             data_file.seekg(header.column_types_offset, data_file.beg).read(reinterpret_cast<char *>(types.data()), header.num_columns * sizeof(types[0]));
+            this->column_infos.column_types.resize(header.num_columns);
+            for (auto i: i_range(header.num_columns))
+                visit_column_type_idx([this, i](auto &&v) {this->column_infos.column_types[i] = std::string(column_type_name_v<std::decay_t<decltype(v)>>);}, types[i]);
 
             OffsetSizes offset_sizes(header.num_columns);
             data_file.seekg(header.columns_offsets_lengths, data_file.beg).read(reinterpret_cast<char *>(offset_sizes.data()), header.num_columns * sizeof(offset_sizes[0]));
@@ -212,9 +215,19 @@ inline std::vector<std::byte> get_free_id_impl<std::vector<std::byte>>(std::span
 }
 Database::ElementType Database::Table::get_free_id() const
 {
-    std::shared_lock lock(mutex);
     return std::visit([this](auto &&v)
                       { return ElementType{get_free_id_impl(std::span(v))}; },
+                      loaded_data[column_infos.id_column]);
+}
+Database::ColumnType Database::Table::get_free_ids(uint32_t num_ids) const
+{
+    return std::visit([num_ids, this](auto &&v)
+                      {
+                          std::decay_t<decltype(v)> ids(num_ids);
+                          for (auto i : i_range(num_ids))
+                              ids[i] = get_free_id_impl(std::span(v));
+                          return ColumnType{std::move(ids)};
+                      },
                       loaded_data[column_infos.id_column]);
 }
 
@@ -226,6 +239,13 @@ void Database::Table::create_index()
             return;
     }
     std::unique_lock index_lock(index_mutex);
+    _create_index();
+}
+
+void Database::Table::_create_index()
+{
+    if (index.size())
+        return;
     std::visit([this](auto &&data)
                {
                    for (auto i : i_range(data.size()))
@@ -278,7 +298,7 @@ void Database::Table::insert_rows(const std::span<ColumnType> &data)
     reset_index();
 }
 
-void Database::Table::insert_row_without_id(const std::span<ElementType> &data)
+Database::ElementType Database::Table::insert_row_without_id(const std::span<ElementType> &data)
 {
     {
         std::shared_lock lock(mutex);
@@ -287,21 +307,23 @@ void Database::Table::insert_row_without_id(const std::span<ElementType> &data)
     }
 
     std::unique_lock lock(mutex);
+    auto new_id = get_free_id();
     for (auto i : i_range(loaded_data.size()))
     {
-        std::visit([&data, &i, this](auto &&d)
+        std::visit([&data, &i, &new_id, this](auto &&d)
                    {
                        using T = std::decay_t<decltype(d)>;
                        using ValueT = T::value_type;
                        const size_t data_i = i < this->column_infos.id_column ? i : i - 1;
-                       d.emplace_back(i == this->column_infos.id_column ? std::get<ValueT>(get_free_id()) : std::get<ValueT>(data[data_i]));
+                       d.emplace_back(i == this->column_infos.id_column ? std::get<ValueT>(new_id) : std::get<ValueT>(data[data_i]));
                    },
                    loaded_data[i]);
     }
     reset_index();
+    return new_id;
 }
 
-void Database::Table::insert_rows_without_id(const std::span<ColumnType> &data)
+Database::ColumnType Database::Table::insert_rows_without_id(const std::span<ColumnType> &data)
 {
     {
         std::shared_lock lock(mutex);
@@ -313,16 +335,17 @@ void Database::Table::insert_rows_without_id(const std::span<ColumnType> &data)
     const size_t data_size = std::visit([](auto &&v)
                                         { return v.size(); },
                                         data[0]);
+    const auto ids = get_free_ids(data_size);
     for (auto i : i_range(data.size()))
     {
-        std::visit([&data, &i, data_size, this](auto &&d)
+        std::visit([&data, i, &ids, data_size, this](auto &&d)
                    {
                        using T = std::decay_t<decltype(d)>;
                        if (i == this->column_infos.id_column)
                        {
                            using ValT = T::value_type;
                            for (auto i : i_range(data_size))
-                               d.emplace_back(std::get<ValT>(get_free_id()));
+                               d.emplace_back(std::get<T>(ids)[i]);
                        }
                        else
                        {
@@ -334,6 +357,7 @@ void Database::Table::insert_rows_without_id(const std::span<ColumnType> &data)
                    loaded_data[i]);
     }
     reset_index();
+    return ids;
 }
 
 void Database::Table::delete_row(const ElementType &id)
@@ -418,7 +442,7 @@ Database::Database(std::string_view storage_location) : _storage_location(storag
     // the config json contains infos about the already created tables and maybe additional future information
 
     if (!std::filesystem::exists(_storage_location))
-        std::filesystem::create_directory(_storage_location);
+        std::filesystem::create_directories(_storage_location);
 
     std::string config_file = _storage_location + "/config.json";
     if (std::filesystem::exists(config_file))
@@ -497,22 +521,22 @@ void Database::insert_row(std::string_view table, const std::span<ElementType> &
     _tables.at(table_s)->insert_row(data);
 }
 
-void Database::insert_row_without_id(std::string_view table, const std::span<ElementType> &data)
+Database::ElementType Database::insert_row_without_id(std::string_view table, const std::span<ElementType> &data)
 {
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
-    _tables.at(table_s)->insert_row_without_id(data);
+    return _tables.at(table_s)->insert_row_without_id(data);
 }
 
-void Database::insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data)
+Database::ColumnType Database::insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data)
 {
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
-    _tables.at(table_s)->insert_rows_without_id(data);
+    return _tables.at(table_s)->insert_rows_without_id(data);
 }
 
 void Database::delete_row(std::string_view table, const ElementType &id)
@@ -537,13 +561,13 @@ void Database::delete_rows(std::string_view table, const std::span<ElementType> 
 // database queries
 // ------------------------------------------------------------------------------------------------------
 template <typename T>
-std::vector<Database::ColumnType> Database::_query_database(const T &query)
+std::vector<Database::ColumnType> Database::_query_database(const T &query) const
 {
     static_assert(database_internal::always_false_v<T>, "Missing implementation for this query type");
     return {};
 }
 template <>
-std::vector<Database::ColumnType> Database::_query_database<database_internal::EventQuery>(const database_internal::EventQuery &query)
+std::vector<Database::ColumnType> Database::_query_database<database_internal::EventQuery>(const database_internal::EventQuery &query) const
 {
     if (!_tables.contains(query.event_table_name))
         throw std::runtime_error{log_msg("The table for the event query does not exist")};
@@ -551,7 +575,7 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::E
     const auto &table = *_tables.at(query.event_table_name);
     const auto &visibilities_col = std::distance(std::ranges::find(table.column_infos.column_names, "visibility"), table.column_infos.column_names.begin());
     const auto &visibilities = std::get<std::vector<std::string>>(table.loaded_data[visibilities_col]);
-    
+
     if (query.query_person == admin_name)
         return table.loaded_data;
 
@@ -569,24 +593,54 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::E
             }
         }
     }
-    
+
     // creating the result array and gathering all elements from the table
     std::vector<Database::ColumnType> res(table._num_columns());
-    for (auto i: i_range(table._num_columns())) {
-        res[i] = std::visit([&active_indices] (auto &&v) {
-            using T = std::decay_t<decltype(v)>;
-            T res(active_indices.count());
-            size_t c{};
-            for (auto i: active_indices)
-                res[c++] = v[i];
-            return ColumnType{res};
-        }, table.loaded_data[i]);
+    for (auto i : i_range(table._num_columns()))
+    {
+        res[i] = std::visit([&active_indices](auto &&v)
+                            {
+                                using T = std::decay_t<decltype(v)>;
+                                T res(active_indices.count());
+                                size_t c{};
+                                for (auto i : active_indices)
+                                    res[c++] = v[i];
+                                return ColumnType{res};
+                            },
+                            table.loaded_data[i]);
     }
 
     return res;
 }
+template <>
+std::vector<Database::ColumnType> Database::_query_database<database_internal::IDQuery>(const database_internal::IDQuery &query) const
+{
+    if (!_tables.contains(query.table_name))
+        throw std::runtime_error{log_msg("The table for the id query does not exist")};
 
-std::vector<Database::ColumnType> Database::query_database(const QueryType &query)
+    auto &table = *_tables.at(query.table_name);
+    if (query.id.index() != table.loaded_data[table.column_infos.id_column].index())
+        throw std::runtime_error{log_msg("The table for the id query has a different id type than given in the qeury")};
+
+    std::shared_lock lock(table.mutex);
+    if (table.index.empty())
+        table.create_index();
+
+    auto row_idx = table.index.at(query.id);
+    std::vector<ColumnType> res(table._num_columns());
+    for (auto i : i_range(table._num_columns()))
+    {
+        res[i] = std::visit([row_idx](auto &&v)
+                            {
+                                using T = std::decay_t<decltype(v)>;
+                                return ColumnType{T{v[row_idx]}};
+                            },
+                            table.loaded_data[i]);
+    }
+    return res;
+}
+
+std::vector<Database::ColumnType> Database::query_database(const QueryType &query) const
 {
     std::shared_lock lock(_mutex);
     return std::visit([this](auto &&q)
