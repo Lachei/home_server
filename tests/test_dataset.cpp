@@ -17,7 +17,7 @@ T random_element()
 template <>
 Database::Date random_element<Database::Date>()
 {
-    return std::chrono::system_clock::now();
+    return std::chrono::utc_clock::now();
 }
 template <>
 std::string random_element<std::string>()

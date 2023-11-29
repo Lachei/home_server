@@ -4,11 +4,12 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include <span>
 #include <array>
 #include <chrono>
 #include <inttypes.h>
 #include <memory>
-#include <unordered_map>
+#include <shared_mutex>
 
 #include "nlohmann/json.hpp"
 #include "Bitset.hpp"
@@ -19,7 +20,7 @@ constexpr uint32_t DBTABLEKINDSTRINGLEN = 4;
 
 namespace database_internal
 {
-    using Date = std::chrono::system_clock::time_point;
+    using Date = std::chrono::utc_clock::time_point;
     template <typename T>
     inline constexpr bool always_false_v = false;
     template <typename T>
@@ -62,11 +63,34 @@ namespace database_internal
 
 }
 
+template <>
+struct std::hash<database_internal::Date>
+{
+    std::size_t operator()(const database_internal::Date &d) const
+    {
+        static_assert(sizeof(d) == sizeof(uint64_t));
+        uint64_t t = reinterpret_cast<const uint64_t &>(d);
+        return std::hash<uint64_t>{}(t);
+    }
+};
+template <>
+struct std::hash<std::vector<std::byte>>
+{
+    std::size_t operator()(const std::vector<std::byte> &d) const
+    {
+        size_t seed = std::hash<size_t>{}(d.size());
+        std::hash<std::byte> hasher{};
+        for (auto b : d)
+            seed ^= hasher(b) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
+
 // Class to store all kinds of tabular data, data is stored in column major format
 class Database
 {
 public:
-    using Date = std::chrono::system_clock::time_point;
+    using Date = database_internal::Date;
     using ColumnType = std::variant<std::vector<float>,
                                     std::vector<double>,
                                     std::vector<int32_t>,
@@ -128,8 +152,12 @@ public:
             uint32_t id_column{};
 
             bool operator==(const ColumnInfos &) const = default;
-            uint32_t num_columns() const { return column_names.size(); }
+
+        private:
         } column_infos{};
+        robin_hood::unordered_map<ElementType, uint64_t> index; // lazily evaluated index which gets cleared upon data change
+        mutable std::shared_mutex mutex;                        // is locked exclusive for insertion, deletion and cache writing, else is locked shared
+        mutable std::shared_mutex index_mutex;                  // is locked exclusive upon building and clearing, else is locked shared
 
         // If column_infos is empty, the table layout is loaded from the stored data.
         // If no column_infos is given and the file does not exist on the computer an error will be thrown
@@ -139,27 +167,49 @@ public:
         void store_cache() const;
         size_t num_rows() const
         {
+            std::shared_lock lock(mutex);
+            return _num_rows();
+        }
+        uint32_t num_columns() const {
+            std::shared_lock lock(mutex);
+            return _num_columns();
+        }
+        ElementType get_free_id() const;
+
+        void create_index();
+        void reset_index()
+        {
+            std::unique_lock lock(index_mutex);
+            index.clear();
+        };
+
+        void insert_row(const nlohmann::json &element);
+        void insert_row(const std::span<ElementType> &data);
+        // same as insert_row but requires the elements to be an array or a set of valid element objects
+        void insert_rows(const nlohmann::json &elements);
+        void insert_rows(const std::span<ColumnType> &data);
+
+        void insert_row_without_id(const std::span<ElementType> &data);
+        void insert_rows_without_id(const std::span<ColumnType> &data);
+
+        void delete_row(const ElementType &id);
+        void delete_rows(const std::span<ElementType> &ids);
+
+        // filter_args must have the following structure: {column_name, check_operation}
+        Bitset get_active_bitset(const nlohmann::json &filter_args);
+        nlohmann::json get_elements(const Bitset &filter_args);
+        nlohmann::json get_elements(const nlohmann::json &filter_args);
+
+    private:
+        size_t _num_rows() const
+        {
             if (loaded_data.empty())
                 return size_t{};
             return std::visit([](auto &&v)
                               { return v.size(); },
                               loaded_data[0]);
         }
-        ElementType get_free_id() const;
-
-        void insert_row(const nlohmann::json &element);
-        void insert_row(const std::vector<ElementType> &data);
-        // same as insert_row but requires the elements to be an array or a set of valid element objects
-        void insert_rows(const nlohmann::json &elements);
-        void insert_rows(const std::vector<ColumnType> &data);
-        
-        void delete_row(const ElementType& id);
-        void delete_rows(const std::vector<ElementType>& ids);
-
-        // filter_args must have the following structure: {column_name, check_operation}
-        Bitset get_active_bitset(const nlohmann::json &filter_args);
-        nlohmann::json get_elements(const Bitset &filter_args);
-        nlohmann::json get_elements(const nlohmann::json &filter_args);
+        uint32_t _num_columns() const { return column_infos.column_names.size(); }
     };
 
     Database(std::string_view storage_location);
@@ -168,13 +218,16 @@ public:
     void store_table_caches() const;
     void create_table(std::string_view table_name, const Table::ColumnInfos &column_infos);
     ElementType get_free_id(std::string_view table_name) const;
-    void insert_row(std::string_view table, const std::vector<ElementType> &row);
-    void insert_rows(std::string_view table, const std::vector<ColumnType> &data);
+    void insert_row(std::string_view table, const std::span<ElementType> &row);
+    void insert_rows(std::string_view table, const std::span<ColumnType> &data);
+    void insert_row_without_id(std::string_view table, const std::span<ElementType> &data);
+    void insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data);
     void delete_row(std::string_view table, const ElementType &id);
-    void delete_rows(std::string_view table, const std::vector<ElementType> &ids);
+    void delete_rows(std::string_view table, const std::span<ElementType> &ids);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
 
 private:
     std::string _storage_location;
     robin_hood::unordered_map<std::string, std::unique_ptr<Table>> _tables;
+    mutable std::shared_mutex _mutex; // is locked unique upon table creation, deletion and storing. for everything else it is locked shared
 };

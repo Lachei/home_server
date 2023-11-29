@@ -14,7 +14,7 @@ using OffsetSizes = std::vector<std::pair<uint64_t, uint64_t>>;
 // Database utility functions -------------------------------------------------------------
 
 template <typename T>
-bool same_data_layout(const std::vector<T> &a, const std::vector<Database::ColumnType> &b)
+bool same_data_layout(const std::span<T> &a, const std::span<Database::ColumnType> &b)
 {
     if (a.size() != b.size())
         return false;
@@ -22,6 +22,21 @@ bool same_data_layout(const std::vector<T> &a, const std::vector<Database::Colum
     for (auto i : i_range(a.size()))
         if (a[i].index() != b[i].index())
             return false;
+
+    return true;
+}
+template <typename T>
+bool same_data_layout_without_id(const std::span<T> &a, const std::span<Database::ColumnType> &b, uint32_t id_column)
+{
+    if (a.size() + 1 != b.size())
+        return false;
+
+    for (auto i : i_range(a.size()))
+    {
+        const auto b_ind = i < id_column ? i: i + 1;
+        if (a[i].index() != b[i].index())
+            return false;
+    }
 
     return true;
 }
@@ -90,7 +105,7 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             throw std::runtime_error{log_msg("The column names for a new table are not allowed to contain spaces.")};
     this->column_infos = *column_infos;
     this->loaded_data.resize(this->column_infos.column_names.size());
-    for (auto i : i_range(column_infos->num_columns()))
+    for (auto i : i_range(_num_columns()))
     {
         visit_column_typename([&i, this](auto &&v)
                               {
@@ -105,6 +120,7 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
 
 void Database::Table::store_cache() const
 {
+    std::unique_lock lock(mutex);
     // TODO put into an extra worker thread which does the export in the background
 
     std::ofstream file(storage_location, std::ios_base::binary);
@@ -114,11 +130,11 @@ void Database::Table::store_cache() const
     for (const auto &name : column_infos.column_names)
         names_stream << name << ' ';
     std::string names_string = names_stream.str();
-    Types types(column_infos.num_columns());
-    for (auto i : i_range(column_infos.num_columns()))
+    Types types(_num_columns());
+    for (auto i : i_range(_num_columns()))
         types[i] = loaded_data[i].index();
-    std::vector<uint64_t> column_sizes(column_infos.num_columns());
-    for (auto i : i_range(column_infos.num_columns()))
+    std::vector<uint64_t> column_sizes(_num_columns());
+    for (auto i : i_range(_num_columns()))
         column_sizes[i] = std::visit([](auto &&v)
                                      { return serialized_size(v); },
                                      loaded_data[i]);
@@ -128,17 +144,17 @@ void Database::Table::store_cache() const
         .magic_num = DBTABLEMAGICNUM,
         .type = columnar_header_id};
     HeaderDataColumnar header{
-        .num_columns = column_infos.num_columns(),
-        .num_rows = num_rows(),
+        .num_columns = _num_columns(),
+        .num_rows = _num_rows(),
         .id_column = column_infos.id_column,
         .column_names_offset = static_cast<uint32_t>(sizeof(GeneralHeader) + sizeof(HeaderDataColumnar)),
         .column_names_len = static_cast<uint32_t>(names_string.length()),
         .column_types_offset = header.column_names_offset + header.column_names_len,
-        .columns_offsets_lengths = header.column_types_offset + static_cast<uint32_t>(column_infos.num_columns() * sizeof(uint32_t))};
-    size_t data_start = header.columns_offsets_lengths + 2 * column_infos.num_columns() * sizeof(uint64_t);
+        .columns_offsets_lengths = header.column_types_offset + static_cast<uint32_t>(_num_columns() * sizeof(uint32_t))};
+    size_t data_start = header.columns_offsets_lengths + 2 * _num_columns() * sizeof(uint64_t);
 
-    OffsetSizes offset_lengths(column_infos.num_columns());
-    for (auto i : i_range(column_infos.num_columns()))
+    OffsetSizes offset_lengths(_num_columns());
+    for (auto i : i_range(_num_columns()))
     {
         if (i)
             offset_lengths[i].first = offset_lengths[i - 1].first + offset_lengths[i - 1].second;
@@ -160,7 +176,7 @@ void Database::Table::store_cache() const
 }
 
 template <typename T>
-inline T get_free_id_impl(const std::vector<T> &v)
+inline T get_free_id_impl(std::span<const T> v)
 {
     auto m = std::ranges::max_element(v);
     if (m == v.end())
@@ -169,11 +185,11 @@ inline T get_free_id_impl(const std::vector<T> &v)
         return (*m) + T{1};
 }
 template <>
-inline Database::Date get_free_id_impl<Database::Date>(const std::vector<Database::Date> &v)
+inline Database::Date get_free_id_impl<Database::Date>(std::span<const Database::Date> v)
 {
     auto m = std::ranges::max_element(v);
     if (m == v.end())
-        return std::chrono::system_clock::now();
+        return std::chrono::utc_clock::now();
     else
     {
         auto t = *m;
@@ -181,29 +197,50 @@ inline Database::Date get_free_id_impl<Database::Date>(const std::vector<Databas
     }
 }
 template <>
-inline std::string get_free_id_impl<std::string>(const std::vector<std::string> &v)
+inline std::string get_free_id_impl<std::string>(std::span<const std::string> v)
 {
     throw std::runtime_error{log_msg("There is no next free id for string. Only numeric types can be queried for next id")};
     return {};
 }
 template <>
-inline std::vector<std::byte> get_free_id_impl<std::vector<std::byte>>(const std::vector<std::vector<std::byte>> &v)
+inline std::vector<std::byte> get_free_id_impl<std::vector<std::byte>>(std::span<const std::vector<std::byte>> v)
 {
     throw std::runtime_error{log_msg("There is no next free id for byte vectors. Only numeric types can be queried for next id")};
     return {};
 }
 Database::ElementType Database::Table::get_free_id() const
 {
+    std::shared_lock lock(mutex);
     return std::visit([this](auto &&v)
-                      { return ElementType{get_free_id_impl(v)}; },
+                      { return ElementType{get_free_id_impl(std::span(v))}; },
                       loaded_data[column_infos.id_column]);
 }
 
-void Database::Table::insert_row(const std::vector<ElementType> &data)
+void Database::Table::create_index()
 {
-    if (!same_data_layout(data, loaded_data))
-        throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+    {
+        std::shared_lock index_lock(index_mutex);
+        if (index.size())
+            return;
+    }
+    std::unique_lock index_lock(index_mutex);
+    std::visit([this](auto &&data)
+               {
+                   for (auto i : i_range(data.size()))
+                       index[ElementType{data[i]}] = i;
+               },
+               loaded_data[column_infos.id_column]);
+}
 
+void Database::Table::insert_row(const std::span<ElementType> &data)
+{
+    {
+        std::shared_lock lock(mutex);
+        if (!same_data_layout(data, loaded_data))
+            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+    }
+
+    std::unique_lock lock(mutex);
     for (auto i : i_range(data.size()))
     {
         std::visit([&data, &i](auto &&d)
@@ -214,13 +251,18 @@ void Database::Table::insert_row(const std::vector<ElementType> &data)
                    },
                    loaded_data[i]);
     }
+    reset_index();
 }
 
-void Database::Table::insert_rows(const std::vector<ColumnType> &data)
+void Database::Table::insert_rows(const std::span<ColumnType> &data)
 {
-    if (!same_data_layout(data, loaded_data))
-        throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+    {
+        std::shared_lock lock(mutex);
+        if (!same_data_layout(data, loaded_data))
+            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+    }
 
+    std::unique_lock lock(mutex);
     for (auto i : i_range(data.size()))
     {
         std::visit([&data, &i](auto &&d)
@@ -231,13 +273,76 @@ void Database::Table::insert_rows(const std::vector<ColumnType> &data)
                    },
                    loaded_data[i]);
     }
+    reset_index();
+}
+
+void Database::Table::insert_row_without_id(const std::span<ElementType> &data)
+{
+    {
+        std::shared_lock lock(mutex);
+        if (!same_data_layout_without_id(data, loaded_data, column_infos.id_column))
+            throw std::runtime_error{log_msg("the data layout for inserting data into the table is different")};
+    }
+
+    std::unique_lock lock(mutex);
+    for (auto i : i_range(loaded_data.size()))
+    {
+        std::visit([&data, &i, this](auto &&d)
+                   {
+                       using T = std::decay_t<decltype(d)>;
+                       using ValueT = T::value_type;
+                       const size_t data_i = i < this->column_infos.id_column ? i : i - 1;
+                       d.emplace_back(i == this->column_infos.id_column ? std::get<ValueT>(get_free_id()) : std::get<ValueT>(data[data_i]));
+                   },
+                   loaded_data[i]);
+    }
+    reset_index();
+}
+
+void Database::Table::insert_rows_without_id(const std::span<ColumnType> &data)
+{
+    {
+        std::shared_lock lock(mutex);
+        if (!same_data_layout_without_id(data, loaded_data, column_infos.id_column))
+            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+    }
+
+    std::unique_lock lock(mutex);
+    const size_t data_size = std::visit([](auto &&v)
+                                        { return v.size(); },
+                                        data[0]);
+    for (auto i : i_range(data.size()))
+    {
+        std::visit([&data, &i, data_size, this](auto &&d)
+                   {
+                       using T = std::decay_t<decltype(d)>;
+                       if (i == this->column_infos.id_column)
+                       {
+                           using ValT = T::value_type;
+                           for (auto i : i_range(data_size))
+                               d.emplace_back(std::get<ValT>(get_free_id()));
+                       }
+                       else
+                       {
+                           const size_t data_i = i < this->column_infos.id_column ? i : i - 1;
+                           const auto &data_v = std::get<T>(data[data_i]);
+                           d.insert(d.end(), data_v.begin(), data_v.end());
+                       }
+                   },
+                   loaded_data[i]);
+    }
+    reset_index();
 }
 
 void Database::Table::delete_row(const ElementType &id)
 {
-    if (id.index() != loaded_data[column_infos.id_column].index())
-        throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+    {
+        std::shared_lock lock(mutex);
+        if (id.index() != loaded_data[column_infos.id_column].index())
+            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+    }
 
+    std::unique_lock lock(mutex);
     size_t del_idx{};
     std::visit([this, &del_idx](auto &&id)
                {
@@ -255,15 +360,20 @@ void Database::Table::delete_row(const ElementType &id)
                    { v.erase(v.begin() + del_idx); },
                    data);
     }
+    reset_index();
 }
 
-void Database::Table::delete_rows(const std::vector<ElementType> &ids)
+void Database::Table::delete_rows(const std::span<ElementType> &ids)
 {
     if (ids.empty())
         return;
-    if (ids[0].index() != loaded_data[column_infos.id_column].index())
-        throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+    {
+        std::shared_lock lock(mutex);
+        if (ids[0].index() != loaded_data[column_infos.id_column].index())
+            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+    }
 
+    std::unique_lock lock(mutex);
     robin_hood::unordered_set<size_t> del_idx{};
     for (const auto &id : ids)
     {
@@ -297,6 +407,7 @@ void Database::Table::delete_rows(const std::vector<ElementType> &ids)
                    },
                    data);
     }
+    reset_index();
 }
 
 Database::Database(std::string_view storage_location) : _storage_location(storage_location)
@@ -323,6 +434,7 @@ Database::Database(std::string_view storage_location) : _storage_location(storag
 
 void Database::store_table_caches() const
 {
+    std::unique_lock lock(_mutex);
     std::vector<std::string> tables(_tables.size());
     size_t i{};
     for (const auto &[n, t] : _tables)
@@ -334,6 +446,7 @@ void Database::store_table_caches() const
 
 void Database::create_table(std::string_view table_name, const Table::ColumnInfos &column_infos)
 {
+    std::unique_lock lock(_mutex);
     const std::string table_name_s(table_name);
     if (_tables.contains(table_name_s))
     {
@@ -348,6 +461,7 @@ void Database::create_table(std::string_view table_name, const Table::ColumnInfo
 
 Database::ElementType Database::get_free_id(std::string_view table) const
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table for which the next id should be acquired does not exits")};
@@ -356,38 +470,61 @@ Database::ElementType Database::get_free_id(std::string_view table) const
 
 const std::vector<Database::ColumnType> &Database::get_table_data(std::string_view table)
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error(log_msg("The table from which the data should be returned does not exist"));
     return _tables.at(table_s)->loaded_data;
 }
 
-void Database::insert_rows(std::string_view table, const std::vector<ColumnType> &data)
+void Database::insert_rows(std::string_view table, const std::span<ColumnType> &data)
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
     _tables.at(table_s)->insert_rows(data);
 }
 
-void Database::insert_row(std::string_view table, const std::vector<ElementType> &data)
+void Database::insert_row(std::string_view table, const std::span<ElementType> &data)
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
     _tables.at(table_s)->insert_row(data);
 }
 
+void Database::insert_row_without_id(std::string_view table, const std::span<ElementType> &data)
+{
+    std::shared_lock lock(_mutex);
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+    _tables.at(table_s)->insert_row_without_id(data);
+}
+
+void Database::insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data)
+{
+    std::shared_lock lock(_mutex);
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+    _tables.at(table_s)->insert_rows_without_id(data);
+}
+
 void Database::delete_row(std::string_view table, const ElementType &id)
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
     _tables.at(table_s)->delete_row(id);
 }
 
-void Database::delete_rows(std::string_view table, const std::vector<ElementType> &ids)
+void Database::delete_rows(std::string_view table, const std::span<ElementType> &ids)
 {
+    std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};

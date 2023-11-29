@@ -5,6 +5,8 @@
 #include <chrono>
 
 #include "crow/crow.h"
+#include "date.h"
+#include "string_view_stream.hpp"
 
 #define EXTRACT_CREDENTIALS(req)                        \
     auto req_creds = extract_credentials_from_req(req); \
@@ -38,7 +40,7 @@ constexpr std::size_t variant_index_v = variant_index_impl<T>(static_cast<V **>(
 template <typename... Ts>
 constexpr auto variant_to_value_type(std::variant<Ts...> **)
 {
-    return static_cast<std::variant<typename Ts::value_type ...> **>(nullptr);
+    return static_cast<std::variant<typename Ts::value_type...> **>(nullptr);
 }
 
 inline auto i_range(auto &&end) { return std::ranges::iota_view(std::remove_reference_t<decltype(end)>{}, end); }
@@ -75,7 +77,18 @@ inline std::string log_msg(std::string_view message, const std::source_location 
     return std::string(loc.file_name()) + ": " + std::to_string(loc.line()) + "| " + std::string(message);
 }
 
-inline std::string to_date_string(const std::chrono::system_clock::time_point &t)
+#define DATE_FORMAT "%Y-%m-%d %T"
+constexpr std::string_view date_dump_format = "{:" DATE_FORMAT "}";
+constexpr std::string_view date_parse_format = DATE_FORMAT;
+inline std::string to_date_string(const std::chrono::utc_clock::time_point &t)
 {
-    return std::format("{:%Y-%m-%d %X}", std::chrono::current_zone()->to_local(t));
+    return std::format(date_dump_format.data(), t);
+}
+
+inline std::chrono::utc_clock::time_point from_date_string(std::string_view date_string)
+{
+    std::chrono::sys_time<std::chrono::nanoseconds> res;
+    string_view_istream d(date_string);
+    d >> date::parse(date_parse_format.data(), res);
+    return std::chrono::utc_clock::from_sys(res);
 }
