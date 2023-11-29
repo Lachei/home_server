@@ -6,6 +6,8 @@
 
 #include "util.hpp"
 #include "type_serialization.hpp"
+#include "string_split.hpp"
+#include "AdminCredentials.hpp"
 
 using src_loc = std::source_location;
 using Types = std::vector<uint32_t>;
@@ -33,7 +35,7 @@ bool same_data_layout_without_id(const std::span<T> &a, const std::span<Database
 
     for (auto i : i_range(a.size()))
     {
-        const auto b_ind = i < id_column ? i: i + 1;
+        const auto b_ind = i < id_column ? i : i + 1;
         if (a[i].index() != b[i].index())
             return false;
     }
@@ -529,4 +531,65 @@ void Database::delete_rows(std::string_view table, const std::span<ElementType> 
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
     _tables.at(table_s)->delete_rows(ids);
+}
+
+// ------------------------------------------------------------------------------------------------------
+// database queries
+// ------------------------------------------------------------------------------------------------------
+template <typename T>
+std::vector<Database::ColumnType> Database::_query_database(const T &query)
+{
+    static_assert(database_internal::always_false_v<T>, "Missing implementation for this query type");
+    return {};
+}
+template <>
+std::vector<Database::ColumnType> Database::_query_database<database_internal::EventQuery>(const database_internal::EventQuery &query)
+{
+    if (!_tables.contains(query.event_table_name))
+        throw std::runtime_error{log_msg("The table for the event query does not exist")};
+
+    const auto &table = *_tables.at(query.event_table_name);
+    const auto &visibilities_col = std::distance(std::ranges::find(table.column_infos.column_names, "visibility"), table.column_infos.column_names.begin());
+    const auto &visibilities = std::get<std::vector<std::string>>(table.loaded_data[visibilities_col]);
+    
+    if (query.query_person == admin_name)
+        return table.loaded_data;
+
+    // query run to build up the bitset
+    Bitset active_indices;
+
+    for (auto i : i_range(table._num_rows()))
+    {
+        for (auto user : string_split{json_array_to_comma_list(visibilities[i]), std::string_view(",")})
+        {
+            if (query.query_person == user)
+            {
+                active_indices.set(i);
+                break;
+            }
+        }
+    }
+    
+    // creating the result array and gathering all elements from the table
+    std::vector<Database::ColumnType> res(table._num_columns());
+    for (auto i: i_range(table._num_columns())) {
+        res[i] = std::visit([&active_indices] (auto &&v) {
+            using T = std::decay_t<decltype(v)>;
+            T res(active_indices.count());
+            size_t c{};
+            for (auto i: active_indices)
+                res[c++] = v[i];
+            return ColumnType{res};
+        }, table.loaded_data[i]);
+    }
+
+    return res;
+}
+
+std::vector<Database::ColumnType> Database::query_database(const QueryType &query)
+{
+    std::shared_lock lock(_mutex);
+    return std::visit([this](auto &&q)
+                      { return this->_query_database(q); },
+                      query);
 }

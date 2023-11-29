@@ -1,5 +1,6 @@
 #include "utils.hpp"
 #include "../src/util.hpp"
+#include "../src/string_split.hpp"
 
 namespace result
 {
@@ -28,9 +29,26 @@ int test_string_serialization()
     return result::success;
 }
 
+int test_string_split()
+{
+    std::string_view test = "Halloxxx mein besterxxx bam";
+    std::string_view delim = "xxx";
+
+    std::vector<std::string_view> elements{"Hallo", " mein bester", " bam"};
+    uint32_t c{};
+    for (auto p: string_split{test, delim}) {
+        std::cout << p << " | ";
+        if (p != elements[c++])
+            return result::error;
+    }
+    std::cout << std::endl;
+    return result::success;
+}
+
 int main()
 {
     check_res(test_string_serialization());
+    check_res(test_string_split());
 
     return result::success;
 }

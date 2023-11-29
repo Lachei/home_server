@@ -61,6 +61,13 @@ namespace database_internal
         ((idx != i++ || (c((typename Ts::value_type){}), false)) && ...);
     }
 
+    // behaviour of these queries is implemented at the end of Database.cpp
+    struct EventQuery
+    {
+        std::string event_table_name;
+        std::string query_person;
+    };
+    using QueryType = std::variant<EventQuery>;
 }
 
 template <>
@@ -102,6 +109,8 @@ public:
                                     std::vector<Date>,
                                     std::vector<std::vector<std::byte>>>;
     using ElementType = std::decay_t<decltype(**variant_to_value_type(static_cast<ColumnType **>(nullptr)))>;
+    using QueryType = database_internal::QueryType;
+    using EventQuery = database_internal::EventQuery;
     template <typename T>
     static constexpr std::string_view column_type_name_v = database_internal::column_type_name<T>();
     template <typename Callable>
@@ -163,6 +172,7 @@ public:
         // If no column_infos is given and the file does not exist on the computer an error will be thrown
         Table(std::string_view storage_location, const std::optional<ColumnInfos> &column_infos = {});
         ~Table() { store_cache(); }
+        friend class Database;
 
         void store_cache() const;
         size_t num_rows() const
@@ -170,7 +180,8 @@ public:
             std::shared_lock lock(mutex);
             return _num_rows();
         }
-        uint32_t num_columns() const {
+        uint32_t num_columns() const
+        {
             std::shared_lock lock(mutex);
             return _num_columns();
         }
@@ -194,11 +205,6 @@ public:
 
         void delete_row(const ElementType &id);
         void delete_rows(const std::span<ElementType> &ids);
-
-        // filter_args must have the following structure: {column_name, check_operation}
-        Bitset get_active_bitset(const nlohmann::json &filter_args);
-        nlohmann::json get_elements(const Bitset &filter_args);
-        nlohmann::json get_elements(const nlohmann::json &filter_args);
 
     private:
         size_t _num_rows() const
@@ -225,9 +231,13 @@ public:
     void delete_row(std::string_view table, const ElementType &id);
     void delete_rows(std::string_view table, const std::span<ElementType> &ids);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
+    std::vector<ColumnType> query_database(const QueryType& query);
 
 private:
     std::string _storage_location;
     robin_hood::unordered_map<std::string, std::unique_ptr<Table>> _tables;
     mutable std::shared_mutex _mutex; // is locked unique upon table creation, deletion and storing. for everything else it is locked shared
+
+    template<typename T>
+    std::vector<ColumnType> _query_database(const T& query);
 };

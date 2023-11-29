@@ -11,3 +11,7 @@ static void setup_event_table(Database& database);
 // If error exists there was an error with creating the 
 // The returned event has an added id field
 static nlohmann::json add_event(Database& db, const nlohmann::json& event);
+
+// returns a json array with all events that are visible by the given person
+// note that the credentials check has to be done before
+static nlohmann::json get_events(Database& db, std::string_view person);

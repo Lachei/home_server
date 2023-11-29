@@ -92,3 +92,23 @@ inline std::chrono::utc_clock::time_point from_date_string(std::string_view date
     d >> date::parse(date_parse_format.data(), res);
     return std::chrono::utc_clock::from_sys(res);
 }
+
+inline std::string json_array_remove_whitespace(std::string_view arr)
+{
+    std::stringstream ret;
+    for (auto c : arr)
+        if (c != ' ' && c != '\t')
+            ret << c;
+    return ret.str();
+}
+
+inline std::string_view json_array_to_comma_list(std::string_view arr)
+{
+    if (!arr.size())
+        return arr;
+    if (arr.front() == '[')
+        arr = arr.substr(1);
+    if (arr.back() == ']')
+        arr = arr.substr(0, arr.size() - 1);
+    return arr;
+}
