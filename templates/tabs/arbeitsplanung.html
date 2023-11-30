@@ -1,28 +1,28 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.css">
 <p>Nachfolgend die Zeitplanung</p>
-<div id="timetable"> </div>
+<div id="timetable" class="ec-dark"> </div>
 <div id="timetable_editing">
     <p><b>F&uuml;ge neues event hinzu</b></p>
     <div class="inset">
-        <label for="ne_title">Titel</label>
-        <input id="ne_title" name="ne_title" type="text">
+        <label for="ne_title"><b>Titel</b></label>
+        <input id="ne_title" type="text">
 
-        <label for="ne_description">Beschreibung</label><br/>
+        <label for="ne_description">Beschreibung</label><br />
         <textarea id="ne_description" name="ne_description" cols="40" rows="5"></textarea>
 
-        <label for="ne_start_time">Start Datum</label><br/>
-        <input id="ne_start_time" name="ne_start_time" type="datetime-local">
+        <label for="ne_start_time"><b>Start Datum</b></label>
+        <input id="ne_start_time" type="datetime-local">
 
-        <label for="ne_end_time">End Datum</label><br/>
-        <input id="ne_end_time" name=""ne_end_time type="datetime-local">
+        <label for="ne_end_time"><b>End Datum</b></label>
+        <input id="ne_end_time" type="datetime-local">
 
-        <label for="ne_people">Beteiligte</label><br/>
-        <b>TODO: Leute hinzufuegen</b>
+        <label for="ne_people"><b>Beteiligte</b></label>
+        <b>TODO: Leute hinzufuegen</b><br />
 
-        <label for="ne_visibility">Sichtbar f&uuml;r</label><br/>
-        <b>TODO: Leute auswhaehlbar</b>
+        <label for="ne_visibility"><b>Sichtbar f&uuml;r</b></label>
+        <b>TODO: Leute auswhaehlbar</b><br />
 
-        <label for="ne_expected_hours">Voraussichtliche Arbeitsstunden</label><br/>
+        <label for="ne_expected_hours"><b>Voraussichtliche Arbeitsstunden</b></label>
         <input id="ne_expected_hours" type="number">
 
         <button onclick="create_new_event({
@@ -30,9 +30,12 @@
             description: getElementById('ne_description').value,
             start_time: getElementById('ne_start_time').value,
             end_time: getElementById('ne_end_time').value,
-            people: ['{{benutzername}}'],            
-            visibility: ['{{benutzername}}'],
-            expected_hours: getElementById('ne_expected_hours').value,
+            creator: '{{benutzername}}',
+            people: '[{{benutzername}}]',            
+            people_status: '[{{benutzername}}, accepted]',
+            visibility: '[{{benutzername}}]',
+            expected_hours: parseFloat(getElementById('ne_expected_hours').value),
+            progress: 0.,
         })">Event erstellen</button>
     </div>
 </div>
@@ -41,33 +44,40 @@
 <script>
     let event_calendar = null;
     console.log(new Date().toLocaleDateString('de-DE'));
+    function db_event_to_cal_event(e) {
+        return {
+            id: e.id,
+            resourceIds: [],
+            allDay: e.expected_hours >= 24,
+            start: new Date(e.start_time),
+            end: new Date(e.end_time),
+            title: e.title,
+            editable: false,
+        }
+    }
     async function init_event_calendar() {
         // loading events
 
         let server_events = await fetch(location.origin + "/get_events",
-                                        {headers: {"credentials": location.search.substr(window.location.search.indexOf("=") + 1)}});
+            { headers: { "credentials": location.search.substr(window.location.search.indexOf("=") + 1) } });
         let events = await server_events.json();
-        
+
         // parsing the events to event calendar format
         let parsed_events = []
-        for (e of events){
-            let event = {
-                id : e.id,
-                resourceIds : [],
-                allDay : e.expected_hours >= 24,
-                start : new Date(e.start_time),
-                end : new Date(e.end_time),
-                title : e.title,
-                editable : false,
-            }
-            parsed_events.push(event);
+        for (e of events) {
+            parsed_events.push(db_event_to_cal_event(e));
         }
 
         event_calendar = new EventCalendar(document.getElementById("timetable"), {
             view: 'timeGridWeek',
+            headerToolbar: {
+                start: 'prev,next today',
+                center: 'title',
+                end: 'dayGridMonth,timeGridWeek,timeGridDay,listWeek'
+            },
             events: parsed_events,
             allDayContent: "Ganztags",
-            buttonText: { close: 'Schliessen', dayGridMonth: 'Monat', listDay: 'Liste', listMonth: 'List', listWeek: 'List', listYear: 'List', resourceTimeGridDay: 'Tag', resourceTimeGridWeek: 'Woche', timeGridDay: 'Tag', timeGridWeek: 'Woche', today: 'Heute' },
+            buttonText: { close: 'Schliessen', dayGridMonth: 'Monat', listDay: 'Liste', listMonth: 'Liste', listWeek: 'Liste', listYear: 'Liste', resourceTimeGridDay: 'Tag', resourceTimeGridWeek: 'Woche', timeGridDay: 'Tag', timeGridWeek: 'Woche', today: 'Heute' },
             //date: new Date().toISOString()
             dayHeaderFormat: date => new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric' }).format(date),
             editable: true
@@ -75,5 +85,17 @@
     }
     async function create_new_event(event_infos) {
         console.log(event_infos);
+
+        let event_result = await fetch(location.origin + "/add_event",
+            {
+                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+                method: "POST",
+                body: JSON.stringify(event_infos)
+            });
+        let event_result_json = await event_result.json();
+        if ("error" in event_result_json)
+            console.log(event_result_json);
+        else
+            event_calendar.addEvent(db_event_to_cal_event(event_result_json));
     }
 </script>

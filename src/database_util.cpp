@@ -12,8 +12,8 @@ std::vector<Database::ElementType> json_event_to_db_event(const nlohmann::json &
 {
     const auto title = event["title"].get<std::string>();
     const auto description = event["description"].get<std::string>();
-    const auto start_time = from_date_string(event["start_time"].get<std::string>());
-    const auto end_time = from_date_string(event["end_time"].get<std::string>()); // time is always transmitted with a string
+    const auto start_time = from_json_date_string(event["start_time"].get<std::string>());
+    const auto end_time = from_json_date_string(event["end_time"].get<std::string>()); // time is always transmitted with a string
     const auto creator = event["creator"].get<std::string>();
     const auto people = std::string(json_array_remove_whitespace(event["people"].get<std::string>()));
     const auto people_status = std::string(json_array_remove_whitespace(event["people_status"].get<std::string>()));
@@ -35,8 +35,8 @@ nlohmann::json db_events_to_json_events(std::span<const Database::ColumnType> ev
         res[i]["id"] = std::get<std::vector<uint64_t>>(events[0])[i];
         res[i]["title"] = std::get<std::vector<std::string>>(events[1])[i];
         res[i]["description"] = std::get<std::vector<std::string>>(events[2])[i];
-        res[i]["start_time"] = to_date_string(std::get<std::vector<Date>>(events[3])[i]);
-        res[i]["end_time"] = to_date_string(std::get<std::vector<Date>>(events[4])[i]);
+        res[i]["start_time"] = to_json_date_string(std::get<std::vector<Date>>(events[3])[i]);
+        res[i]["end_time"] = to_json_date_string(std::get<std::vector<Date>>(events[4])[i]);
         res[i]["creator"] = std::get<std::vector<std::string>>(events[5])[i];
         res[i]["people"] = std::get<std::vector<std::string>>(events[6])[i];
         res[i]["people_status"] = std::get<std::vector<std::string>>(events[7])[i];
@@ -60,8 +60,6 @@ namespace database_util
         try
         {
             auto e = event;
-            e["people_status"] = "[]";
-            e["progress"] = 0.0;
             auto db_event = json_event_to_db_event(e);
 
             // getting all required parts of an event to create it

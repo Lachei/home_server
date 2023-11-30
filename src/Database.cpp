@@ -36,7 +36,7 @@ bool same_data_layout_without_id(const std::span<T> &a, const std::span<Database
     for (auto i : i_range(a.size()))
     {
         const auto b_ind = i < id_column ? i : i + 1;
-        if (a[i].index() != b[i].index())
+        if (a[i].index() != b[b_ind].index())
             return false;
     }
 
@@ -468,6 +468,8 @@ void Database::store_table_caches() const
     nlohmann::json config_json{{"tables", std::move(tables)}};
     std::ofstream config_file(_storage_location + "/config.json");
     config_file << config_json.dump();
+    for (const auto &[n, t]: _tables)
+        t->store_cache();
 }
 
 void Database::create_table(std::string_view table_name, const Table::ColumnInfos &column_infos)
@@ -573,7 +575,7 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::E
         throw std::runtime_error{log_msg("The table for the event query does not exist")};
 
     const auto &table = *_tables.at(query.event_table_name);
-    const auto &visibilities_col = std::distance(std::ranges::find(table.column_infos.column_names, "visibility"), table.column_infos.column_names.begin());
+    const auto &visibilities_col = std::distance(table.column_infos.column_names.begin(), std::ranges::find(table.column_infos.column_names, "visibility"));
     const auto &visibilities = std::get<std::vector<std::string>>(table.loaded_data[visibilities_col]);
 
     if (query.query_person == admin_name)
@@ -586,7 +588,7 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::E
     {
         for (auto user : string_split{json_array_to_comma_list(visibilities[i]), std::string_view(",")})
         {
-            if (query.query_person == user)
+            if (query.query_person == user || user == "all")
             {
                 active_indices.set(i);
                 break;

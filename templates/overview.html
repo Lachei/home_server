@@ -14,6 +14,9 @@
 
         /* Full-width input fields */
         input[type=text],
+        input[type=datetime-local],
+        input[type=number],
+        textarea,
         input[type=password] {
             width: 100%;
             padding: 12px 20px;
@@ -115,7 +118,7 @@
 <body>
     <div style="contain: content;">
         <div id="logout">
-            <p>Eingeloggt als <b>{{benutzername}}</b></p>
+            <p style="margin-top: 1.3em;">Eingeloggt als <b>{{benutzername}}</b></p>
             <div style="width: 10px"></div>
             <button onclick="window.location = window.location.origin;">Logout</button>
         </div>

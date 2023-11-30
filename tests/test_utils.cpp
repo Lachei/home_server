@@ -29,6 +29,17 @@ int test_string_serialization()
     return result::success;
 }
 
+int test_js_time()
+{
+    const std::string_view date = "2023-11-30T18:00";
+    const auto t = from_json_date_string(date);
+    const auto t_s = to_json_date_string(t);
+    std::cout << date << " | " << t_s << std::endl;
+    if (date != t_s)
+        return result::error;
+    return result::success;
+}
+
 int test_string_split()
 {
     std::string_view test = "Halloxxx mein besterxxx bam";
@@ -36,7 +47,8 @@ int test_string_split()
 
     std::vector<std::string_view> elements{"Hallo", " mein bester", " bam"};
     uint32_t c{};
-    for (auto p: string_split{test, delim}) {
+    for (auto p : string_split{test, delim})
+    {
         std::cout << p << " | ";
         if (p != elements[c++])
             return result::error;
@@ -49,6 +61,7 @@ int main()
 {
     check_res(test_string_serialization());
     check_res(test_string_split());
+    check_res(test_js_time());
 
     return result::success;
 }

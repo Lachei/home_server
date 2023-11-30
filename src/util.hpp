@@ -93,6 +93,21 @@ inline std::chrono::utc_clock::time_point from_date_string(std::string_view date
     return std::chrono::utc_clock::from_sys(res);
 }
 
+#define JSON_DATE_FORMAT "%Y-%m-%dT%R"
+constexpr std::string_view json_date_dump_format = "{:" JSON_DATE_FORMAT "}";
+constexpr std::string_view json_date_parse_format = JSON_DATE_FORMAT;
+inline std::string to_json_date_string(const std::chrono::utc_clock::time_point &t)
+{
+    return std::format(json_date_dump_format.data(), t);
+}
+inline std::chrono::utc_clock::time_point from_json_date_string(std::string_view date_string)
+{
+    std::chrono::sys_time<std::chrono::nanoseconds> res;
+    string_view_istream d(date_string);
+    d >> date::parse(json_date_parse_format.data(), res);
+    return std::chrono::utc_clock::from_sys(res);
+}
+
 inline std::string json_array_remove_whitespace(std::string_view arr)
 {
     std::stringstream ret;

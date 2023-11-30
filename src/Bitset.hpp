@@ -180,7 +180,7 @@ public:
     
     struct BitsetIterator{
         BitsetIterator() = default;
-        BitsetIterator(const Bitset& b): b_ref(&b) {}
+        BitsetIterator(const Bitset& b): b_ref(&b) {seek_next(true);}
         
         BitsetIterator operator++() {seek_next(); return *this;};
         BitsetIterator operator++(int) {BitsetIterator t = *this; seek_next(); return t;}
@@ -195,7 +195,7 @@ public:
         std::optional<bitset::index_iterable<block_size, const std::bitset<block_size>&>::const_iterator> cur_block_iterator{};
         std::optional<bitset::index_iterable<block_size, const std::bitset<block_size>&>::const_iterator> cur_block_iterator_end{};
         
-        void seek_next(){
+        void seek_next(bool init = false){
             if (!b_ref)
                 return;
             bool advance_cur_block{};
@@ -209,7 +209,10 @@ public:
                 }
             }
             else {
-                ++cur_block_idx;
+                if (!init)
+                    ++cur_block_idx;
+                else
+                    advance_cur_block = true;
                 if (cur_block_idx >= block_size) {
                     cur_block_idx = 0;
                     ++cur_block;
@@ -224,7 +227,6 @@ public:
                 return;
             }
             if (advance_cur_block && b_ref->_blocks[cur_block].index() == bitset_index){
-                std::cout << std::endl;
                 auto iter = bitset::indices_on(bit(b_ref->_blocks[cur_block]));
                 cur_block_iterator = iter.begin();
                 cur_block_iterator_end = iter.end();                

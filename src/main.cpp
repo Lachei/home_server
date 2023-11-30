@@ -75,7 +75,7 @@ int main() {
         auto events = database_util::get_events(event_database, username);
         return events.dump();
     });
-    CROW_ROUTE(app, "/add_event")([&credentials, &event_database](const crow::request& req){
+    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &event_database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
         
         try{
