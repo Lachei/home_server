@@ -1,6 +1,15 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.css">
-<p>Nachfolgend die Zeitplanung</p>
-<div id="timetable" class="ec-dark"> </div>
+<style>
+    .selector_button {
+        background-color: rgb(49, 114, 116);
+        color: white;
+        padding: 8px 8px;
+        margin: 2px 10px;
+        display: block;
+        cursor: pointer;
+    }
+</style>
+<div id="timetable"></div>
 <div id="timetable_editing">
     <p><b>F&uuml;ge neues event hinzu</b></p>
     <div class="inset">
@@ -16,30 +25,63 @@
         <label for="ne_end_time"><b>End Datum</b></label>
         <input id="ne_end_time" type="datetime-local">
 
-        <label for="ne_people"><b>Beteiligte</b></label>
-        <b>TODO: Leute hinzufuegen</b><br />
+        <label for="ne_people"><b>Mitarbeiter</b></label>
+        <div id="associates" class="select_users"></div>
 
         <label for="ne_visibility"><b>Sichtbar f&uuml;r</b></label>
-        <b>TODO: Leute auswhaehlbar</b><br />
+        <div id="visible" class="select_users select_all"></div>
 
         <label for="ne_expected_hours"><b>Voraussichtliche Arbeitsstunden</b></label>
-        <input id="ne_expected_hours" type="number">
+        <input id="ne_expected_hours" type="number" value="5">
 
-        <button onclick="create_new_event({
+        <button onclick="
+            let people = '[{{benutzername}}';
+            for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
+                if (p.innerHTML == 'Alle') {
+                    people = '[all]';
+                    break;
+                }
+                people += ',' + p.innerHTML;
+            }
+            if (people.slice(-1) != ']')
+                people += ']';
+            let visibility = '[{{benutzername}}';
+            for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes)
+                visibility += ',' + p.innerHTML;
+            visibility += ']';
+            create_new_event({
             title : getElementById('ne_title').value,
             description: getElementById('ne_description').value,
             start_time: getElementById('ne_start_time').value,
             end_time: getElementById('ne_end_time').value,
             creator: '{{benutzername}}',
-            people: '[{{benutzername}}]',            
+            people: people,
             people_status: '[{{benutzername}}, accepted]',
-            visibility: '[{{benutzername}}]',
+            visibility: visibility,
             expected_hours: parseFloat(getElementById('ne_expected_hours').value),
             progress: 0.,
         })">Event erstellen</button>
     </div>
 </div>
-<script onload="init_event_calendar();"
+<div style="display:none">
+    <div id="side_select" style="display:grid; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px;">
+        <div id="side_select_left_title" style="border:solid thin gray; border-bottom:none">
+            Title links
+            <hr>
+        </div>
+        <div id="side_select_right_title" style="border:solid thin gray; border-bottom:none">
+            Title rechts
+            <hr>
+        </div>
+        <div id="side_select_left" style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll">
+            left
+        </div>
+        <div id="side_select_right" style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll;">
+            right
+        </div>
+    </div>
+</div>
+<script onload="init_event_calendar(); setup_user_selections();"
     src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js"></script>
 <script>
     let event_calendar = null;
@@ -52,7 +94,7 @@
             start: new Date(e.start_time),
             end: new Date(e.end_time),
             title: e.title,
-            editable: false,
+            editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
         }
     }
     async function init_event_calendar() {
@@ -97,5 +139,40 @@
             console.log(event_result_json);
         else
             event_calendar.addEvent(db_event_to_cal_event(event_result_json));
+    }
+    async function setup_user_selections() {
+        let users = await fetch(location.origin + "/get_all_users", { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
+        users = await users.json();
+        const create_selector = (id, contains_all) => {
+            let select = document.getElementById("side_select");
+            let selector = select.cloneNode(true);
+            selector.setAttribute("id", id);
+            selector.querySelector("#side_select_left_title").innerHTML = "<p class='p_title'>Nicht dabei <hr>";
+            selector.querySelector("#side_select_right_title").innerHTML = "<p class='p_title'>Mit dabei <hr>";
+
+            let user_buttons = "";
+            for (user of users)
+                if (user != "{{benutzername}}")
+                    user_buttons += "<button class='selector_button' onclick=\"switch_side('" + user + "', this);\">" + user + "</button>\n";
+            selector.querySelector("#side_select_left").innerHTML = user_buttons;
+            let right_buttons = "";
+            if (contains_all)
+                right_buttons += "<button class='selector_button' onclick=\"switch_side('all', this);\">Alle</button>\n";
+            selector.querySelector("#side_select_right").innerHTML = right_buttons;
+            return selector;
+        }
+        let selectors = document.getElementsByClassName("select_users");
+        for (s of selectors) {
+            const contains_all = s.classList.contains("select_all");
+            const id = s.getAttribute("id") + "_selector";
+            const selector = create_selector(id, contains_all);
+            s.appendChild(selector);
+        }
+    }
+    function switch_side(user_name, button) {
+        let p = button.parentNode;
+        let other_side = p.getAttribute("id") == "side_select_left" ? "side_select_right" : "side_select_left";
+        p.removeChild(button);
+        p.parentNode.querySelector("#" + other_side).appendChild(button);
     }
 </script>

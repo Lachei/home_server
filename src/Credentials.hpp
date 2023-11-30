@@ -33,14 +33,24 @@ public:
         if (credentials_json_string.size())
             _credentials = nlohmann::json::parse(credentials_json_string);
     }
-    
-    ~Credentials(){
+
+    ~Credentials()
+    {
         safe_credentials();
     }
 
     bool contains(const std::string &user)
     {
         return _credentials.contains(user);
+    }
+
+    std::vector<std::string> get_user_list() const
+    {
+        std::vector<std::string> users(_credentials.size());
+        int i{};
+        for (const auto &[user, _] : _credentials.get<std::map<std::string, nlohmann::json>>())
+            users[i++] = user;
+        return users;
     }
 
     // if user is not yet known generates a new entry in the map and a new salt
@@ -101,14 +111,15 @@ public:
         safe_credentials();
         return true;
     }
-    
-    bool delete_credential(const std::string &user) {
+
+    bool delete_credential(const std::string &user)
+    {
         if (!_credentials.contains(user))
             return false;
         auto alt = crow::json::wvalue::object();
         _credentials.erase(user);
         safe_credentials();
-        return  true;
+        return true;
     }
 
     void safe_credentials()

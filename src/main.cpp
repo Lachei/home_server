@@ -68,6 +68,13 @@ int main() {
         else
             return std::string("error");
     });
+
+    CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        nlohmann::json ret = credentials.get_user_list();
+        return ret.dump();
+    });
     
     CROW_ROUTE(app, "/get_events")([&credentials, &event_database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);

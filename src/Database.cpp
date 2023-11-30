@@ -588,7 +588,7 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::E
     {
         for (auto user : string_split{json_array_to_comma_list(visibilities[i]), std::string_view(",")})
         {
-            if (query.query_person == user || user == "all")
+            if (query.query_person == user || user == "Alle")
             {
                 active_indices.set(i);
                 break;
