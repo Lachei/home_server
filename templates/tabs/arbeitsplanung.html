@@ -8,10 +8,36 @@
         display: block;
         cursor: pointer;
     }
+
+    #main_time_view {
+        display: grid;
+        grid-template-columns: 1fr auto;
+    }
+
+    #inspector {
+        display: none;
+        width: 30vw;
+        margin-left: 10px;
+    }
+
+    .close_x {
+        float: right;
+        font-size: 30px;
+        cursor: pointer;
+    }
 </style>
-<div id="timetable"></div>
+<div id="main_time_view">
+    <div id="timetable"></div>
+    <div id="inspector">
+        <a class="close_x" onclick="this.parentNode.style.display = 'none';">x</a>
+        <p><b>Event Details</b></p>
+        <div id="inspector_content"></div>
+        <hr>
+        <p><b>Event Aktionen</b></p>
+    </div>
+</div>
 <div id="timetable_editing">
-    <p><b>F&uuml;ge neues event hinzu</b></p>
+    <p><b>Neues event erstellen</b>
     <div class="inset">
         <label for="ne_title"><b>Titel</b></label>
         <input id="ne_title" type="text">
@@ -64,7 +90,8 @@
     </div>
 </div>
 <div style="display:none">
-    <div id="side_select" style="display:grid; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px;">
+    <div id="side_select"
+        style="display:grid; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px;">
         <div id="side_select_left_title" style="border:solid thin gray; border-bottom:none">
             Title links
             <hr>
@@ -76,7 +103,8 @@
         <div id="side_select_left" style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll">
             left
         </div>
-        <div id="side_select_right" style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll;">
+        <div id="side_select_right"
+            style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll;">
             right
         </div>
     </div>
@@ -122,7 +150,8 @@
             buttonText: { close: 'Schliessen', dayGridMonth: 'Monat', listDay: 'Liste', listMonth: 'Liste', listWeek: 'Liste', listYear: 'Liste', resourceTimeGridDay: 'Tag', resourceTimeGridWeek: 'Woche', timeGridDay: 'Tag', timeGridWeek: 'Woche', today: 'Heute' },
             //date: new Date().toISOString()
             dayHeaderFormat: date => new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric' }).format(date),
-            editable: true
+            editable: true,
+            eventClick: show_event_in_inspector
         });
     }
     async function create_new_event(event_infos) {
@@ -174,5 +203,32 @@
         let other_side = p.getAttribute("id") == "side_select_left" ? "side_select_right" : "side_select_left";
         p.removeChild(button);
         p.parentNode.querySelector("#" + other_side).appendChild(button);
+    }
+    async function show_event_in_inspector(info) {
+        let inspector = document.getElementById("inspector");
+        inspector.style.display = "block";
+        let content = document.getElementById("inspector_content");
+        let e = await fetch(location.origin + "/get_event/" + info.event.id, { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
+        let event = await e.json();
+        if ("error" in event)
+            console.log(event["error"]);
+        else {
+            const component = function(s) {
+                return "<p><b>" + s + "</b>: " + event[s];
+            };
+            info_string = "";
+            info_string += component("id");
+            info_string += component("title");
+            info_string += component("description");
+            info_string += component("start_time");
+            info_string += component("end_time");
+            info_string += component("creator");
+            info_string += component("people");
+            info_string += component("people_status");
+            info_string += component("visibility");
+            info_string += component("expected_hours");
+            info_string += component("progress");
+            content.innerHTML = info_string;
+        }
     }
 </script>

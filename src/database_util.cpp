@@ -1,4 +1,6 @@
 #include "database_util.hpp"
+#include "AdminCredentials.hpp"
+#include "string_split.hpp"
 
 template <typename T>
 static const std::string t = std::string(Database::column_type_name_v<T>);
@@ -66,7 +68,7 @@ namespace database_util
             const auto id = db.insert_row_without_id(event_table_name, db_event);
             db.store_table_caches();
             const auto inserted_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
-            return db_events_to_json_events(inserted_event)[0];    // [0] is needed to unpack the 1 sized array that is returned from db_events_to.....
+            return db_events_to_json_events(inserted_event)[0]; // [0] is needed to unpack the 1 sized array that is returned from db_events_to.....
         }
         catch (std::runtime_error e)
         {
@@ -84,5 +86,32 @@ namespace database_util
         auto data = db.query_database(Database::EventQuery{.event_table_name = std::string(event_table_name),
                                                            .query_person = std::string(person)});
         return db_events_to_json_events(data);
+    }
+
+    nlohmann::json get_event(Database &db, std::string_view person, uint64_t id)
+    {
+        const auto user_allowed_to_see = [](std::string_view person, std::string_view list)
+        {
+            if (person == admin_name)
+                return true;
+
+            for (auto user : string_split{json_array_to_comma_list(list), std::string_view(",")})
+                if (user == person || user == "Alle")
+                    return true;
+            return false;
+        };
+        try
+        {
+            const auto e = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
+            const auto event = db_events_to_json_events(e)[0];
+            if (!user_allowed_to_see(person, event["visibility"].get<std::string>()))
+                return nlohmann::json{{"error", "The user is now permitted to see this event"}};
+            return event;
+        }
+        catch (std::runtime_error e)
+        {
+            return nlohmann::json{{"error", e.what()}};
+        }
+        return nlohmann::json{{"error", log_msg("Some other error occured")}};
     }
 }

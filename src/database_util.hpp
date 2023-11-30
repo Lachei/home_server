@@ -17,4 +17,6 @@ namespace database_util
     // returns a json array with all events that are visible by the given person
     // note that the credentials check has to be done before
     nlohmann::json get_events(Database &db, std::string_view person);
+    
+    nlohmann::json get_event(Database &db, std::string_view person, uint64_t id);
 }
