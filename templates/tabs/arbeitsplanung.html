@@ -141,7 +141,9 @@
             //date: new Date().toISOString()
             dayHeaderFormat: date => new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric' }).format(date),
             editable: true,
-            eventClick: show_event_in_inspector
+            eventClick: show_event_in_inspector,
+            eventDrop: update_event_drag,
+            eventResize: update_event_drag,
         });
     }
     async function create_new_event(event_infos) {
@@ -172,11 +174,11 @@
             let user_buttons = "";
             for (user of users)
                 if (user != "{{benutzername}}")
-                    user_buttons += "<button class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+                    user_buttons += "<button id='bn_" + user +"' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
             selector.querySelector("#side_select_left").innerHTML = user_buttons;
             let right_buttons = "";
             if (contains_all)
-                right_buttons += "<button class='selector_button' onclick=\"switch_side(this);\">Alle</button>\n";
+                right_buttons += "<button id='bn_Alle' class='selector_button' onclick=\"switch_side(this);\">Alle</button>\n";
             selector.querySelector("#side_select_right").innerHTML = right_buttons;
             return selector;
         }
@@ -189,6 +191,8 @@
         }
     }
     function switch_side(button) {
+        if (button == null)
+            return;
         let p = button.parentNode;
         let other_side = p.getAttribute("id") == "side_select_left" ? "side_select_right" : "side_select_left";
         p.removeChild(button);
@@ -202,24 +206,29 @@
         let people = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
         for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
             if (p.innerHTML == 'Alle') {
-                people = '[all]';
+                people = '[Alle';
                 break;
             }
             people += ',' + p.innerHTML;
         }
-        if (people.slice(-1) != ']')
-            people += ']';
+        people += ']';
         let visibility = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
-        for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes)
+        for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes) {
+            if (p.innerHTML == 'Alle') {
+                visibility = '[Alle';
+                break;
+            }
             visibility += ',' + p.innerHTML;
+        }
         visibility += ']';
         let creator = event_inputs.querySelector('#creator_name');
-        console.log(creator);
+        let start = new Date(Date.parse(event_inputs.querySelector('#ne_start_time').value));
+        let end = new Date(Date.parse(event_inputs.querySelector('#ne_end_time').value));
         return {
             title : event_inputs.querySelector('#ne_title').value,
             description: event_inputs.querySelector('#ne_description').value,
-            start_time: event_inputs.querySelector('#ne_start_time').value,
-            end_time: event_inputs.querySelector('#ne_end_time').value,
+            start_time: start.toISOString(),
+            end_time: end.toISOString(),
             creator: creator == null ? '{{benutzername}}': creator.innerHTML,
             people: people,
             people_status: '[{{benutzername}}, accepted]',
@@ -232,8 +241,8 @@
         let e = await fetch(location.origin + "/get_event/" + id, { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
         return await e.json();
     }
-    async function show_event_in_inspector(info) {
-        if (info.event.id == cur_inspected_event)
+    async function show_event_in_inspector(info, force_update = false) {
+        if (!force_update && info.event.id == cur_inspected_event)
             return;
         cur_inspected_event = info.event.id;
         inspector_observer.disconnect();
@@ -243,16 +252,41 @@
         if ("error" in event)
             console.log(event["error"]);
         else {
+            let start = new Date(Date.parse(event.start_time));
+            let end = new Date(Date.parse(event.end_time));
+            start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
+            end.setMinutes(end.getMinutes() - end.getTimezoneOffset());
+            console.log(new Date(Date.parse(event.start_time)));
             inspector.style.display = "block";
             content.innerHTML = '<b>ID: </b><p>' + event.id + '</p>';
             content.innerHTML += '<b>Ersteller: </b><p id="creator_name">' + event.creator + "</p>";
             let inputs = document.getElementById("event_input_template").cloneNode(true);
             inputs.querySelector("#ne_title").value = event.title;
             inputs.querySelector("#ne_description").value = event.description;
-            inputs.querySelector("#ne_start_time").value = event.start_time;
-            inputs.querySelector("#ne_end_time").value = event.end_time;
-            //inputs.querySelector("#ne_associates")
-            //inputs.querySelector("#ne_visibility")
+            inputs.querySelector("#ne_start_time").value = start.toISOString().slice(0, 16);
+            inputs.querySelector("#ne_end_time").value = end.toISOString().slice(0, 16);
+
+            let mitarbeiter = event.people.slice(1, -1).split(',');
+            let mitarbeiter_selector = inputs.querySelector("#associates");
+            for (m of mitarbeiter) {
+                if (m == "{{benutzername}}") continue;
+                switch_side(mitarbeiter_selector.querySelector("#bn_" + m));
+            }
+
+            let vis = event.visibility.slice(1, -1).split(',');
+            let vis_selector = inputs.querySelector("#visible");
+            let all_included = false;
+            for (m of vis) {
+                if (m == "{{mitarbeiter}}") continue;
+                if (m == "Alle") {
+                    all_included = true;
+                    continue;
+                }
+                switch_side(vis_selector.querySelector("#bn_" + m));
+            }
+            if (!all_included)
+                switch_side(vis_selector.querySelector("#bn_Alle"));
+
             inputs.querySelector("#ne_expected_hours").value = event.expected_hours;
             content.appendChild(inputs);
             attach_event_update_on_value_change(content);
@@ -267,7 +301,6 @@
                 body: JSON.stringify(event),
             });
         let res_json = await res.json();
-        console.log(res_json);
         if ("error" in res_json)
             console.log(res_json);
         else
@@ -276,6 +309,11 @@
     async function update_event_drag(info) {
         let event = await get_event(info.event.id);
         // setting the event starting and end time
+        event.start_time = info.event.start;
+        event.end_time = info.event.end;
+        await update_event(event);
+        if (cur_inspected_event == event.id)
+            show_event_in_inspector(info, true);
     }
     function inspector_observer_callback(mutationsList = null) {
         let event = parse_event_from_form(document.getElementById("inspector_content"));
@@ -284,7 +322,6 @@
     }
     function attach_event_update_on_value_change(base_node) {
         let input_elements = base_node.querySelectorAll("input,textarea");
-        console.log(input_elements);
         for (e of input_elements)
             e.onchange = inspector_observer_callback;
     }
