@@ -131,6 +131,7 @@ public:
     {
         database_internal::variant_idx_impl(c, idx, static_cast<ColumnType **>(nullptr));
     }
+    static constexpr uint64_t npos = uint64_t(-1);
     struct Table
     {
         // there might be more header datas coming, currently only columnar is available
@@ -215,6 +216,8 @@ public:
         void delete_row(const ElementType &id);
         void delete_rows(const std::span<ElementType> &ids);
 
+        void update_row(const std::span<ElementType> row);
+
     private:
         size_t _num_rows() const
         {
@@ -240,6 +243,7 @@ public:
     ColumnType insert_rows_without_id(std::string_view table, const std::span<ColumnType> &data);
     void delete_row(std::string_view table, const ElementType &id);
     void delete_rows(std::string_view table, const std::span<ElementType> &ids);
+    void update_row(std::string_view table, const std::span<ElementType> row);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
     std::vector<ColumnType> query_database(const QueryType& query) const;
 

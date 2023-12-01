@@ -70,15 +70,29 @@ namespace database_util
             const auto inserted_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
             return db_events_to_json_events(inserted_event)[0]; // [0] is needed to unpack the 1 sized array that is returned from db_events_to.....
         }
-        catch (std::runtime_error e)
+        catch (const std::exception& e)
         {
             return nlohmann::json{{"error", e.what()}};
         }
-        catch (nlohmann::json::type_error e)
-        {
-            return nlohmann::json{{"error", std::string("Json missing parameter: ") + e.what()}};
-        }
         return nlohmann::json({"error", log_msg("Some other error occurred")});
+    }
+
+    nlohmann::json update_event(Database &db, const nlohmann::json &event)
+    {
+        try
+        {
+            const auto id = event["id"].get<uint64_t>();
+            auto db_event = json_event_to_db_event(event);
+            db_event.insert(db_event.begin(), Database::ElementType{id});
+            db.update_row(event_table_name, db_event);
+            const auto updated_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
+            return db_events_to_json_events(updated_event)[0];  // [0] is needed to unpack the 1 sized array
+        }
+        catch(const std::exception& e)
+        {
+            return nlohmann::json({"error", e.what()});
+        }
+        return nlohmann::json{{"error", log_msg("End of db_function, should never arrive here")}};
     }
 
     nlohmann::json get_events(Database &db, std::string_view person)
@@ -108,7 +122,7 @@ namespace database_util
                 return nlohmann::json{{"error", "The user is now permitted to see this event"}};
             return event;
         }
-        catch (std::runtime_error e)
+        catch (const std::exception& e)
         {
             return nlohmann::json{{"error", e.what()}};
         }

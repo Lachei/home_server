@@ -94,10 +94,10 @@ int main() {
         try{
             const auto& event = nlohmann::json::parse(req.body);
             const auto& creator = event["creator"].get<std::string>();
-            if (creator != username && creator != admin_name)
-                return nlohmann::json{{"error", "can not create event for other players, only admin can do that"}}.dump();
+            if (creator != username && username != admin_name)
+                return nlohmann::json{{"error", "can not create event for other users, only admin can do that"}}.dump();
                 
-            auto result = database_util::add_event(event_database, nlohmann::json::parse(req.body));
+            auto result = database_util::add_event(event_database, event);
             return result.dump();
         } catch(nlohmann::json::parse_error e){
             return nlohmann::json{{"error", e.what()}}.dump();
@@ -105,10 +105,16 @@ int main() {
         
         return std::string{};
     });
-    CROW_ROUTE(app, "/update_event")([&credentials, &event_database](const crow::request& req){
+    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &event_database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        return std::string{};
+        const auto& event = nlohmann::json::parse(req.body);
+        const auto& creator = event["creator"].get<std::string>();
+        if (creator != username && username != admin_name)
+            return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
+        
+        auto result = database_util::update_event(event_database, event);
+        return result.dump();
     });
     
     const auto overview_page = crow::mustache::load("overview.html");

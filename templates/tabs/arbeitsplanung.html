@@ -29,67 +29,28 @@
 <div id="main_time_view">
     <div id="timetable"></div>
     <div id="inspector">
-        <a class="close_x" onclick="this.parentNode.style.display = 'none';">x</a>
+        <a class="close_x" onclick="this.parentNode.style.display = 'none'; cur_inspected_event = null; inspector_observer.disconnect();">x</a>
         <p><b>Event Details</b></p>
         <div id="inspector_content"></div>
         <hr>
         <p><b>Event Aktionen</b></p>
+        <div id="inspector_event_actions">
+            <button class="delete_button">Event l&ouml;schen</button>
+        </div>
     </div>
 </div>
-<div id="timetable_editing">
+<hr>
+<div id="timetable_editing" class="user">
     <p><b>Neues event erstellen</b>
     <div class="inset">
-        <label for="ne_title"><b>Titel</b></label>
-        <input id="ne_title" type="text">
-
-        <label for="ne_description">Beschreibung</label><br />
-        <textarea id="ne_description" name="ne_description" cols="40" rows="5"></textarea>
-
-        <label for="ne_start_time"><b>Start Datum</b></label>
-        <input id="ne_start_time" type="datetime-local">
-
-        <label for="ne_end_time"><b>End Datum</b></label>
-        <input id="ne_end_time" type="datetime-local">
-
-        <label for="ne_people"><b>Mitarbeiter</b></label>
-        <div id="associates" class="select_users"></div>
-
-        <label for="ne_visibility"><b>Sichtbar f&uuml;r</b></label>
-        <div id="visible" class="select_users select_all"></div>
-
-        <label for="ne_expected_hours"><b>Voraussichtliche Arbeitsstunden</b></label>
-        <input id="ne_expected_hours" type="number" value="5">
+        <div id="create_event_input"> </div>
 
         <button onclick="
-            let people = '[{{benutzername}}';
-            for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
-                if (p.innerHTML == 'Alle') {
-                    people = '[all]';
-                    break;
-                }
-                people += ',' + p.innerHTML;
-            }
-            if (people.slice(-1) != ']')
-                people += ']';
-            let visibility = '[{{benutzername}}';
-            for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes)
-                visibility += ',' + p.innerHTML;
-            visibility += ']';
-            create_new_event({
-            title : getElementById('ne_title').value,
-            description: getElementById('ne_description').value,
-            start_time: getElementById('ne_start_time').value,
-            end_time: getElementById('ne_end_time').value,
-            creator: '{{benutzername}}',
-            people: people,
-            people_status: '[{{benutzername}}, accepted]',
-            visibility: visibility,
-            expected_hours: parseFloat(getElementById('ne_expected_hours').value),
-            progress: 0.,
-        })">Event erstellen</button>
+            create_new_event(parse_event_from_form(getElementById('create_event_input')));"
+        >Event erstellen</button>
     </div>
 </div>
-<div style="display:none">
+<div id="templates" style="display:none">
     <div id="side_select"
         style="display:grid; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px;">
         <div id="side_select_left_title" style="border:solid thin gray; border-bottom:none">
@@ -108,12 +69,36 @@
             right
         </div>
     </div>
+    <div id="event_input_template">
+        <label for="ne_title"><b>Titel</b></label>
+        <input id="ne_title" type="text">
+
+        <label for="ne_description"><b>Beschreibung</b></label><br />
+        <textarea id="ne_description" name="ne_description" cols="40" rows="5"></textarea>
+
+        <label for="ne_start_time"><b>Start Datum</b></label>
+        <input id="ne_start_time" type="datetime-local">
+
+        <label for="ne_end_time"><b>End Datum</b></label>
+        <input id="ne_end_time" type="datetime-local">
+
+        <label for="ne_people"><b>Mitarbeiter</b></label>
+        <div id="associates" class="select_users"></div>
+
+        <label for="ne_visibility"><b>Sichtbar f&uuml;r</b></label>
+        <div id="visible" class="select_users select_all"></div>
+
+        <label for="ne_expected_hours"><b>Voraussichtliche Arbeitsstunden</b></label>
+        <input id="ne_expected_hours" type="number" value="5">
+    </div>
 </div>
-<script onload="init_event_calendar(); setup_user_selections();"
+<script onload="setup();"
     src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js"></script>
 <script>
     let event_calendar = null;
-    console.log(new Date().toLocaleDateString('de-DE'));
+    let cur_inspected_event = null;
+    let inspector_observer = new MutationObserver(inspector_observer_callback);
+    let inspector_observer_config = {childList: true, subtree: true};
     function db_event_to_cal_event(e) {
         return {
             id: e.id,
@@ -124,6 +109,11 @@
             title: e.title,
             editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
         }
+    }
+    async function setup() {
+        init_event_calendar();
+        setup_event_input();
+        setup_user_selections();
     }
     async function init_event_calendar() {
         // loading events
@@ -182,11 +172,11 @@
             let user_buttons = "";
             for (user of users)
                 if (user != "{{benutzername}}")
-                    user_buttons += "<button class='selector_button' onclick=\"switch_side('" + user + "', this);\">" + user + "</button>\n";
+                    user_buttons += "<button class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
             selector.querySelector("#side_select_left").innerHTML = user_buttons;
             let right_buttons = "";
             if (contains_all)
-                right_buttons += "<button class='selector_button' onclick=\"switch_side('all', this);\">Alle</button>\n";
+                right_buttons += "<button class='selector_button' onclick=\"switch_side(this);\">Alle</button>\n";
             selector.querySelector("#side_select_right").innerHTML = right_buttons;
             return selector;
         }
@@ -198,37 +188,104 @@
             s.appendChild(selector);
         }
     }
-    function switch_side(user_name, button) {
+    function switch_side(button) {
         let p = button.parentNode;
         let other_side = p.getAttribute("id") == "side_select_left" ? "side_select_right" : "side_select_left";
         p.removeChild(button);
         p.parentNode.querySelector("#" + other_side).appendChild(button);
     }
+    function setup_event_input() {
+        const input_template = document.getElementById("event_input_template").cloneNode(true);
+        document.getElementById("create_event_input").appendChild(input_template);
+    }
+    function parse_event_from_form(event_inputs) {
+        let people = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
+        for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
+            if (p.innerHTML == 'Alle') {
+                people = '[all]';
+                break;
+            }
+            people += ',' + p.innerHTML;
+        }
+        if (people.slice(-1) != ']')
+            people += ']';
+        let visibility = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
+        for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes)
+            visibility += ',' + p.innerHTML;
+        visibility += ']';
+        let creator = event_inputs.querySelector('#creator_name');
+        console.log(creator);
+        return {
+            title : event_inputs.querySelector('#ne_title').value,
+            description: event_inputs.querySelector('#ne_description').value,
+            start_time: event_inputs.querySelector('#ne_start_time').value,
+            end_time: event_inputs.querySelector('#ne_end_time').value,
+            creator: creator == null ? '{{benutzername}}': creator.innerHTML,
+            people: people,
+            people_status: '[{{benutzername}}, accepted]',
+            visibility: visibility,
+            expected_hours: parseFloat(event_inputs.querySelector('#ne_expected_hours').value),
+            progress: 0.
+        }
+    }
+    async function get_event(id) {
+        let e = await fetch(location.origin + "/get_event/" + id, { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
+        return await e.json();
+    }
     async function show_event_in_inspector(info) {
+        if (info.event.id == cur_inspected_event)
+            return;
+        cur_inspected_event = info.event.id;
+        inspector_observer.disconnect();
         let inspector = document.getElementById("inspector");
-        inspector.style.display = "block";
         let content = document.getElementById("inspector_content");
-        let e = await fetch(location.origin + "/get_event/" + info.event.id, { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
-        let event = await e.json();
+        let event = await get_event(info.event.id);
         if ("error" in event)
             console.log(event["error"]);
         else {
-            const component = function(s) {
-                return "<p><b>" + s + "</b>: " + event[s];
-            };
-            info_string = "";
-            info_string += component("id");
-            info_string += component("title");
-            info_string += component("description");
-            info_string += component("start_time");
-            info_string += component("end_time");
-            info_string += component("creator");
-            info_string += component("people");
-            info_string += component("people_status");
-            info_string += component("visibility");
-            info_string += component("expected_hours");
-            info_string += component("progress");
-            content.innerHTML = info_string;
+            inspector.style.display = "block";
+            content.innerHTML = '<b>ID: </b><p>' + event.id + '</p>';
+            content.innerHTML += '<b>Ersteller: </b><p id="creator_name">' + event.creator + "</p>";
+            let inputs = document.getElementById("event_input_template").cloneNode(true);
+            inputs.querySelector("#ne_title").value = event.title;
+            inputs.querySelector("#ne_description").value = event.description;
+            inputs.querySelector("#ne_start_time").value = event.start_time;
+            inputs.querySelector("#ne_end_time").value = event.end_time;
+            //inputs.querySelector("#ne_associates")
+            //inputs.querySelector("#ne_visibility")
+            inputs.querySelector("#ne_expected_hours").value = event.expected_hours;
+            content.appendChild(inputs);
+            attach_event_update_on_value_change(content);
+            inspector_observer.observe(content, inspector_observer_config);
         }
+    }
+    async function update_event(event) {
+        let res = await fetch(location.origin + "/update_event",
+            {
+                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+                method: "POST",
+                body: JSON.stringify(event),
+            });
+        let res_json = await res.json();
+        console.log(res_json);
+        if ("error" in res_json)
+            console.log(res_json);
+        else
+            event_calendar.updateEvent(db_event_to_cal_event(res_json));
+    }
+    async function update_event_drag(info) {
+        let event = await get_event(info.event.id);
+        // setting the event starting and end time
+    }
+    function inspector_observer_callback(mutationsList = null) {
+        let event = parse_event_from_form(document.getElementById("inspector_content"));
+        event.id = parseInt(cur_inspected_event);
+        update_event(event);
+    }
+    function attach_event_update_on_value_change(base_node) {
+        let input_elements = base_node.querySelectorAll("input,textarea");
+        console.log(input_elements);
+        for (e of input_elements)
+            e.onchange = inspector_observer_callback;
     }
 </script>

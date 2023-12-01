@@ -78,8 +78,10 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             Types types(header.num_columns);
             data_file.seekg(header.column_types_offset, data_file.beg).read(reinterpret_cast<char *>(types.data()), header.num_columns * sizeof(types[0]));
             this->column_infos.column_types.resize(header.num_columns);
-            for (auto i: i_range(header.num_columns))
-                visit_column_type_idx([this, i](auto &&v) {this->column_infos.column_types[i] = std::string(column_type_name_v<std::decay_t<decltype(v)>>);}, types[i]);
+            for (auto i : i_range(header.num_columns))
+                visit_column_type_idx([this, i](auto &&v)
+                                      { this->column_infos.column_types[i] = std::string(column_type_name_v<std::decay_t<decltype(v)>>); },
+                                      types[i]);
 
             OffsetSizes offset_sizes(header.num_columns);
             data_file.seekg(header.columns_offsets_lengths, data_file.beg).read(reinterpret_cast<char *>(offset_sizes.data()), header.num_columns * sizeof(offset_sizes[0]));
@@ -436,6 +438,42 @@ void Database::Table::delete_rows(const std::span<ElementType> &ids)
     reset_index();
 }
 
+void Database::Table::update_row(const std::span<ElementType> row)
+{
+    {
+        std::shared_lock lock(mutex);
+        if (row.size() != _num_columns())
+            throw std::runtime_error{log_msg("The amount of elements does not coincide with the table")};
+        if (row[column_infos.id_column].index() != loaded_data[column_infos.id_column].index())
+            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+    }
+
+    std::unique_lock lock(mutex);
+    uint64_t i{npos};
+    if (index.size())
+    {
+        std::shared_lock index_lock(index_mutex);
+        i = index.at(row[column_infos.id_column]);
+    }
+    if (i == npos)
+        i = std::visit([this, &row](auto &&v)
+                       {
+                           using T = std::decay_t<decltype(v)>::value_type;
+                           return std::distance(v.begin(), std::ranges::find(v, std::get<T>(row[this->column_infos.id_column])));
+                       },
+                       loaded_data[column_infos.id_column]);
+    if (i >= _num_rows())
+        throw std::runtime_error{log_msg("The index for the row to update was not found")};
+    
+    for (auto j: i_range(_num_columns()))
+    {
+        std::visit([i, j, &row](auto&& v) {
+            using T = std::decay_t<decltype(v)>::value_type;
+            v[i] = std::get<T>(row[j]);
+        }, loaded_data[j]);
+    }
+}
+
 Database::Database(std::string_view storage_location) : _storage_location(storage_location)
 {
     // checking for the config json in the storage location, if not available create
@@ -468,7 +506,7 @@ void Database::store_table_caches() const
     nlohmann::json config_json{{"tables", std::move(tables)}};
     std::ofstream config_file(_storage_location + "/config.json");
     config_file << config_json.dump();
-    for (const auto &[n, t]: _tables)
+    for (const auto &[n, t] : _tables)
         t->store_cache();
 }
 
@@ -557,6 +595,15 @@ void Database::delete_rows(std::string_view table, const std::span<ElementType> 
     if (!_tables.contains(table_s))
         throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
     _tables.at(table_s)->delete_rows(ids);
+}
+
+void Database::update_row(std::string_view table, const std::span<ElementType> row)
+{
+    std::shared_lock lock(_mutex);
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+    _tables.at(table_s)->update_row(row);
 }
 
 // ------------------------------------------------------------------------------------------------------

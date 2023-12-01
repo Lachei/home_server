@@ -27,6 +27,10 @@
             box-sizing: border-box;
         }
 
+        textarea {
+            font-size: 90%;
+        }
+
         button {
             background-color: #04AA6D;
             color: white;
@@ -162,7 +166,7 @@
                         tabcontents[i].innerHTML = t.replaceAll("{" + "{benutzername}}", parent_uname);
                         scripts = [...tabcontents[i].getElementsByTagName('script')];
                         scripts.map(
-                            s => reattach_script(s)//window.eval(s.innerHTML)
+                            s => reattach_script(s)
                         );
                     });
                 }
