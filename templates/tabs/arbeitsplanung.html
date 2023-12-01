@@ -7,6 +7,7 @@
         margin: 2px 10px;
         display: block;
         cursor: pointer;
+        border-radius: 10px;
     }
 
     #main_time_view {
@@ -29,25 +30,25 @@
 <div id="main_time_view">
     <div id="timetable"></div>
     <div id="inspector">
-        <a class="close_x" onclick="this.parentNode.style.display = 'none'; cur_inspected_event = null; inspector_observer.disconnect();">x</a>
+        <a class="close_x"
+            onclick="hide_inspector()">x</a>
         <p><b>Event Details</b></p>
         <div id="inspector_content"></div>
         <hr>
         <p><b>Event Aktionen</b></p>
         <div id="inspector_event_actions">
-            <button class="delete_button">Event l&ouml;schen</button>
+            <button class="delete_button" onclick="delete_event(cur_inspected_event)">Event l&ouml;schen</button>
         </div>
     </div>
 </div>
-<hr>
 <div id="timetable_editing" class="user">
+    <hr>
     <p><b>Neues event erstellen</b>
     <div class="inset">
         <div id="create_event_input"> </div>
 
         <button onclick="
-            create_new_event(parse_event_from_form(getElementById('create_event_input')));"
-        >Event erstellen</button>
+            create_new_event(parse_event_from_form(getElementById('create_event_input')));">Event erstellen</button>
     </div>
 </div>
 <div id="templates" style="display:none">
@@ -92,13 +93,12 @@
         <input id="ne_expected_hours" type="number" value="5">
     </div>
 </div>
-<script onload="setup();"
-    src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js"></script>
+<script onload="setup();" src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js"></script>
 <script>
     let event_calendar = null;
     let cur_inspected_event = null;
     let inspector_observer = new MutationObserver(inspector_observer_callback);
-    let inspector_observer_config = {childList: true, subtree: true};
+    let inspector_observer_config = { childList: true, subtree: true };
     function db_event_to_cal_event(e) {
         return {
             id: e.id,
@@ -174,7 +174,7 @@
             let user_buttons = "";
             for (user of users)
                 if (user != "{{benutzername}}")
-                    user_buttons += "<button id='bn_" + user +"' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+                    user_buttons += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
             selector.querySelector("#side_select_left").innerHTML = user_buttons;
             let right_buttons = "";
             if (contains_all)
@@ -203,7 +203,7 @@
         document.getElementById("create_event_input").appendChild(input_template);
     }
     function parse_event_from_form(event_inputs) {
-        let people = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
+        let people = "{{benutzername}}" == "admin" ? "[" : "[{{benutzername}}";
         for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
             if (p.innerHTML == 'Alle') {
                 people = '[Alle';
@@ -212,7 +212,7 @@
             people += ',' + p.innerHTML;
         }
         people += ']';
-        let visibility = "{{benutzername}}" == "admin" ? "[": "[{{benutzername}}";
+        let visibility = "{{benutzername}}" == "admin" ? "[" : "[{{benutzername}}";
         for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes) {
             if (p.innerHTML == 'Alle') {
                 visibility = '[Alle';
@@ -225,11 +225,11 @@
         let start = new Date(Date.parse(event_inputs.querySelector('#ne_start_time').value));
         let end = new Date(Date.parse(event_inputs.querySelector('#ne_end_time').value));
         return {
-            title : event_inputs.querySelector('#ne_title').value,
+            title: event_inputs.querySelector('#ne_title').value,
             description: event_inputs.querySelector('#ne_description').value,
             start_time: start.toISOString(),
             end_time: end.toISOString(),
-            creator: creator == null ? '{{benutzername}}': creator.innerHTML,
+            creator: creator == null ? '{{benutzername}}' : creator.innerHTML,
             people: people,
             people_status: '[{{benutzername}}, accepted]',
             visibility: visibility,
@@ -256,7 +256,6 @@
             let end = new Date(Date.parse(event.end_time));
             start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
             end.setMinutes(end.getMinutes() - end.getTimezoneOffset());
-            console.log(new Date(Date.parse(event.start_time)));
             inspector.style.display = "block";
             content.innerHTML = '<b>ID: </b><p>' + event.id + '</p>';
             content.innerHTML += '<b>Ersteller: </b><p id="creator_name">' + event.creator + "</p>";
@@ -293,6 +292,11 @@
             inspector_observer.observe(content, inspector_observer_config);
         }
     }
+    function hide_inspector() {
+        document.getElementById("inspector").style.display = 'none'; 
+        cur_inspected_event = null; 
+        inspector_observer.disconnect();
+    }
     async function update_event(event) {
         let res = await fetch(location.origin + "/update_event",
             {
@@ -324,5 +328,18 @@
         let input_elements = base_node.querySelectorAll("input,textarea");
         for (e of input_elements)
             e.onchange = inspector_observer_callback;
+    }
+    async function delete_event(id) {
+        let res = await fetch(location.origin + "/delete_event/" + id,
+            {
+                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+            });
+        let res_json = await res.json();
+        if ("error" in res_json)
+            console.log(res_json);
+        else{
+            hide_inspector();
+            event_calendar.removeEventById(id);
+        }
     }
 </script>

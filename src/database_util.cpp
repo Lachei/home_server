@@ -70,7 +70,7 @@ namespace database_util
             const auto inserted_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
             return db_events_to_json_events(inserted_event)[0]; // [0] is needed to unpack the 1 sized array that is returned from db_events_to.....
         }
-        catch (const std::exception& e)
+        catch (const std::exception &e)
         {
             return nlohmann::json{{"error", e.what()}};
         }
@@ -85,10 +85,11 @@ namespace database_util
             auto db_event = json_event_to_db_event(event);
             db_event.insert(db_event.begin(), Database::ElementType{id});
             db.update_row(event_table_name, db_event);
+            db.store_table_caches();
             const auto updated_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
-            return db_events_to_json_events(updated_event)[0];  // [0] is needed to unpack the 1 sized array
+            return db_events_to_json_events(updated_event)[0]; // [0] is needed to unpack the 1 sized array
         }
-        catch(const std::exception& e)
+        catch (const std::exception &e)
         {
             return nlohmann::json({"error", e.what()});
         }
@@ -122,10 +123,28 @@ namespace database_util
                 return nlohmann::json{{"error", "The user is now permitted to see this event"}};
             return event;
         }
-        catch (const std::exception& e)
+        catch (const std::exception &e)
         {
             return nlohmann::json{{"error", e.what()}};
         }
         return nlohmann::json{{"error", log_msg("Some other error occured")}};
+    }
+
+    nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id)
+    {
+        try
+        {
+            const auto e = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
+            if (std::get<std::vector<std::string>>(e[5])[0] != person && person != admin_name)
+                return nlohmann::json{{"error", "Only the creator of the event and the admin can destroy the element"}};
+            db.delete_row(event_table_name, id);
+            db.store_table_caches();
+            return nlohmann::json{{"success", "The element was successfully deleted"}};
+        }
+        catch (const std::exception &e)
+        {
+            return nlohmann::json({"error", e.what()});
+        }
+        return nlohmann::json({"error", log_msg("Should not get here")});
     }
 }

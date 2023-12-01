@@ -116,6 +116,12 @@ int main() {
         auto result = database_util::update_event(event_database, event);
         return result.dump();
     });
+    CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &event_database](const crow::request& req, uint64_t id){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        const auto result = database_util::delete_event(event_database, username, id);
+        return result.dump();
+    });
     
     const auto overview_page = crow::mustache::load("overview.html");
     CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){

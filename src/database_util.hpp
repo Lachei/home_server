@@ -24,4 +24,6 @@ namespace database_util
     // ot see the event
     // else returns an empty object
     nlohmann::json get_event(Database &db, std::string_view person, uint64_t id);
+
+    nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id);
 }
