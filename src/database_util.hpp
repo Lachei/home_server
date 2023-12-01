@@ -5,6 +5,8 @@
 namespace database_util
 {
     static constexpr std::string_view event_table_name = "events";
+    static constexpr std::string_view active_timeclock_table_name = "active_timeclocks";
+    static constexpr std::string_view finished_timeclock_table_name = "finished_time_clocks";
 
     void setup_event_table(Database &database);
 
@@ -26,4 +28,6 @@ namespace database_util
     nlohmann::json get_event(Database &db, std::string_view person, uint64_t id);
 
     nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id);
+
+    void setup_timeclock_tables(Database &database);
 }

@@ -9,6 +9,14 @@ static Database::Table::ColumnInfos event_infos{
     .column_names = {"id", "title", "description", "start_time", "end_time", "creator", "people", "people_status", "visibility", "expected_hours", "progress"},
     .column_types = {t<uint64_t>, t<std::string>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<std::string>, t<std::string>, t<std::string>, t<double>, t<double>},
     .id_column = 0};
+static Database::Table::ColumnInfos active_timeclock_infos {
+    .column_names = {"user", "start_time"},
+    .column_types = {t<std::string>, t<Date>},
+    .id_column = 0};
+static Database::Table::ColumnInfos finished_timeclock_infos {
+    .column_names = {"id", "user", "start_time", "end_time", "visibility", "original_start_time", "original_end_time"},
+    .column_types = {t<uint64_t>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<Date>, t<Date>},
+    .id_column = 0};
 
 std::vector<Database::ElementType> json_event_to_db_event(const nlohmann::json &event)
 {
@@ -146,5 +154,14 @@ namespace database_util
             return nlohmann::json({"error", e.what()});
         }
         return nlohmann::json({"error", log_msg("Should not get here")});
+    }
+
+    void setup_timeclock_tables(Database &database)
+    {
+        assert(active_timeclock_infos.column_names.size() == active_timeclock_infos.column_types.size());
+        assert(finished_timeclock_infos.column_names.size() == finished_timeclock_infos.column_types.size());
+
+        database.create_table(active_timeclock_table_name, active_timeclock_infos);
+        database.create_table(finished_timeclock_table_name, finished_timeclock_infos);
     }
 }

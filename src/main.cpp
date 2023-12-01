@@ -24,8 +24,9 @@ int main() {
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
-    Database event_database("data/events");
-    database_util::setup_event_table(event_database);
+    Database database("data/events");
+    database_util::setup_event_table(database);
+    database_util::setup_timeclock_tables(database);
 
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){
@@ -76,19 +77,19 @@ int main() {
         return ret.dump();
     });
     
-    CROW_ROUTE(app, "/get_events")([&credentials, &event_database](const crow::request& req){
+    CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        auto events = database_util::get_events(event_database, username);
+        auto events = database_util::get_events(database, username);
         return events.dump();
     });
-    CROW_ROUTE(app, "/get_event/<int>")([&credentials, &event_database](const crow::request& req, uint64_t event_id){
+    CROW_ROUTE(app, "/get_event/<int>")([&credentials, &database](const crow::request& req, uint64_t event_id){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        auto event = database_util::get_event(event_database, username, event_id);
+        auto event = database_util::get_event(database, username, event_id);
         return event.dump();
     });
-    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &event_database](const crow::request& req){
+    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
         
         try{
@@ -97,7 +98,7 @@ int main() {
             if (creator != username && username != admin_name)
                 return nlohmann::json{{"error", "can not create event for other users, only admin can do that"}}.dump();
                 
-            auto result = database_util::add_event(event_database, event);
+            auto result = database_util::add_event(database, event);
             return result.dump();
         } catch(nlohmann::json::parse_error e){
             return nlohmann::json{{"error", e.what()}}.dump();
@@ -105,7 +106,7 @@ int main() {
         
         return std::string{};
     });
-    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &event_database](const crow::request& req){
+    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
         const auto& event = nlohmann::json::parse(req.body);
@@ -113,13 +114,13 @@ int main() {
         if (creator != username && username != admin_name)
             return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
         
-        auto result = database_util::update_event(event_database, event);
+        auto result = database_util::update_event(database, event);
         return result.dump();
     });
-    CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &event_database](const crow::request& req, uint64_t id){
+    CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &database](const crow::request& req, uint64_t id){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        const auto result = database_util::delete_event(event_database, username, id);
+        const auto result = database_util::delete_event(database, username, id);
         return result.dump();
     });
     
