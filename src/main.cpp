@@ -26,7 +26,7 @@ int main() {
     Credentials credentials("credentials/cred.json");
     Database database("data/events");
     database_util::setup_event_table(database);
-    database_util::setup_timeclock_tables(database);
+    database_util::setup_shift_tables(database);
 
     // ------------------------------------------------------------------------------------------------
     // Login/authentication
@@ -136,20 +136,35 @@ int main() {
     CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        if (username != user || username != admin_name)
+        if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not begin shift for another user, only admin can do that"}}.dump();
         
         auto result = database_util::start_shift(database, user);
         return result.dump();
     });
+    CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (username != user && username != admin_name)
+            return nlohmann::json{{"error", "can not check shift for another user, only admin can do that"}}.dump();
+        
+        auto result = database_util::check_active_shift(database, user);
+        return result.dump();
+    });
     CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database](const crow::request& req, const std::string& user){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        if (username != user || username != admin_name)
+        if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
         
         const auto result = database_util::end_shift(database, user);
         return result.dump();
+    });
+    CROW_ROUTE(app, "/get_shifts")([&credentials, &database](const crow::request& req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        const auto res = database_util::get_shifts_grouped(database);
+        return res.dump();
     });
     
     // ------------------------------------------------------------------------------------------------

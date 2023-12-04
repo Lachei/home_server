@@ -548,13 +548,13 @@ Database::ElementType Database::get_free_id(std::string_view table) const
     return _tables.at(table_s)->get_free_id();
 }
 
-const std::vector<Database::ColumnType> &Database::get_table_data(std::string_view table)
+Database::ReadReference Database::get_table_data(std::string_view table)
 {
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
         throw std::runtime_error(log_msg("The table from which the data should be returned does not exist"));
-    return _tables.at(table_s)->loaded_data;
+    return ReadReference(_tables.at(table_s)->loaded_data, _mutex, _tables.at(table_s)->mutex);
 }
 
 void Database::insert_rows(std::string_view table, const std::span<ColumnType> &data)

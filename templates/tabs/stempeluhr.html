@@ -1,4 +1,20 @@
 <style>
+    table {
+        border-collapse: collapse;
+        width: 100%;
+    }
+
+    td,
+    th {
+        border: 1px solid #dddddd;
+        text-align: left;
+        padding: 8px;
+    }
+
+    tr:nth-child(even) {
+        background-color: #dddddd;
+    }
+
     #timeclock_buttons {
         display: grid;
         grid-template-columns: 50% 50%
@@ -21,39 +37,132 @@
         opacity: .9;
         cursor: default;
     }
+
+    .collapsible_header {
+        background-color: gray;
+        color: white;
+        cursor: pointer;
+        padding: 15px;
+        margin: 2px;
+        width: 100%;
+    }
+
+    .collapsible_active,
+    .collapsible_header:hover {
+        background-color: rgb(99, 98, 98);
+    }
+
+    .collapsible_contet {
+        margin-left: 5%;
+        display: none;
+        overflow: hidden;
+        background-color: rgb(240, 240, 240);
+    }
 </style>
 <div id="timeclock" class="user">
     <div id="timeclock_info_text">
-        <center>
+        <center id="shift_text">
             Derzeit keine Schicht offen
         </center>
     </div>
     <div id="timeclock_buttons">
         <div id="timeclock_start">
             <center>
-                <button class="timeclock_button" onclick="start_shift();">Schicht start</button>
+                <button id="shift_start" class="timeclock_button" onclick="start_shift();">Schicht start</button>
             </center>
         </div>
         <div id="timeclock_end">
             <center>
-                <button class="timeclock_button" disabled onclick="end_shift();">Schicht ende</button>
+                <button id="shift_end" class="timeclock_button" disabled onclick="end_shift();">Schicht ende</button>
             </center>
         </div>
     </div>
 </div>
 <div id="timeclock_admin" class="admin">
-    
+
+</div>
+<div id="shift_list">
+    Alle get&auml;tigten Arbeitszeiten:
+    <div id="shift_entries">
+    </div>
 </div>
 
-<script onload="setup_stempeluhr();">
-    function setup_stempeluhr(){
-
+<script>
+    function setup_stempeluhr() {
+        console.log("laoding shifts");
+        // getting all recorded shifts and displaying them
+        update_shifts_table();
+        update_shifts_text();
     }
     async function start_shift() {
-        
+        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res_json = await res.json();
+        if ("error" in res_json)
+            console.log(res_json.error);
+        else {
+            document.getElementById("shift_text").innerHtml = "Schicht läufft, start: " + res_json.start_time;
+            document.getElementById("shift_start").setAttribute("disabled", "");
+            document.getElementById("shift_end").removeAttribute("disabled");
+        }
     }
     async function end_shift() {
-        
+        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res_json = await res.json();
+        if ("error" in res_json)
+            console.log(res_json.error);
+        else {
+            document.getElementById("shift_text").innerHtml = "Derzeit keine Schicht offen";
+            document.getElementById("shift_start").removeAttribute("disabled");
+            document.getElementById("shift_end").setAttribute("disabled", "");
+            update_shifts_table();
+        }
+    }
+    async function update_shifts_table() {
+        let table_header = "<tr><th>Id</th> <th>Original Start</th><th>Original End</th><th>Start</th><th>End</th></tr>";
+        fetch(location.origin + "/get_shifts", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, })
+            .then(response => {
+                response.json().then(entries => {
+                    let user_shifts;
+                    for (let [user, shifts] of Object.entries(entries)) {
+                        // for each user we create a button and the collapsible list of items
+                        user_shifts += "<button class='collapsible_header' onclick='toggle_collapsible_content(this);'>" + user + "</button>";
+                        user_shifts += "<div class='collapsible_content><table>";
+                        user_shifts += table_header;
+                        for (let shift of shifts)
+                            user_shift += "<tr> <td>" + shift.id + "</td><td>" + shift.original_start_time + "</td><td>" + shift.original_end_time + "</td><td>" + shift.start_time + "</td><td>" + shift.end_time + "</tr>";
+                        user_shifts += "</table></div>";
+                    }
+                    document.getElementById("shift_entries").innerHtml = user_shifts;
+                });
+            });
+    }
+    async function update_shifts_text() {
+        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res_json = await res.json();
+        if ("error" in res_json)
+            console.log(res_json.error);
+        else {
+            if (res_json.shift_status === "active") {
+                document.getElementById("shift_text").innerHtml = "Schicht läufft, start: " + res_json.start_time;
+                document.getElementById("shift_start").setAttribute("disabled", "");
+                document.getElementById("shift_end").removeAttribute("disabled");
+            }
+            else {
+                document.getElementById("shift_text").innerHtml = "Derzeit keine Schicht offen";
+                document.getElementById("shift_start").removeAttribute("disabled");
+                document.getElementById("shift_end").setAttribute("disabled", "");
+            }
+        }
     }
 
+    function toggle_collapsible_content(header) {
+        header.classList.toggle("active_collapsible");
+        let content = header.nextElementSibling;
+        if (content.style.display === "block")
+            content.style.display = "none";
+        else
+            content.style.display = "block";
+    }
+
+    setup_stempeluhr();
 </script>

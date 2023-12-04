@@ -74,7 +74,7 @@ inline std::optional<std::pair<std::string_view, std::string_view>> extract_cred
 
 inline std::string log_msg(std::string_view message, const std::source_location &loc = std::source_location::current())
 {
-    return std::string(loc.file_name()) + ": " + std::to_string(loc.line()) + "| " + std::string(message);
+    return std::string(loc.file_name()) + ": " + std::to_string(loc.line()) + " | " + std::string(message);
 }
 
 #define DATE_FORMAT "%Y-%m-%d %T"

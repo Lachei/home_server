@@ -232,6 +232,18 @@ public:
         uint32_t _num_columns() const { return column_infos.column_names.size(); }
         void _create_index() const;
     };
+    
+    class ReadReference{
+    public:
+        ReadReference(const std::vector<ColumnType> &data, std::shared_mutex &db_mutex, std::shared_mutex &table_mutex): 
+            _table_data(data), _db_lock(db_mutex), _table_lock(table_mutex) {}
+        const std::vector<ColumnType> &operator*() const { return _table_data; }
+        const std::vector<ColumnType>* operator->() const { return &_table_data; }
+
+    private:
+        const std::vector<ColumnType> &_table_data;
+        std::shared_lock<std::shared_mutex> _db_lock, _table_lock;
+    };
 
     Database(std::string_view storage_location);
     ~Database() { store_table_caches(); }
@@ -246,7 +258,7 @@ public:
     void delete_row(std::string_view table, const ElementType &id);
     void delete_rows(std::string_view table, const std::span<ElementType> &ids);
     void update_row(std::string_view table, const std::span<ElementType> row);
-    const std::vector<ColumnType> &get_table_data(std::string_view table);
+    ReadReference get_table_data(std::string_view table);
     bool contains(std::string_view table, const ElementType& id) const;
     std::vector<ColumnType> query_database(const QueryType& query) const;
 

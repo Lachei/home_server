@@ -31,7 +31,7 @@ int test_string_serialization()
 
 int test_js_time()
 {
-    const std::string_view date = "2023-11-30T18:00:00.000Z";
+    const std::string_view date = "2023-11-30T18:00:00.000000000Z";
     const auto t = from_json_date_string(date);
     const auto t_s = to_json_date_string(t);
     std::cout << date << " | " << t_s << std::endl;

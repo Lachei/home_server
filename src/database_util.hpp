@@ -5,8 +5,8 @@
 namespace database_util
 {
     static constexpr std::string_view event_table_name = "events";
-    static constexpr std::string_view active_timeclock_table_name = "active_timeclocks";
-    static constexpr std::string_view finished_timeclock_table_name = "finished_time_clocks";
+    static constexpr std::string_view active_shifts_table_name = "active_shifts";
+    static constexpr std::string_view finished_shifts_table_name = "finished_shifts";
 
     void setup_event_table(Database &database);
     // returns a json of the following form
@@ -25,7 +25,11 @@ namespace database_util
     nlohmann::json get_event(Database &db, std::string_view person, uint64_t id);
     nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id);
 
-    void setup_timeclock_tables(Database &database);
+    void setup_shift_tables(Database &database);
     nlohmann::json start_shift(Database &db, std::string_view person);
+    nlohmann::json check_active_shift(const Database &db, std::string_view person);
     nlohmann::json end_shift(Database &db, std::string_view person);
+    // returns the shifts in a json object which contains for each user a list of shifts that user
+    // has started and completed
+    nlohmann::json get_shifts_grouped(Database &db);
 }

@@ -90,8 +90,8 @@ int test_database_store_load(const int n = 100)
     try
     {
         Database test(test_folder);
-        const auto &loaded_data = test.get_table_data("test_table");
-        if (loaded_data != test_data)
+        const auto loaded_data = test.get_table_data("test_table");
+        if (*loaded_data != test_data)
             return result::bad_data_loaded;
     }
     catch (std::runtime_error e)

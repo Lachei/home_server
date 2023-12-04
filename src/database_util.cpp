@@ -1,6 +1,7 @@
 #include "database_util.hpp"
 #include "AdminCredentials.hpp"
 #include "string_split.hpp"
+#include "robin_hood/robin_hood.h"
 
 template <typename T>
 static const std::string t = std::string(Database::column_type_name_v<T>);
@@ -9,11 +10,11 @@ static Database::Table::ColumnInfos event_infos{
     .column_names = {"id", "title", "description", "start_time", "end_time", "creator", "people", "people_status", "visibility", "expected_hours", "progress"},
     .column_types = {t<uint64_t>, t<std::string>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<std::string>, t<std::string>, t<std::string>, t<double>, t<double>},
     .id_column = 0};
-static Database::Table::ColumnInfos active_timeclock_infos{
+static Database::Table::ColumnInfos active_shifts_infos{
     .column_names = {"user", "start_time"},
     .column_types = {t<std::string>, t<Date>},
     .id_column = 0};
-static Database::Table::ColumnInfos finished_timeclock_infos{
+static Database::Table::ColumnInfos finished_shifts_infos{
     .column_names = {"id", "user", "start_time", "end_time", "visibility", "original_start_time", "original_end_time"},
     .column_types = {t<uint64_t>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<Date>, t<Date>},
     .id_column = 0};
@@ -60,6 +61,10 @@ nlohmann::json db_events_to_json_events(std::span<const Database::ColumnType> ev
 nlohmann::json db_active_shift_to_json(const std::array<Database::ElementType, 2> &shift)
 {
     return nlohmann::json{{"user", std::get<std::string>(shift[0])}, {"start_time", to_json_date_string(std::get<Date>(shift[1]))}};
+}
+nlohmann::json db_active_shift_to_json(const std::vector<Database::ColumnType> &shift)
+{
+    return nlohmann::json{{"user", std::get<std::vector<std::string>>(shift[0])[0]}, {"start_time", to_json_date_string(std::get<std::vector<Date>>(shift[1])[0])}};
 }
 
 namespace database_util
@@ -161,24 +166,24 @@ namespace database_util
         return nlohmann::json({"error", log_msg("Should not get here")});
     }
 
-    void setup_timeclock_tables(Database &database)
+    void setup_shift_tables(Database &database)
     {
-        assert(active_timeclock_infos.column_names.size() == active_timeclock_infos.column_types.size());
-        assert(finished_timeclock_infos.column_names.size() == finished_timeclock_infos.column_types.size());
+        assert(active_shifts_infos.column_names.size() == active_shifts_infos.column_types.size());
+        assert(finished_shifts_infos.column_names.size() == finished_shifts_infos.column_types.size());
 
-        database.create_table(active_timeclock_table_name, active_timeclock_infos);
-        database.create_table(finished_timeclock_table_name, finished_timeclock_infos);
+        database.create_table(active_shifts_table_name, active_shifts_infos);
+        database.create_table(finished_shifts_table_name, finished_shifts_infos);
     }
 
     nlohmann::json start_shift(Database &db, std::string_view person)
     {
         const std::string person_s(person);
-        if (db.contains(active_timeclock_table_name, Database::ElementType{person_s}))
-            return nlohmann::json{{"error", "The user has already begun a shift"}};
         try
         {
+            if (db.contains(active_shifts_table_name, Database::ElementType{person_s}))
+                return nlohmann::json{{"error", "The user has already begun a shift"}};
             std::array<Database::ElementType, 2> row{person_s, std::chrono::utc_clock::now()};
-            db.insert_row(active_timeclock_table_name, row);
+            db.insert_row(active_shifts_table_name, row);
             return db_active_shift_to_json(row);
         }
         catch (const std::exception &e)
@@ -187,13 +192,79 @@ namespace database_util
         }
         return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
     }
-    
-    nlohmann::json end_shift(Database &db, std::string_view person)
+
+    nlohmann::json check_active_shift(const Database &db, std::string_view person)
     {
         const std::string person_s(person);
-        if (!db.contains(active_timeclock_table_name, Database::ElementType{person_s}))
-            return nlohmann::json{{"error", "The user has no active shift"}};
-        
+        try
+        {
+            if (db.contains(active_shifts_table_name, Database::ElementType{person_s})){
+                auto shift = db_active_shift_to_json(db.query_database(Database::IDQuery{std::string(active_shifts_table_name), person_s}));
+                shift["shift_status"] = "active";
+                return shift;
+            }
+
+            return nlohmann::json{{"shift_status", "inactive"}};
+        }
+        catch (const std::exception &e)
+        {
+            return nlohmann::json{{"error", e.what()}};
+        }
+        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+    }
+
+    nlohmann::json end_shift(Database &db, std::string_view person)
+    {
+        try
+        {
+            const std::string person_s(person);
+            if (!db.contains(active_shifts_table_name, Database::ElementType{person_s}))
+                return nlohmann::json{{"error", "The user has no active shift"}};
+        }
+        catch (const std::exception &e)
+        {
+            return nlohmann::json{{"error", e.what()}};
+        }
+        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+    }
+
+    nlohmann::json db_shift_to_json(const std::vector<Database::ColumnType> &data, uint64_t i)
+    {
+        return nlohmann::json{
+            {"id", std::get<std::vector<uint64_t>>(data[0])[i]},
+            {"user", std::get<std::vector<std::string>>(data[1])[i]},
+            {"start_time", to_json_date_string(std::get<std::vector<Date>>(data[2])[i])},
+            {"end_time", to_json_date_string(std::get<std::vector<Date>>(data[3])[i])},
+            {"visibility", std::get<std::vector<std::string>>(data[4])[i]},
+            {"original_start_time", to_json_date_string(std::get<std::vector<Date>>(data[5])[i])},
+            {"original_end_time", to_json_date_string(std::get<std::vector<Date>>(data[6])[i])}};
+    }
+
+    nlohmann::json get_shifts_grouped(Database &db)
+    {
+        try
+        {
+            const auto data = db.get_table_data(finished_shifts_table_name);
+            // grouping the data and then packing into json
+            robin_hood::unordered_map<std::string, std::vector<uint64_t>> entries_per_user;
+            const auto db_size = std::visit([](auto &&v)
+                                            { return v.size(); },
+                                            data->at(0));
+            const int32_t user_index = std::distance(finished_shifts_infos.column_names.begin(), std::ranges::find(finished_shifts_infos.column_names, "user"));
+            for (auto i : i_range(db_size))
+                entries_per_user[std::get<std::vector<std::string>>(data->at(user_index))[i]].emplace_back(i);
+
+            nlohmann::json ret = nlohmann::json::object();
+            for (const auto &[user, entries] : entries_per_user)
+                for (auto entry : entries)
+                    ret[user].get<std::vector<nlohmann::json>>().emplace_back(db_shift_to_json(*data, entry));
+
+            return ret;
+        }
+        catch (const std::exception &e)
+        {
+            return nlohmann::json{{"error", e.what()}};
+        }
         return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
     }
 }
