@@ -100,7 +100,7 @@
         if ("error" in res_json)
             console.log(res_json.error);
         else {
-            document.getElementById("shift_text").innerHtml = "Schicht läufft, start: " + res_json.start_time;
+            document.getElementById("shift_text").innerHTML = "Schicht läufft, start: " + res_json.start_time;
             document.getElementById("shift_start").setAttribute("disabled", "");
             document.getElementById("shift_end").removeAttribute("disabled");
         }
@@ -111,7 +111,7 @@
         if ("error" in res_json)
             console.log(res_json.error);
         else {
-            document.getElementById("shift_text").innerHtml = "Derzeit keine Schicht offen";
+            document.getElementById("shift_text").innerHTML = "Derzeit keine Schicht offen";
             document.getElementById("shift_start").removeAttribute("disabled");
             document.getElementById("shift_end").setAttribute("disabled", "");
             update_shifts_table();
@@ -132,7 +132,7 @@
                             user_shift += "<tr> <td>" + shift.id + "</td><td>" + shift.original_start_time + "</td><td>" + shift.original_end_time + "</td><td>" + shift.start_time + "</td><td>" + shift.end_time + "</tr>";
                         user_shifts += "</table></div>";
                     }
-                    document.getElementById("shift_entries").innerHtml = user_shifts;
+                    document.getElementById("shift_entries").innerHTML = user_shifts;
                 });
             });
     }
@@ -143,12 +143,12 @@
             console.log(res_json.error);
         else {
             if (res_json.shift_status === "active") {
-                document.getElementById("shift_text").innerHtml = "Schicht läufft, start: " + res_json.start_time;
+                document.getElementById("shift_text").innerHTML = "Schicht läufft, start: " + res_json.start_time;
                 document.getElementById("shift_start").setAttribute("disabled", "");
                 document.getElementById("shift_end").removeAttribute("disabled");
             }
             else {
-                document.getElementById("shift_text").innerHtml = "Derzeit keine Schicht offen";
+                document.getElementById("shift_text").innerHTML = "Derzeit keine Schicht offen";
                 document.getElementById("shift_start").removeAttribute("disabled");
                 document.getElementById("shift_end").setAttribute("disabled", "");
             }
