@@ -93,7 +93,6 @@
         <input id="ne_expected_hours" type="number" value="5">
     </div>
 </div>
-<script onload="setup();" src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js"></script>
 <script>
     let event_calendar = null;
     let cur_inspected_event = null;
@@ -110,7 +109,8 @@
             editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
         }
     }
-    async function setup() {
+    function setup_arbeitsplanung() {
+        console.log("setting things up");
         init_event_calendar();
         setup_event_input();
         setup_user_selections();
@@ -147,8 +147,6 @@
         });
     }
     async function create_new_event(event_infos) {
-        console.log(event_infos);
-
         let event_result = await fetch(location.origin + "/add_event",
             {
                 headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
@@ -343,3 +341,4 @@
         }
     }
 </script>
+<script onload="setup_arbeitsplanung();" onerror="console.log('error with script');" type="text/javascript" src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js" defer></script>

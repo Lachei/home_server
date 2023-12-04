@@ -22,7 +22,7 @@
         cursor: default;
     }
 </style>
-<div id="timeclock">
+<div id="timeclock" class="user">
     <div id="timeclock_info_text">
         <center>
             Derzeit keine Schicht offen
@@ -31,13 +31,29 @@
     <div id="timeclock_buttons">
         <div id="timeclock_start">
             <center>
-                <button class="timeclock_button" type="button">Schicht start</button>
+                <button class="timeclock_button" onclick="start_shift();">Schicht start</button>
             </center>
         </div>
         <div id="timeclock_end">
             <center>
-                <button class="timeclock_button" type="button" disabled>Schicht ende</button>
+                <button class="timeclock_button" disabled onclick="end_shift();">Schicht ende</button>
             </center>
         </div>
     </div>
 </div>
+<div id="timeclock_admin" class="admin">
+    
+</div>
+
+<script onload="setup_stempeluhr();">
+    function setup_stempeluhr(){
+
+    }
+    async function start_shift() {
+        
+    }
+    async function end_shift() {
+        
+    }
+
+</script>

@@ -173,7 +173,7 @@ public:
 
         private:
         } column_infos{};
-        robin_hood::unordered_map<ElementType, uint64_t> index; // lazily evaluated index which gets cleared upon data change
+        mutable robin_hood::unordered_map<ElementType, uint64_t> index; // lazily evaluated index which gets cleared upon data change
         mutable std::shared_mutex mutex;                        // is locked exclusive for insertion, deletion and cache writing, else is locked shared
         mutable std::shared_mutex index_mutex;                  // is locked exclusive upon building and clearing, else is locked shared
 
@@ -197,8 +197,8 @@ public:
         ElementType get_free_id() const;
         ColumnType get_free_ids(uint32_t num_ids) const;
 
-        void create_index();
-        void reset_index()
+        void create_index() const;
+        void reset_index() const
         {
             std::unique_lock lock(index_mutex);
             index.clear();
@@ -218,6 +218,8 @@ public:
 
         void update_row(const std::span<ElementType> row);
 
+        bool contains(const ElementType& id) const;
+
     private:
         size_t _num_rows() const
         {
@@ -228,7 +230,7 @@ public:
                               loaded_data[0]);
         }
         uint32_t _num_columns() const { return column_infos.column_names.size(); }
-        void _create_index();
+        void _create_index() const;
     };
 
     Database(std::string_view storage_location);
@@ -245,6 +247,7 @@ public:
     void delete_rows(std::string_view table, const std::span<ElementType> &ids);
     void update_row(std::string_view table, const std::span<ElementType> row);
     const std::vector<ColumnType> &get_table_data(std::string_view table);
+    bool contains(std::string_view table, const ElementType& id) const;
     std::vector<ColumnType> query_database(const QueryType& query) const;
 
 private:

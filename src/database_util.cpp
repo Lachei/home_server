@@ -9,11 +9,11 @@ static Database::Table::ColumnInfos event_infos{
     .column_names = {"id", "title", "description", "start_time", "end_time", "creator", "people", "people_status", "visibility", "expected_hours", "progress"},
     .column_types = {t<uint64_t>, t<std::string>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<std::string>, t<std::string>, t<std::string>, t<double>, t<double>},
     .id_column = 0};
-static Database::Table::ColumnInfos active_timeclock_infos {
+static Database::Table::ColumnInfos active_timeclock_infos{
     .column_names = {"user", "start_time"},
     .column_types = {t<std::string>, t<Date>},
     .id_column = 0};
-static Database::Table::ColumnInfos finished_timeclock_infos {
+static Database::Table::ColumnInfos finished_timeclock_infos{
     .column_names = {"id", "user", "start_time", "end_time", "visibility", "original_start_time", "original_end_time"},
     .column_types = {t<uint64_t>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<Date>, t<Date>},
     .id_column = 0};
@@ -55,6 +55,11 @@ nlohmann::json db_events_to_json_events(std::span<const Database::ColumnType> ev
         res[i]["progress"] = std::get<std::vector<double>>(events[10])[i];
     }
     return res;
+}
+
+nlohmann::json db_active_shift_to_json(const std::array<Database::ElementType, 2> &shift)
+{
+    return nlohmann::json{{"user", std::get<std::string>(shift[0])}, {"start_time", to_json_date_string(std::get<Date>(shift[1]))}};
 }
 
 namespace database_util
@@ -163,5 +168,32 @@ namespace database_util
 
         database.create_table(active_timeclock_table_name, active_timeclock_infos);
         database.create_table(finished_timeclock_table_name, finished_timeclock_infos);
+    }
+
+    nlohmann::json start_shift(Database &db, std::string_view person)
+    {
+        const std::string person_s(person);
+        if (db.contains(active_timeclock_table_name, Database::ElementType{person_s}))
+            return nlohmann::json{{"error", "The user has already begun a shift"}};
+        try
+        {
+            std::array<Database::ElementType, 2> row{person_s, std::chrono::utc_clock::now()};
+            db.insert_row(active_timeclock_table_name, row);
+            return db_active_shift_to_json(row);
+        }
+        catch (const std::exception &e)
+        {
+            return nlohmann::json{{"error", e.what()}};
+        }
+        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+    }
+    
+    nlohmann::json end_shift(Database &db, std::string_view person)
+    {
+        const std::string person_s(person);
+        if (!db.contains(active_timeclock_table_name, Database::ElementType{person_s}))
+            return nlohmann::json{{"error", "The user has no active shift"}};
+        
+        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
     }
 }

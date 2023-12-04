@@ -233,7 +233,7 @@ Database::ColumnType Database::Table::get_free_ids(uint32_t num_ids) const
                       loaded_data[column_infos.id_column]);
 }
 
-void Database::Table::create_index()
+void Database::Table::create_index() const
 {
     {
         std::shared_lock index_lock(index_mutex);
@@ -244,7 +244,7 @@ void Database::Table::create_index()
     _create_index();
 }
 
-void Database::Table::_create_index()
+void Database::Table::_create_index() const
 {
     if (index.size())
         return;
@@ -464,14 +464,28 @@ void Database::Table::update_row(const std::span<ElementType> row)
                        loaded_data[column_infos.id_column]);
     if (i >= _num_rows())
         throw std::runtime_error{log_msg("The index for the row to update was not found")};
-    
-    for (auto j: i_range(_num_columns()))
+
+    for (auto j : i_range(_num_columns()))
     {
-        std::visit([i, j, &row](auto&& v) {
-            using T = std::decay_t<decltype(v)>::value_type;
-            v[i] = std::get<T>(row[j]);
-        }, loaded_data[j]);
+        std::visit([i, j, &row](auto &&v)
+                   {
+                       using T = std::decay_t<decltype(v)>::value_type;
+                       v[i] = std::get<T>(row[j]);
+                   },
+                   loaded_data[j]);
     }
+}
+
+bool Database::Table::contains(const ElementType& id) const 
+{
+    {
+        std::shared_lock lock(mutex);
+        if (id.index() != loaded_data[column_infos.id_column].index())
+            throw std::runtime_error{log_msg("The id value has nothte same type as the id column of the tabel")};
+    }
+    std::shared_lock lock(mutex);
+    create_index();
+    return index.contains(id);
 }
 
 Database::Database(std::string_view storage_location) : _storage_location(storage_location)
@@ -606,6 +620,15 @@ void Database::update_row(std::string_view table, const std::span<ElementType> r
     _tables.at(table_s)->update_row(row);
 }
 
+bool Database::contains(std::string_view table, const ElementType &id) const
+{
+    std::shared_lock lock(_mutex);
+    const std::string table_s(table);
+    if (!_tables.contains(table_s))
+        throw std::runtime_error{log_msg("The table on which contains should be called does not exist")};
+    return _tables.at(table_s)->contains(id);
+}
+
 // ------------------------------------------------------------------------------------------------------
 // database queries
 // ------------------------------------------------------------------------------------------------------
@@ -674,6 +697,9 @@ std::vector<Database::ColumnType> Database::_query_database<database_internal::I
     std::shared_lock lock(table.mutex);
     if (table.index.empty())
         table.create_index();
+
+    if (!table.index.contains(query.id))
+        throw std::runtime_error{log_msg("The id searched for is not in the database")};
 
     auto row_idx = table.index.at(query.id);
     std::vector<ColumnType> res(table._num_columns());

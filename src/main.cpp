@@ -28,6 +28,9 @@ int main() {
     database_util::setup_event_table(database);
     database_util::setup_timeclock_tables(database);
 
+    // ------------------------------------------------------------------------------------------------
+    // Login/authentication
+    // ------------------------------------------------------------------------------------------------
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){
         return main_page_text;
@@ -77,6 +80,9 @@ int main() {
         return ret.dump();
     });
     
+    // ------------------------------------------------------------------------------------------------
+    // Event creation, editing, deletion, querying
+    // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
@@ -123,7 +129,32 @@ int main() {
         const auto result = database_util::delete_event(database, username, id);
         return result.dump();
     });
+
+    // ------------------------------------------------------------------------------------------------
+    // Shift editing
+    // ------------------------------------------------------------------------------------------------
+    CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (username != user || username != admin_name)
+            return nlohmann::json{{"error", "can not begin shift for another user, only admin can do that"}}.dump();
+        
+        auto result = database_util::start_shift(database, user);
+        return result.dump();
+    });
+    CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database](const crow::request& req, const std::string& user){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (username != user || username != admin_name)
+            return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
+        
+        const auto result = database_util::end_shift(database, user);
+        return result.dump();
+    });
     
+    // ------------------------------------------------------------------------------------------------
+    // General page loading
+    // ------------------------------------------------------------------------------------------------
     const auto overview_page = crow::mustache::load("overview.html");
     CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
         EXTRACT_CREDENTIALS(req);
