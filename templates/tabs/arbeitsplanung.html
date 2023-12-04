@@ -39,8 +39,7 @@
 <div id="main_time_view">
     <div id="timetable"></div>
     <div id="inspector">
-        <a class="close_x"
-            onclick="hide_inspector()">x</a>
+        <a class="close_x" onclick="hide_inspector()">x</a>
         <p><b>Event Details</b></p>
         <div id="inspector_content"></div>
         <hr>
@@ -107,6 +106,31 @@
     let cur_inspected_event = null;
     let inspector_observer = new MutationObserver(inspector_observer_callback);
     let inspector_observer_config = { childList: true, subtree: true };
+    function generateDivergingColors(numColors) {
+        const baseColor1 = [44, 160, 44]; // Greenish color
+        const baseColor2 = [214, 39, 40]; // Reddish color
+
+        const colorTable = [];
+
+        for (let i = 0; i < numColors; i++) {
+            const ratio = i / (numColors - 1);
+            const color = [
+                Math.floor(baseColor1[0] + ratio * (baseColor2[0] - baseColor1[0])),
+                Math.floor(baseColor1[1] + ratio * (baseColor2[1] - baseColor1[1])),
+                Math.floor(baseColor1[2] + ratio * (baseColor2[2] - baseColor1[2])),
+            ];
+
+            // Convert RGB to hex
+            const hexColor = `#${color.map(c => c.toString(16).padStart(2, '0')).join('')}`;
+
+            colorTable.push(hexColor);
+        }
+
+        return colorTable;
+    }
+
+    const numColors = 23;
+    const divergingColors = generateDivergingColors(numColors);
     function db_event_to_cal_event(e) {
         return {
             id: e.id,
@@ -116,10 +140,10 @@
             end: new Date(e.end_time),
             title: e.title,
             editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
+            backgroundColor: divergingColors[e.creator.hashCode() % numColors],
         }
     }
     function setup_arbeitsplanung() {
-        console.log("setting things up");
         init_event_calendar();
         setup_event_input();
         setup_user_selections();
@@ -128,7 +152,7 @@
         // loading events
 
         let server_events = await fetch(location.origin + "/get_events",
-            { headers: { "credentials": location.search.substr(window.location.search.indexOf("=") + 1) } });
+            { headers: { "credentials": user_credentials } });
         let events = await server_events.json();
 
         // parsing the events to event calendar format
@@ -136,6 +160,7 @@
         for (e of events) {
             parsed_events.push(db_event_to_cal_event(e));
         }
+        console.log(parsed_events[0].backgroundColor);
 
         event_calendar = new EventCalendar(document.getElementById("timetable"), {
             view: 'timeGridWeek',
@@ -158,7 +183,7 @@
     async function create_new_event(event_infos) {
         let event_result = await fetch(location.origin + "/add_event",
             {
-                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+                headers: { "credentials": user_credentials },
                 method: "POST",
                 body: JSON.stringify(event_infos)
             });
@@ -169,7 +194,7 @@
             event_calendar.addEvent(db_event_to_cal_event(event_result_json));
     }
     async function setup_user_selections() {
-        let users = await fetch(location.origin + "/get_all_users", { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
+        let users = await fetch(location.origin + "/get_all_users", { headers: { "credentials": user_credentials } });
         users = await users.json();
         const create_selector = (id, contains_all) => {
             let select = document.getElementById("side_select");
@@ -245,7 +270,7 @@
         }
     }
     async function get_event(id) {
-        let e = await fetch(location.origin + "/get_event/" + id, { headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) }, });
+        let e = await fetch(location.origin + "/get_event/" + id, { headers: { "credentials": user_credentials } });
         return await e.json();
     }
     async function show_event_in_inspector(info, force_update = false) {
@@ -300,14 +325,14 @@
         }
     }
     function hide_inspector() {
-        document.getElementById("inspector").style.display = 'none'; 
-        cur_inspected_event = null; 
+        document.getElementById("inspector").style.display = 'none';
+        cur_inspected_event = null;
         inspector_observer.disconnect();
     }
     async function update_event(event) {
         let res = await fetch(location.origin + "/update_event",
             {
-                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+                headers: { "credentials": user_credentials },
                 method: "POST",
                 body: JSON.stringify(event),
             });
@@ -339,15 +364,16 @@
     async function delete_event(id) {
         let res = await fetch(location.origin + "/delete_event/" + id,
             {
-                headers: { "credentials": location.search.substring(location.search.indexOf("=") + 1) },
+                headers: { "credentials": user_credentials }
             });
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json);
-        else{
+        else {
             hide_inspector();
             event_calendar.removeEventById(id);
         }
     }
 </script>
-<script onload="setup_arbeitsplanung();" onerror="console.log('error with script');" type="text/javascript" src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js" defer></script>
+<script onload="setup_arbeitsplanung();" onerror="console.log('error with script');" type="text/javascript"
+    src="https://cdn.jsdelivr.net/npm/@event-calendar/build/event-calendar.min.js" defer></script>

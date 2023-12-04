@@ -49,36 +49,6 @@
   </style>
 
   <script type="text/javascript" src="sha256.js"></script>
-  <script>
-    let errors;
-    let username;
-    let password;
-    window.onload = function () {
-      if(window.location.search.length !== 0)
-        window.location.replace(window.location.origin);
-      errors = document.getElementById("errors");
-      username = document.getElementById("uname");
-      password = document.getElementById("password");
-    };
-
-    const login = function () {
-      // first get salt
-      fetch(window.location.pathname + "get_salt/" + username.value).then(response => {
-        response.text().then(text => {
-          if (text.length === 0)
-            errors.innerHTML = "Benutzer ist nicht bekannt. Vertippt?";
-          else {
-            errors.innerHTML = "";
-            console.log(text);
-            let sha = sha256(password.value + text);
-            console.log(sha);
-            window.location = window.location.pathname + "overview?credentials=" + username.value + ":" + sha;
-          }
-        })
-      });
-    };
-
-  </script>
 </head>
 
 <body>
@@ -87,14 +57,51 @@
     <div id="errors" class="errors">
 
     </div>
-    <label for="uname"><b>Benutzername</b></label>
-    <input id="uname" type="text" placeholder="Benutzernamen" name="uname" required>
+    <form id="login_form" method="post" action="/overview">
+      <label for="uname"><b>Benutzername</b></label>
+      <input id="uname" type="text" placeholder="Benutzernamen" name="uname" required>
 
-    <label for="password"><b>Passwort</b></label>
-    <input id="password" type="password" placeholder="Passwort" name="psw" required>
+      <label for="password"><b>Passwort</b></label>
+      <input id="password" type="password" placeholder="Passwort" name="psw" required>
 
-    <button onclick="login()">Login</button>
+      <button type="submit">Login</button>
+    </form>
   </div>
 </body>
+
+<script>
+  let errors;
+  let username;
+  let password;
+  window.onload = function () {
+    if (window.location.pathname != "/")
+      window.location = window.origin;
+    errors = document.getElementById("errors");
+    username = document.getElementById("uname");
+    password = document.getElementById("password");
+    document.getElementById("login_form").addEventListener("submit", (e) => {e.preventDefault(); login();});
+  };
+
+  const login = function () {
+    // first get salt
+    fetch(window.location.pathname + "get_salt/" + username.value).then(response => {
+      response.text().then(text => {
+        if (text.length === 0)
+          errors.innerHTML = "Benutzer ist nicht bekannt. Vertippt?";
+        else {
+          errors.innerHTML = "";
+          console.log(text);
+          let sha = sha256(password.value + text);
+          password.value = sha;
+          console.log(sha);
+          //window.location = window.location.pathname + "overview?credentials=" + username.value + ":" + sha;
+          document.getElementById("login_form").submit();
+          password.value = "";
+        }
+      })
+    });
+  };
+
+</script>
 
 </html>

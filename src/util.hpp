@@ -3,16 +3,19 @@
 #include <optional>
 #include <source_location>
 #include <chrono>
+#include <filesystem>
 
 #include "crow/crow.h"
 #include "date.h"
 #include "string_view_stream.hpp"
 
-#define EXTRACT_CREDENTIALS(req)                        \
+#define EXTRACT_CREDENTIALS_T(req, ret_type)            \
     auto req_creds = extract_credentials_from_req(req); \
     if (!req_creds)                                     \
-        return std::string("Credentials missing");      \
+        return ret_type{"Credentials missing"};         \
     auto [username, sha] = *req_creds;
+
+#define EXTRACT_CREDENTIALS(req) EXTRACT_CREDENTIALS_T(req, std::string)
 
 #define EXTRACT_CHECK_CREDENTIALS(req, credentials)                \
     auto req_creds = extract_credentials_from_req(req);            \
@@ -55,21 +58,26 @@ inline std::pair<std::string_view, std::string_view> extract_credentials(std::st
 
 inline std::optional<std::pair<std::string_view, std::string_view>> extract_credentials_from_req(const crow::request &req)
 {
-    std::string_view creds;
-    auto cred = req.headers.find("credentials");
-    if (cred == req.headers.end())
+    if (std::filesystem::path(req.url).filename().string() == "overview")
     {
-        if (std::ranges::count(req.url_params.keys(), "credentials"))
-        {
-            creds = req.url_params.get("credentials");
-        }
-        else
+        auto body_view = std::string_view(req.body);
+        if (body_view.empty())
             return {};
+        auto uname_start = body_view.find("uname=") + sizeof("uname");
+        auto uname_end = body_view.find('&', uname_start);
+        auto uname = body_view.substr(uname_start, uname_end - uname_start);
+        auto pwd = body_view.substr(body_view.find("psw=", uname_end) + sizeof("psw"));
+        return std::optional{std::pair{uname, pwd}};
     }
     else
-        creds = cred->second;
-
-    return std::optional{extract_credentials(creds)};
+    {
+        auto cred = req.headers.find("credentials");
+        if (cred != req.headers.end())
+        {
+            return std::optional{extract_credentials(cred->second)};
+        }
+    }
+    return {};
 }
 
 inline std::string log_msg(std::string_view message, const std::source_location &loc = std::source_location::current())

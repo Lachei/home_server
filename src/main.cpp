@@ -171,9 +171,10 @@ int main() {
     // General page loading
     // ------------------------------------------------------------------------------------------------
     const auto overview_page = crow::mustache::load("overview.html");
-    CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
+    CROW_ROUTE(app, "/overview").methods("POST"_method, "GET"_method)([&credentials, &main_page_text, &overview_page](const crow::request& req){
         EXTRACT_CREDENTIALS(req);
         
+        crow::response res;
         if (!credentials.check_credential(std::string(username), sha)){
             CROW_LOG_INFO << "Credential check failed for username " << username << ':' << sha;
             return main_page_text;
@@ -182,6 +183,7 @@ int main() {
         bool is_admin = username == admin_name;
         using op = std::pair<std::string const, crow::json::wvalue>;
         crow::mustache::context crow_context{};
+        crow_context["user_credentials"] = std::string(username) + ":" + std::string(sha);
         if (is_admin) {
             crow_context["benutzername"] = "admin";
             crow_context["user_specific_css"] = "admin.css";

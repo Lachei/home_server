@@ -184,6 +184,7 @@ namespace database_util
                 return nlohmann::json{{"error", "The user has already begun a shift"}};
             std::array<Database::ElementType, 2> row{person_s, std::chrono::utc_clock::now()};
             db.insert_row(active_shifts_table_name, row);
+            db.store_table_caches();
             return db_active_shift_to_json(row);
         }
         catch (const std::exception &e)
@@ -220,6 +221,16 @@ namespace database_util
             const std::string person_s(person);
             if (!db.contains(active_shifts_table_name, Database::ElementType{person_s}))
                 return nlohmann::json{{"error", "The user has no active shift"}};
+            const auto shift_start = db.query_database(Database::IDQuery{std::string(active_shifts_table_name), person_s});
+            db.delete_row(active_shifts_table_name, person_s);
+            const auto original_start_time = std::get<std::vector<Date>>(shift_start[1])[0];
+            const auto original_end_time = std::chrono::utc_clock::now();
+            const auto start_time = std::chrono::round<std::chrono::minutes>(original_start_time);
+            const auto end_time = std::chrono::round<std::chrono::minutes>(original_end_time);
+            std::vector<Database::ElementType> row{person_s, start_time, end_time, "[Alle]", original_start_time, original_end_time};
+            const auto res = db.insert_row_without_id(finished_shifts_table_name, row);
+            db.store_table_caches();
+            return nlohmann::json{{"status", "success"}};
         }
         catch (const std::exception &e)
         {
@@ -257,7 +268,7 @@ namespace database_util
             nlohmann::json ret = nlohmann::json::object();
             for (const auto &[user, entries] : entries_per_user)
                 for (auto entry : entries)
-                    ret[user].get<std::vector<nlohmann::json>>().emplace_back(db_shift_to_json(*data, entry));
+                    ret[user].push_back(db_shift_to_json(*data, entry));
 
             return ret;
         }

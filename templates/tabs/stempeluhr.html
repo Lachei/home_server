@@ -45,14 +45,15 @@
         padding: 15px;
         margin: 2px;
         width: 100%;
+        text-align: left;
     }
 
     .collapsible_active,
     .collapsible_header:hover {
-        background-color: rgb(99, 98, 98);
+        background-color: rgb(57, 57, 57);
     }
 
-    .collapsible_contet {
+    .collapsible_content {
         margin-left: 5%;
         display: none;
         overflow: hidden;
@@ -81,6 +82,7 @@
 <div id="timeclock_admin" class="admin">
 
 </div>
+<hr>
 <div id="shift_list">
     Alle get&auml;tigten Arbeitszeiten:
     <div id="shift_entries">
@@ -89,47 +91,44 @@
 
 <script>
     function setup_stempeluhr() {
-        console.log("laoding shifts");
         // getting all recorded shifts and displaying them
         update_shifts_table();
         update_shifts_text();
     }
     async function start_shift() {
-        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
-        else {
-            document.getElementById("shift_text").innerHTML = "Schicht läufft, start: " + res_json.start_time;
-            document.getElementById("shift_start").setAttribute("disabled", "");
-            document.getElementById("shift_end").removeAttribute("disabled");
-        }
+        else 
+            update_shifts_text();
     }
     async function end_shift() {
-        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
         else {
-            document.getElementById("shift_text").innerHTML = "Derzeit keine Schicht offen";
-            document.getElementById("shift_start").removeAttribute("disabled");
-            document.getElementById("shift_end").setAttribute("disabled", "");
+            update_shifts_text();
             update_shifts_table();
         }
     }
+    function shift_table_date(date) {
+        return new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric', year: 'numeric', hour:'numeric', minute:'numeric'}).format(new Date(Date.parse(date)));
+    };
     async function update_shifts_table() {
-        let table_header = "<tr><th>Id</th> <th>Original Start</th><th>Original End</th><th>Start</th><th>End</th></tr>";
-        fetch(location.origin + "/get_shifts", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, })
+        let table_header = "<tr><th>Id</th> <th>Genauer Start</th><th>Geanues Ende</th><th>Start</th><th>Ende</th></tr>";
+        fetch(location.origin + "/get_shifts", { headers: { credentials: user_credentials}})
             .then(response => {
                 response.json().then(entries => {
-                    let user_shifts;
+                    let user_shifts = "";
                     for (let [user, shifts] of Object.entries(entries)) {
                         // for each user we create a button and the collapsible list of items
                         user_shifts += "<button class='collapsible_header' onclick='toggle_collapsible_content(this);'>" + user + "</button>";
-                        user_shifts += "<div class='collapsible_content><table>";
+                        user_shifts += "<div class='collapsible_content'><table>";
                         user_shifts += table_header;
                         for (let shift of shifts)
-                            user_shift += "<tr> <td>" + shift.id + "</td><td>" + shift.original_start_time + "</td><td>" + shift.original_end_time + "</td><td>" + shift.start_time + "</td><td>" + shift.end_time + "</tr>";
+                            user_shifts += "<tr> <td>" + shift.id + "</td><td>" + shift_table_date(shift.original_start_time) + "</td><td>" + shift_table_date(shift.original_end_time) + "</td><td>" + shift_table_date(shift.start_time) + "</td><td>" + shift_table_date(shift.end_time) + "</td></tr>";
                         user_shifts += "</table></div>";
                     }
                     document.getElementById("shift_entries").innerHTML = user_shifts;
@@ -137,13 +136,13 @@
             });
     }
     async function update_shifts_text() {
-        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: location.search.substring(location.search.indexOf("=") + 1) }, });
+        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
         else {
             if (res_json.shift_status === "active") {
-                document.getElementById("shift_text").innerHTML = "Schicht läufft, start: " + res_json.start_time;
+                document.getElementById("shift_text").innerHTML = "Schicht läufft seit: " + shift_table_date(res_json.start_time);
                 document.getElementById("shift_start").setAttribute("disabled", "");
                 document.getElementById("shift_end").removeAttribute("disabled");
             }

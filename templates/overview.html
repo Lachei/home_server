@@ -43,9 +43,9 @@
         button:hover {
             opacity: 0.8;
         }
-        
+
         .p_title {
-            margin : 5px;
+            margin: 5px;
         }
 
         .container {
@@ -94,6 +94,7 @@
             border-bottom-color: blue;
             border-bottom-width: 5px;
         }
+
         .inset {
             margin-left: 5%;
         }
@@ -138,7 +139,8 @@
         <div class="tab">
             <button id="Arbeitsplanungbutton" class="tablinks tabactive"
                 onclick="openTab(event, 'Arbeitsplanung')"><b>Arbeitsplanung</b></button>
-            <button id="Stempeluhrbutton" class="tablinks" onclick="openTab(event, 'Stempeluhr')"><b>Stempeluhr</b></button>
+            <button id="Stempeluhrbutton" class="tablinks"
+                onclick="openTab(event, 'Stempeluhr')"><b>Stempeluhr</b></button>
             <button id="Datenbutton" class="tablinks" onclick="openTab(event, 'Daten')"><b>Daten</b></button>
             <button id="Einstellungenbutton" class="tablinks"
                 onclick="openTab(event, 'Einstellungen')"><b>Einstellungen</b></button>
@@ -149,7 +151,8 @@
         <div id="Daten" class="tabcontent" content="/tabs/daten.html"> </div>
         <div id="Einstellungen" class="tabcontent" content="/tabs/einstellungen.html"> </div>
     </div>
-    <script defer>
+    <script>
+        globalThis.user_credentials = "{{user_credentials}}";
         function reattach_script(script_node) {
             let new_script_node = document.createElement("script");
             new_script_node.innerHTML = script_node.innerHTML;
@@ -160,7 +163,7 @@
         let tabcontents = [...document.getElementsByClassName("tabcontent")];
         Promise.all(tabcontents.map(e => fetch(window.location.origin + e.attributes["content"].value)))
             .then(contents => {
-                for(let i = 0; i < tabcontents.length; ++i) {
+                for (let i = 0; i < tabcontents.length; ++i) {
                     contents[i].text().then(t => {
                         // replacing all instances of username in t
                         tabcontents[i].innerHTML = t.replaceAll("{" + "{benutzername}}", parent_uname);
@@ -171,6 +174,18 @@
                     });
                 }
             });
+
+        String.prototype.hashCode = function () {
+            var hash = 0,
+                i, chr;
+            if (this.length === 0) return hash;
+            for (i = 0; i < this.length; i++) {
+                chr = this.charCodeAt(i);
+                hash = ((hash << 5) - hash) + chr;
+                hash |= 0; // Convert to 32bit integer
+            }
+            return hash;
+        }
     </script>
 </body>
 
