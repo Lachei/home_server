@@ -135,3 +135,12 @@ inline std::string_view json_array_to_comma_list(std::string_view arr)
         arr = arr.substr(0, arr.size() - 1);
     return arr;
 }
+
+namespace std::ranges
+{
+    template <typename T, typename E>
+    inline bool contains(T range, E v)
+    {
+        return std::ranges::find(range, v) != range.end();
+    }
+}

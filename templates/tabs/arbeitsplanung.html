@@ -14,7 +14,7 @@
         display: grid;
         grid-template-columns: 1fr auto;
     }
-    
+
     #timetable {
         overflow: auto;
     }
@@ -30,7 +30,7 @@
         border-radius: 5px;
         background-color: black;
     }
-    
+
     .inspector {
         display: none;
         width: 30vw;
@@ -49,7 +49,7 @@
         <hr>
         <p><b>Event Aktionen</b></p>
         <div id="inspector_event_actions">
-            <button class="delete_button" onclick="delete_event(cur_inspected_event)">Event l&ouml;schen</button>
+            <button id="ins_event_delete_b" class="delete_button" onclick="delete_event(cur_inspected_event)">Event l&ouml;schen</button>
         </div>
     </div>
 </div>
@@ -111,7 +111,7 @@
     let inspector_observer = new MutationObserver(inspector_observer_callback);
     let inspector_observer_config = { childList: true, subtree: true };
     function generateDivergingColors() {
-        const colorTable = ['#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928'];
+        const colorTable = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928'];
 
         return colorTable;
     }
@@ -270,6 +270,7 @@
         if ("error" in event)
             console.log(event["error"]);
         else {
+            let allowed_to_edit = "{{benutzername}}" == event.creator || "{{benutzername}}" == "admin";
             let start = new Date(Date.parse(event.start_time));
             let end = new Date(Date.parse(event.end_time));
             start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
@@ -305,6 +306,20 @@
                 switch_side(vis_selector.querySelector("#bn_Alle"));
 
             inputs.querySelector("#ne_expected_hours").value = event.expected_hours;
+
+            if (!allowed_to_edit) {
+                inputs.querySelector("#ne_title").setAttribute("disabled", "");
+                inputs.querySelector("#ne_description").setAttribute("disabled", "");
+                inputs.querySelector("#ne_start_time").setAttribute("disabled", "");
+                inputs.querySelector("#ne_end_time").setAttribute("disabled", "");
+
+                mitarbeiter_selector.innerHTML = "<p class='inset'>" + event.people + "</p>";
+                vis_selector.innerHTML = "<p class='inset'>"  + event.visibility + "</p>";
+
+                inputs.querySelector("#ne_expected_hours").setAttribute("disabled", "");
+                document.getElementById("ins_event_delete_b").setAttribute("disabled", "");
+            }
+
             content.appendChild(inputs);
             attach_event_update_on_value_change(content);
             inspector_observer.observe(content, inspector_observer_config);

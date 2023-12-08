@@ -1,6 +1,6 @@
 #pragma once
 #include "Database.hpp"
-#include "nlohmann/json.hpp"
+#include "nlohmann/json_fwd.hpp"
 
 namespace database_util
 {

@@ -20,7 +20,40 @@ struct AccessControlHeader{
     }
 };
 
-int main() {
+void print_help()
+{
+    std::cout << "Home server can be called with the following command line arguments:\n";
+    std::cout << "    ./home_server [OptionalArgs] --data data/path\n";
+    std::cout << "RequiredArgs:\n";
+    std::cout << "    --data    : The directory where the data tab stores all data files\n";
+    std::cout << "OptionalArgs:\n";
+    std::cout << "    --help    : Prints this help dialogue\n";
+}
+
+std::string_view get_parameter(std::span<const char*> args, std::string_view parameter) {
+    if (!std::ranges::contains(args, parameter))
+        return {};
+    
+    auto e = std::ranges::find(args, parameter);
+    if (e == args.end() || ++e == args.end())
+        return {};
+    
+    return *e;
+}
+
+using namespace std::string_view_literals;
+int main(int argc, const char** argv) {
+    std::span<const char*> args(argv, argc);
+    if (std::ranges::contains(args, "--help"sv))
+        print_help();
+    
+    std::string_view data_base_folder = get_parameter(args, "--data");
+    if (data_base_folder.empty()) {
+        std::cout << "[error] Missing --data argument.\n";
+        print_help();
+        return -1;
+    }
+
     crow::App<AccessControlHeader> app;
     
     Credentials credentials("credentials/cred.json");
@@ -231,7 +264,6 @@ int main() {
     
     const std::string admin_css = crow::mustache::load_text("admin.css");
     const std::string user_css = crow::mustache::load_text("user.css");
-    const std::string general_css = crow::mustache::load_text("general.css");
     const std::string sha_js = crow::mustache::load_text("sha256.js");
     const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
@@ -239,7 +271,6 @@ int main() {
     const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
-    CROW_ROUTE(app, "/general.css")([&general_css](){return general_css;});
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){return sha_js;});
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});

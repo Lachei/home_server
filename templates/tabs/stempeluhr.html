@@ -40,13 +40,6 @@
         border-radius: 20px;
     }
 
-    .timeclock_button:disabled {
-        background-color: dimgrey;
-        color: linen;
-        opacity: .9;
-        cursor: default;
-    }
-
     .collapsible_header {
         background-color: gray;
         color: white;
@@ -110,7 +103,7 @@
         <hr>
         <p><b>Shift Aktionen</b></p>
         <div id="shift_inspector_actions">
-            <button class="delete_button" onclick="delete_shift(cur_inspected_shift)">Schicht l&ouml;schen</button>
+            <button id="shift_delete_b" class="delete_button" onclick="delete_shift(cur_inspected_shift);">Schicht l&ouml;schen</button>
         </div>
     </div>
 </div>
@@ -266,7 +259,12 @@
             let orig_start = utc_to_timepoint_local(shift.original_start_time);
             let orig_end = utc_to_timepoint_local(shift.original_end_time);
 
-            let disabled = "{{benutzername}}" == "admin" || user == "{{benutzername}}" ? "" : "disabled";
+            let change_allowed = "{{benutzername}}" == "admin" || user == "{{benutzername}}";
+            let disabled =  change_allowed ? "" : "disabled";
+            if (change_allowed)
+                document.getElementById("shift_delete_b").removeAttribute("disabled");
+            else
+                document.getElementById("shift_delete_b").setAttribute("disabled", "");
 
             let inner = "<p><b>Id:</b> " + shift.id + "</p>";
             inner += "<p><b>Benutzer:</b> " + user + "</p>";
