@@ -14,14 +14,9 @@
         display: grid;
         grid-template-columns: 1fr auto;
     }
-
-    #inspector {
-        display: none;
-        width: 30vw;
-        margin-left: 10px;
-        padding: 5px;
-        background-color: rgb(225, 225, 225);
-        border-radius: 10px;
+    
+    #timetable {
+        overflow: auto;
     }
 
     .close_x {
@@ -35,10 +30,19 @@
         border-radius: 5px;
         background-color: black;
     }
+    
+    .inspector {
+        display: none;
+        width: 30vw;
+        margin-left: 10px;
+        padding: 5px;
+        background-color: rgb(225, 225, 225);
+        border-radius: 10px;
+    }
 </style>
 <div id="main_time_view">
     <div id="timetable"></div>
-    <div id="inspector">
+    <div id="inspector" class="inspector">
         <a class="close_x" onclick="hide_inspector()">x</a>
         <p><b>Event Details</b></p>
         <div id="inspector_content"></div>
@@ -106,31 +110,13 @@
     let cur_inspected_event = null;
     let inspector_observer = new MutationObserver(inspector_observer_callback);
     let inspector_observer_config = { childList: true, subtree: true };
-    function generateDivergingColors(numColors) {
-        const baseColor1 = [44, 160, 44]; // Greenish color
-        const baseColor2 = [214, 39, 40]; // Reddish color
-
-        const colorTable = [];
-
-        for (let i = 0; i < numColors; i++) {
-            const ratio = i / (numColors - 1);
-            const color = [
-                Math.floor(baseColor1[0] + ratio * (baseColor2[0] - baseColor1[0])),
-                Math.floor(baseColor1[1] + ratio * (baseColor2[1] - baseColor1[1])),
-                Math.floor(baseColor1[2] + ratio * (baseColor2[2] - baseColor1[2])),
-            ];
-
-            // Convert RGB to hex
-            const hexColor = `#${color.map(c => c.toString(16).padStart(2, '0')).join('')}`;
-
-            colorTable.push(hexColor);
-        }
+    function generateDivergingColors() {
+        const colorTable = ['#a6cee3','#1f78b4','#b2df8a','#33a02c','#fb9a99','#e31a1c','#fdbf6f','#ff7f00','#cab2d6','#6a3d9a','#ffff99','#b15928'];
 
         return colorTable;
     }
 
-    const numColors = 23;
-    const divergingColors = generateDivergingColors(numColors);
+    const divergingColors = generateDivergingColors();
     function db_event_to_cal_event(e) {
         return {
             id: e.id,
@@ -140,7 +126,7 @@
             end: new Date(e.end_time),
             title: e.title,
             editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
-            backgroundColor: divergingColors[e.creator.hashCode() % numColors],
+            backgroundColor: divergingColors[e.creator.hashCode() % divergingColors.length],
         }
     }
     function setup_arbeitsplanung() {

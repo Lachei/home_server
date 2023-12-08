@@ -3,6 +3,13 @@
 #include "string_split.hpp"
 #include "robin_hood/robin_hood.h"
 
+#define DEFAULT_CATCH                               \
+    catch (const std::exception &e)                 \
+    {                                               \
+        return nlohmann::json{{"error", e.what()}}; \
+    }                                               \
+    return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+
 template <typename T>
 static const std::string t = std::string(Database::column_type_name_v<T>);
 using Date = Database::Date;
@@ -88,11 +95,7 @@ namespace database_util
             const auto inserted_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
             return db_events_to_json_events(inserted_event)[0]; // [0] is needed to unpack the 1 sized array that is returned from db_events_to.....
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json{{"error", e.what()}};
-        }
-        return nlohmann::json({"error", log_msg("Some other error occurred")});
+        DEFAULT_CATCH;
     }
 
     nlohmann::json update_event(Database &db, const nlohmann::json &event)
@@ -107,11 +110,7 @@ namespace database_util
             const auto updated_event = db.query_database(Database::IDQuery{.table_name = std::string(event_table_name), .id = id});
             return db_events_to_json_events(updated_event)[0]; // [0] is needed to unpack the 1 sized array
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json({"error", e.what()});
-        }
-        return nlohmann::json{{"error", log_msg("End of db_function, should never arrive here")}};
+        DEFAULT_CATCH;
     }
 
     nlohmann::json get_events(Database &db, std::string_view person)
@@ -141,11 +140,7 @@ namespace database_util
                 return nlohmann::json{{"error", "The user is now permitted to see this event"}};
             return event;
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json{{"error", e.what()}};
-        }
-        return nlohmann::json{{"error", log_msg("Some other error occured")}};
+        DEFAULT_CATCH;
     }
 
     nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id)
@@ -159,11 +154,7 @@ namespace database_util
             db.store_table_caches();
             return nlohmann::json{{"success", "The element was successfully deleted"}};
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json({"error", e.what()});
-        }
-        return nlohmann::json({"error", log_msg("Should not get here")});
+        DEFAULT_CATCH;
     }
 
     void setup_shift_tables(Database &database)
@@ -187,11 +178,7 @@ namespace database_util
             db.store_table_caches();
             return db_active_shift_to_json(row);
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json{{"error", e.what()}};
-        }
-        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+        DEFAULT_CATCH;
     }
 
     nlohmann::json check_active_shift(const Database &db, std::string_view person)
@@ -199,7 +186,8 @@ namespace database_util
         const std::string person_s(person);
         try
         {
-            if (db.contains(active_shifts_table_name, Database::ElementType{person_s})){
+            if (db.contains(active_shifts_table_name, Database::ElementType{person_s}))
+            {
                 auto shift = db_active_shift_to_json(db.query_database(Database::IDQuery{std::string(active_shifts_table_name), person_s}));
                 shift["shift_status"] = "active";
                 return shift;
@@ -207,11 +195,7 @@ namespace database_util
 
             return nlohmann::json{{"shift_status", "inactive"}};
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json{{"error", e.what()}};
-        }
-        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+        DEFAULT_CATCH;
     }
 
     nlohmann::json end_shift(Database &db, std::string_view person)
@@ -232,11 +216,7 @@ namespace database_util
             db.store_table_caches();
             return nlohmann::json{{"status", "success"}};
         }
-        catch (const std::exception &e)
-        {
-            return nlohmann::json{{"error", e.what()}};
-        }
-        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+        DEFAULT_CATCH;
     }
 
     nlohmann::json db_shift_to_json(const std::vector<Database::ColumnType> &data, uint64_t i)
@@ -249,6 +229,26 @@ namespace database_util
             {"visibility", std::get<std::vector<std::string>>(data[4])[i]},
             {"original_start_time", to_json_date_string(std::get<std::vector<Date>>(data[5])[i])},
             {"original_end_time", to_json_date_string(std::get<std::vector<Date>>(data[6])[i])}};
+    }
+    std::vector<Database::ElementType> json_shift_to_db_shift(const nlohmann::json &shift)
+    {
+        if (shift.contains("id"))
+            return {
+                shift["id"].get<uint64_t>(),
+                shift["user"].get<std::string>(),
+                from_json_date_string(shift["start_time"].get<std::string>()),
+                from_json_date_string(shift["end_time"].get<std::string>()),
+                shift["visibility"].get<std::string>(),
+                from_json_date_string(shift["original_start_time"].get<std::string>()),
+                from_json_date_string(shift["original_end_time"].get<std::string>())};
+        else
+            return {
+                shift["user"].get<std::string>(),
+                from_json_date_string(shift["start_time"].get<std::string>()),
+                from_json_date_string(shift["end_time"].get<std::string>()),
+                shift["visibility"].get<std::string>(),
+                from_json_date_string(shift["original_start_time"].get<std::string>()),
+                from_json_date_string(shift["original_end_time"].get<std::string>())};
     }
 
     nlohmann::json get_shifts_grouped(Database &db)
@@ -272,10 +272,57 @@ namespace database_util
 
             return ret;
         }
-        catch (const std::exception &e)
+        DEFAULT_CATCH;
+    }
+
+    nlohmann::json get_shift(const Database &db, uint64_t shift_id)
+    {
+        try
         {
-            return nlohmann::json{{"error", e.what()}};
+            const auto data = db.query_database(Database::IDQuery{.table_name = std::string(finished_shifts_table_name), .id = shift_id});
+            return db_shift_to_json(data, 0);
         }
-        return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+        DEFAULT_CATCH;
+    }
+
+    nlohmann::json update_shift(Database &db, const nlohmann::json &shift)
+    {
+        try
+        {
+            auto db_shift = json_shift_to_db_shift(shift);
+            db.update_row(finished_shifts_table_name, db_shift);
+            db.store_table_caches();
+            const auto updated_shift = db.query_database(Database::IDQuery{
+                .table_name = std::string(finished_shifts_table_name),
+                .id = std::get<uint64_t>(db_shift[0])});
+            return db_shift_to_json(updated_shift, 0);
+        }
+        DEFAULT_CATCH;
+    }
+
+    nlohmann::json delete_shift(Database &db, std::string_view user, uint64_t shift_id)
+    {
+        try
+        {
+            const auto shift = db.query_database(Database::IDQuery{.table_name = std::string(finished_shifts_table_name), .id = shift_id});
+            if (user != std::get<std::vector<std::string>>(shift[1])[0] && user != admin_name)
+                return nlohmann::json{{"error", "Only the shift user or the admin can delete the shift"}};
+            db.delete_row(finished_shifts_table_name, shift_id);
+            db.store_table_caches();
+            return nlohmann::json{{"success", "The shift was successfully deleted"}};
+        }
+        DEFAULT_CATCH;
+    }
+
+    nlohmann::json add_shift(Database &db, const nlohmann::json &shift)
+    {
+        try
+        {
+            auto db_shift = json_shift_to_db_shift(shift);
+            const auto result = db.insert_row_without_id(finished_shifts_table_name, db_shift);
+            db.store_table_caches();
+            return nlohmann::json{{"id", std::get<uint64_t>(result)}};
+        }
+        DEFAULT_CATCH;
     }
 }

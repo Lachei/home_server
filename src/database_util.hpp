@@ -32,4 +32,8 @@ namespace database_util
     // returns the shifts in a json object which contains for each user a list of shifts that user
     // has started and completed
     nlohmann::json get_shifts_grouped(Database &db);
+    nlohmann::json get_shift(const Database &db, uint64_t shift_id);
+    nlohmann::json update_shift(Database &db, const nlohmann::json &shift);
+    nlohmann::json delete_shift(Database &db, std::string_view user, uint64_t shift_id);
+    nlohmann::json add_shift(Database &db, const nlohmann::json &shift);
 }

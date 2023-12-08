@@ -115,7 +115,7 @@ int main() {
     CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
-        const auto& event = nlohmann::json::parse(req.body);
+        const auto event = nlohmann::json::parse(req.body);
         const auto& creator = event["creator"].get<std::string>();
         if (creator != username && username != admin_name)
             return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
@@ -165,6 +165,39 @@ int main() {
 
         const auto res = database_util::get_shifts_grouped(database);
         return res.dump();
+    });
+    CROW_ROUTE(app, "/get_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        const auto res = database_util::get_shift(database, shift_id);
+        return res.dump();
+    });
+    CROW_ROUTE(app, "/update_shift").methods("POST"_method)([&credentials, &database](const crow::request& req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        const auto shift = nlohmann::json::parse(req.body);
+        const auto& user = shift["user"].get<std::string>();
+        if (user != username && username != admin_name)
+            return nlohmann::json{{"error", "can not update a shift of another person, only admin can do that"}}.dump();
+
+        auto result = database_util::update_shift(database, shift);
+        return result.dump();
+    });
+    CROW_ROUTE(app, "/delete_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        auto result = database_util::delete_shift(database, username, shift_id);
+        return result.dump();
+    });
+    CROW_ROUTE(app, "/add_shift").methods("POST"_method)([&credentials, &database](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        const auto shift = nlohmann::json::parse(req.body);
+        if(shift["user"].get<std::string>() != username && username != admin_name)
+            return nlohmann::json{{"error", "can not insert a shift of another user, only admin can do that"}}.dump();
+            
+        auto result = database_util::add_shift(database, shift);
+        return result.dump();
     });
     
     // ------------------------------------------------------------------------------------------------

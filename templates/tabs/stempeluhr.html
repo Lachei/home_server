@@ -20,8 +20,17 @@
         grid-template-columns: 50% 50%
     }
 
-    #timeclock_info_text {
-        font-size: 40px;
+    #shift_text {
+        font-size: 200%;
+    }
+
+    #shift_list {
+        display: grid;
+        grid-template-columns: 1fr auto;
+    }
+
+    #shift_templates {
+        display: none;
     }
 
     .timeclock_button {
@@ -59,6 +68,11 @@
         overflow: hidden;
         background-color: rgb(240, 240, 240);
     }
+
+    .shift_button {
+        margin: 0px;
+        width: 100px;
+    }
 </style>
 <div id="timeclock" class="user">
     <div id="timeclock_info_text">
@@ -84,27 +98,67 @@
 </div>
 <hr>
 <div id="shift_list">
-    Alle get&auml;tigten Arbeitszeiten:
-    <div id="shift_entries">
+    <div>
+        <p><b>Alle get&auml;tigten Arbeitszeiten:</b></p>
+        <div id="shift_entries">
+        </div>
+    </div>
+    <div id="shift_inspector" class="inspector">
+        <a class="close_x" onclick="hide_shift_inspector()">x</a>
+        <p><b>Shift details</b></p>
+        <div id="shift_inspector_content"></div>
+        <hr>
+        <p><b>Shift Aktionen</b></p>
+        <div id="shift_inspector_actions">
+            <button class="delete_button" onclick="delete_shift(cur_inspected_shift)">Schicht l&ouml;schen</button>
+        </div>
+    </div>
+</div>
+<div>
+    <p><b>Schicht nachtragen:</b></p>
+    <div id="shift_creation" class="inset"></div>
+    <div class="inset">
+        <button onclick="create_shift()">Schicht nachtragen</button>
+    </div>
+</div>
+
+<div id="shift_templates">
+    <div id="shift_input_template">
+        <label for="user">Benutzer</label>
+        <input id="user" type="text">
+
+        <label for="start">Schicht Start (bereinigt)</label>
+        <input id="start" type="datetime-local">
+
+        <label for="end">Schicht Ende (bereinigt)</label>
+        <input id="end" type="datetime-local">
+
+        <label for="original_start">Schicht Start (exakt)</label>
+        <input id="original_start" type="datetime-local">
+
+        <label for="original_end">Schicht Ende (exakt)</label>
+        <input id="original_end" type="datetime-local">
     </div>
 </div>
 
 <script>
+    var cur_inspected_shift = null;
     function setup_stempeluhr() {
         // getting all recorded shifts and displaying them
         update_shifts_table();
         update_shifts_text();
+        setup_shift_creation();
     }
     async function start_shift() {
-        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
+        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
-        else 
+        else
             update_shifts_text();
     }
     async function end_shift() {
-        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
+        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
@@ -114,11 +168,11 @@
         }
     }
     function shift_table_date(date) {
-        return new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric', year: 'numeric', hour:'numeric', minute:'numeric'}).format(new Date(Date.parse(date)));
+        return new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric' }).format(new Date(Date.parse(date)));
     };
     async function update_shifts_table() {
         let table_header = "<tr><th>Id</th> <th>Genauer Start</th><th>Geanues Ende</th><th>Start</th><th>Ende</th></tr>";
-        fetch(location.origin + "/get_shifts", { headers: { credentials: user_credentials}})
+        fetch(location.origin + "/get_shifts", { headers: { credentials: user_credentials } })
             .then(response => {
                 response.json().then(entries => {
                     let user_shifts = "";
@@ -128,7 +182,7 @@
                         user_shifts += "<div class='collapsible_content'><table>";
                         user_shifts += table_header;
                         for (let shift of shifts)
-                            user_shifts += "<tr> <td>" + shift.id + "</td><td>" + shift_table_date(shift.original_start_time) + "</td><td>" + shift_table_date(shift.original_end_time) + "</td><td>" + shift_table_date(shift.start_time) + "</td><td>" + shift_table_date(shift.end_time) + "</td></tr>";
+                            user_shifts += "<tr> <td> <button class='shift_button' onclick='inspect_shift(" + shift.id + ");'>" + shift.id + "</button></td><td>" + shift_table_date(shift.original_start_time) + "</td><td>" + shift_table_date(shift.original_end_time) + "</td><td>" + shift_table_date(shift.start_time) + "</td><td>" + shift_table_date(shift.end_time) + "</td></tr>";
                         user_shifts += "</table></div>";
                     }
                     document.getElementById("shift_entries").innerHTML = user_shifts;
@@ -136,7 +190,7 @@
             });
     }
     async function update_shifts_text() {
-        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: user_credentials}});
+        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
@@ -161,6 +215,114 @@
             content.style.display = "none";
         else
             content.style.display = "block";
+    }
+
+    function setup_shift_creation() {
+        let shift_input_template = document.getElementById("shift_input_template").cloneNode(true);
+        shift_input_template.id = shift_input_template.id.slice(0, -("template").length) + "creation";
+        if ("{{benutzername}}" != "admin") {
+            let user_input = shift_input_template.querySelector("#user");
+            user_input.setAttribute("disabled", "");
+            user_input.value = "{{benutzername}}";
+        }
+        let shift_input = document.getElementById("shift_creation");
+        shift_input.appendChild(shift_input_template);
+    }
+
+    async function create_shift() {
+        const shift_input = document.getElementById("shift_creation");
+        let shift = parse_shift_data_from_form(shift_input);
+        let result = await fetch("/create_shift", {
+            headers: { credentials: user_credentials, },
+            method: "POST",
+            body: JSON.stringify(shift)
+        });
+        let res = await result.json();
+        if ("error" in res)
+            console.log(res);
+        else
+            update_shifts_table();
+    }
+
+    async function load_shift(shift_id) {
+        let shift = await fetch("/get_shift/" + shift_id, { headers: { "credentials": user_credentials } });
+        shift = await shift.json();
+        return shift;
+    }
+
+    async function inspect_shift(shift_id) {
+        // loading shift and then showing on screen
+        if (shift_id == cur_inspected_shift)
+            return;
+        cur_inspected_shift = shift_id;
+        let content = document.getElementById("shift_inspector_content");
+        let shift = await load_shift(shift_id);
+        if ("error" in shift)
+            console.log(shift["error"]);
+        else {
+            let user = shift.user;
+            let start = utc_to_timepoint_local(shift.start_time);
+            let end = utc_to_timepoint_local(shift.end_time);
+            let orig_start = utc_to_timepoint_local(shift.original_start_time);
+            let orig_end = utc_to_timepoint_local(shift.original_end_time);
+
+            let disabled = "{{benutzername}}" == "admin" || user == "{{benutzername}}" ? "" : "disabled";
+
+            let inner = "<p><b>Id:</b> " + shift.id + "</p>";
+            inner += "<p><b>Benutzer:</b> " + user + "</p>";
+            inner += "<p><b>Genauer Start:</b> " + orig_start + "</p>";
+            inner += "<p><b>Genaues Ende:</b> " + orig_end + "</p>";
+            inner += "<label for='ins_start'>Startzeit</label><input id='ins_start' type='datetime-local' onchange='update_inspected_shift();'" + disabled + " value='" + start + "'>";
+            inner += "<label for='ins_end'>Endzeit</label><input id='ins_end' type='datetime-local' onchange='update_inspected_shift();'" + disabled + " value='" + end + "'>";
+
+            document.getElementById("shift_inspector_content").innerHTML = inner;
+
+            document.getElementById("shift_inspector").style.display = "block";
+        }
+    }
+
+    function hide_shift_inspector() {
+        document.getElementById("shift_inspector").style.display = "none";
+        cur_inspected_shift = null;
+    }
+
+    function parse_shift_data_from_form(form) {
+        let user = form.querySelector("#user").value;
+        let start = timepoint_local_to_utc(form.querySelector("#start").value);
+        let end = timepoint_local_to_utc(form.querySelector("#end").value);
+        let original_start = timepoint_local_to_utc(form.querySelector("#original_start").value);
+        let original_end = timepoint_local_to_utc(form.querySelector("#original_end").value);
+        return { user: user, start_time: start, end_time: end, visibility: "[Alle]", original_start_time: original_start, original_end_time: original_end };
+    }
+
+    async function update_inspected_shift() {
+        let shift = await load_shift(cur_inspected_shift);
+        if ("error" in shift)
+            console.log(shift);
+        else {
+            shift.start_time = timepoint_local_to_utc(document.getElementById("ins_start").value);
+            shift.end_time = timepoint_local_to_utc(document.getElementById("ins_end").value);
+            let res = await fetch("/update_shift", {
+                headers: { credentials: user_credentials, },
+                method: "POST",
+                body: JSON.stringify(shift)
+            });
+            res = await res.json();
+            if ("error" in res)
+                console.log(res);
+            update_shifts_table();
+        }
+    }
+    
+    async function delete_shift() {
+        let res = await fetch("/delete_shift/" + cur_inspected_shift, {headers: {credentials: user_credentials}}); 
+        res = await res.json();
+        if ("error" in res)
+            console.log(res);
+        else {
+            update_shifts_table();
+            hide_shift_inspector();
+        }
     }
 
     setup_stempeluhr();

@@ -7,10 +7,12 @@
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
+            font-size: min(2vw, .5cm);
         }
 
         h1 {
             text-align: center;
+            font-size: 200%;
         }
 
         /* Full-width input fields */
@@ -185,6 +187,15 @@
                 hash |= 0; // Convert to 32bit integer
             }
             return hash;
+        }
+
+        function timepoint_local_to_utc(time) {
+            return new Date(Date.parse(time)).toISOString();
+        }
+        function utc_to_timepoint_local(time) {
+            let d = new Date(Date.parse(time));
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            return d.toISOString().slice(0, 16);
         }
     </script>
 </body>
