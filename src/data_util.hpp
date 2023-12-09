@@ -3,7 +3,8 @@
 #include "nlohmann/json_fwd.hpp"
 
 namespace data_util{
-    nlohmann::json get_dir_infos(std::string_view dir);
+    void setup_data(std::string_view dir);
+    nlohmann::json get_dir_infos(std::string_view base, std::string_view dir);
     nlohmann::json create_dir(std::string_view dir);
     nlohmann::json create_file(std::string_view file);
     nlohmann::json delete_file(std::string_view file);

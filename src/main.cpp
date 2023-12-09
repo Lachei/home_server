@@ -4,6 +4,7 @@
 #include "Credentials.hpp"
 #include "Database.hpp"
 #include "database_util.hpp"
+#include "data_util.hpp"
 
 struct AccessControlHeader{
     struct context{};
@@ -60,6 +61,7 @@ int main(int argc, const char** argv) {
     Database database("data/events");
     database_util::setup_event_table(database);
     database_util::setup_shift_tables(database);
+    data_util::setup_data(data_base_folder);
 
     // ------------------------------------------------------------------------------------------------
     // Login/authentication
@@ -231,6 +233,27 @@ int main(int argc, const char** argv) {
             
         auto result = database_util::add_shift(database, shift);
         return result.dump();
+    });
+    
+    // ------------------------------------------------------------------------------------------------
+    // Data loading...
+    // ------------------------------------------------------------------------------------------------
+    CROW_ROUTE(app, "/daten/")([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        return data_util::get_dir_infos(data_base_folder, "").dump();
+    });
+    CROW_ROUTE(app, "/daten/<path>")([&credentials, &data_base_folder](const crow::request &req, const std::string& path) {
+        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+
+        crow::response res;
+        std::filesystem::path file_path = data_base_folder.data() + path;
+        if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path))
+            res.set_static_file_info(file_path.string());
+        else
+            res.body = data_util::get_dir_infos(data_base_folder, path).dump();
+
+        return res;
     });
     
     // ------------------------------------------------------------------------------------------------

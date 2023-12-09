@@ -53,6 +53,25 @@
             cursor: default;
         }
 
+        a {
+            color: blue;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        /*fixing chrome rendering*/
+        p b {
+            float: left;
+        }
+
+        p:after {
+            display: block;
+            font-size: 0;
+            content: " ";
+            clear: both;
+            height: 0;
+        }
+
         .p_title {
             margin: 5px;
         }

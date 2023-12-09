@@ -17,13 +17,15 @@
 
 #define EXTRACT_CREDENTIALS(req) EXTRACT_CREDENTIALS_T(req, std::string)
 
-#define EXTRACT_CHECK_CREDENTIALS(req, credentials)                \
+#define EXTRACT_CHECK_CREDENTIALS_T(req, credentials, ret_type)    \
     auto req_creds = extract_credentials_from_req(req);            \
     if (!req_creds)                                                \
-        return std::string("Credentials missing");                 \
+        return ret_type("Credentials missing");                    \
     auto [username, sha] = *req_creds;                             \
     if (!credentials.check_credential(std::string(username), sha)) \
-        return std::string("Credential check failed. Relogging might fix the issue.");
+        return ret_type("Credential check failed. Relogging might fix the issue.");
+
+#define EXTRACT_CHECK_CREDENTIALS(req, credentials) EXTRACT_CHECK_CREDENTIALS_T(req, credentials, std::string)
 
 template <class... Ts>
 struct overloaded : Ts...
