@@ -1,7 +1,7 @@
 <style>
     object {
         width: 100%;
-        height: 100vh;
+        height: 90vh;
     }
 
     .folder {
@@ -221,12 +221,32 @@
         width: auto;
         margin-left: 20px;
     }
+
+    #create_div {
+        display: none;
+        position: absolute;
+        background-color: white;
+        border-radius: 10px;
+        border-style: solid;
+        padding: 5px;
+    }
+
+    #plus_button {
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
+        padding: 0;
+        margin-left: -10px;
+        margin-top: -10px;
+        margin-bottom: -10px;
+    }
 </style>
 
 <div id="file_explorer">
     <div id="tree_search">Here comes the search and tree</div>
     <div id="folder_explorer_header">
-        <div id="add_header" class="header_div">+</div>
+        <div id="add_header" class="header_div"><button id="plus_button" onclick="show_create_div(this);">+</button>
+        </div>
         <div id="name_header" class="header_div">Name</div>
         <div id="size_header" class="header_div">Gr&ouml;sse</div>
         <div id="changed_header" class="header_div">Bearbeitet von</div>
@@ -234,7 +254,13 @@
     </div>
 </div>
 <div id="document_viewer" style="display:none">
-    <object id="document_renderer"></object>
+    <object id="document_renderer">
+    </object>
+</div>
+<div id="create_div">
+    <label for="upload_file">Datei</label>
+    <input id="upload_file" name="file" type="file" />
+    <button onclick="upload_data();">Hochladen</button>
 </div>
 
 <script>
@@ -297,7 +323,7 @@
         for (let element of files_json.elements) {
             list.innerHTML += "<div class='le_div'>" + get_icon(element.extension) + "</div>";
             if (element.extension.length > 0)
-                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" +  element.extension + "\");'>" + element.name + "</a></div>";
+                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
             else
                 list.innerHTML += "<div class='le_div'><a onclick='cur_directory=\"" + element.full_path + "\"; reload_cur_directory();'>" + element.name + "</a></div>";
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
@@ -321,37 +347,70 @@
             update_tree_search();
         }
     }
-    
+
     async function open_data(data_file, extension) {
         // todo: store fetched pdf to show
-        let data = await fetch(data_file, {headers: {credentials: user_credentials}});
+        let data = await fetch(data_file, { headers: { credentials: user_credentials } });
         data = await data.blob();
         let url = URL.createObjectURL(data);
-        let renderer = document.getElementById("document_renderer");
-        renderer.setAttribute("data", url);
-        switch(extension){
-        case "json":
-        case "xml":
-        case "pdf": renderer.setAttribute("type", "application/" + extension); break;
-        case "ods":
-        case "xlsm":
-        case "xls":
-        case "xltx":
-        case "xltm":
-        case "xlsx": renderer.setAttribute("type", "application/vnd.ms-excel");
-        case "jpeg":
-        case "jpg":
-        case "gif":
-        case "svg":
-        case "png": renderer.setAttribute("type", "image/" + extension); break;
-        case "wav":
-        case "ogg":
-        case "mp3": renderer.setAttribute("type", "audio/" + extension); break;
-        case "webm":
-        case "mp4": renderer.setAttribute("type", "video/" + extension); break;
-        default : renderer.setAttribute("type", "text/plain"); break;
-        }
-        document.getElementById("document_viewer").style.display = "block";
+        //let renderer = document.getElementById("document_renderer");
+        //renderer.setAttribute("data", url);
+        //switch(extension){
+        //case "json":
+        //case "xml":
+        //case "pdf": renderer.setAttribute("type", "application/" + extension); break;
+        //case "ods":
+        //case "xlsm":
+        //case "xls":
+        //case "xltx":
+        //case "xltm":
+        //case "xlsx": renderer.setAttribute("type", "application/vnd.ms-excel");
+        //case "jpeg":
+        //case "jpg":
+        //case "gif":
+        //case "svg":
+        //case "png": renderer.setAttribute("type", "image/" + extension); break;
+        //case "wav":
+        //case "ogg":
+        //case "mp3": renderer.setAttribute("type", "audio/" + extension); break;
+        //case "webm":
+        //case "mp4": renderer.setAttribute("type", "video/" + extension); break;
+        //default : renderer.setAttribute("type", "text/plain"); break;
+        //}
+        //document.getElementById("document_viewer").style.display = "block";
+        window.open(url);
+    }
+
+    function show_create_div(element) {
+        let div = document.getElementById("create_div");
+        let rect = element.getBoundingClientRect();
+        div.style.top = rect.bottom + "px";
+        div.style.left = rect.left + "px";
+        div.style.display = "block";
+        let ignore_next = true;
+        window.addEventListener("click", function hand(e) {
+            if (ignore_next) {
+                ignore_next = false;
+                return;
+            }
+            let div_rect = div.getBoundingClientRect();
+            if (e.clientX < div_rect.left || e.clientX > div_rect.right ||
+                e.clientY < div_rect.top || e.clientY > div_rect.bottom) {
+                div.style.display = "none";
+                window.removeEventListener('click', hand);
+            }
+        });
+    }
+
+    function upload_data() {
+        let file_input = document.getElementById("upload_file").files[0];
+        let reader = new FileReader();
+        reader.onload = function (evt) {
+            const metadata = `name: ${file_input.name}, type: ${file_input.type}, size: ${file_input.size}, contents:`;
+            const contents = evt.target.result;
+            console.log(metadata, contents);
+        };
+        reader.readAsDataURL(file_input);
     }
 
     setup_file_explorer();
