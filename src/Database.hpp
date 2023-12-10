@@ -69,7 +69,7 @@ namespace database_internal
     constexpr void variant_idx_impl(Callable c, size_t idx, std::variant<Ts...> **)
     {
         size_t i{};
-        ((idx != i++ || (c((typename Ts::value_type){}), false)) && ...);
+        ((idx != i++ || (c(typename Ts::value_type{}), false)) && ...);
     }
 
     // behaviour of these queries is implemented at the end of Database.cpp

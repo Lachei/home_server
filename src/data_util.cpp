@@ -26,7 +26,7 @@ namespace data_util
                 {"name", p.filename()},
                 {"size", e.is_directory() ? 0: e.file_size()},
                 {"changed_by", "Nobody"},
-                {"change_date", to_json_date_string(std::chrono::utc_clock::from_sys(std::chrono::sys_time<std::chrono::nanoseconds>(e.last_write_time().time_since_epoch())))},
+                {"change_date", to_json_date_string(std::chrono::time_point_cast<std::chrono::utc_clock::duration>(std::chrono::utc_clock::from_sys(std::chrono::sys_time<std::chrono::nanoseconds>(e.last_write_time().time_since_epoch()))))},
                 {"full_path", p.string().substr(base.length())}
             });
         }

@@ -23,7 +23,7 @@ struct string_split
             return t;
         }
 
-        bool operator<=>(const iterator &o) const = default;
+        std::strong_ordering operator<=>(const iterator &o) const = default;
 
     private:
         std::basic_string_view<T> backed_view{};
