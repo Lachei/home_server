@@ -194,7 +194,7 @@
 
     #folder_explorer_header {
         display: grid;
-        grid-template-columns: 50px repeat(4, auto);
+        grid-template-columns: 50px 50px repeat(4, auto);
     }
 
     .header_div {
@@ -217,12 +217,23 @@
         margin-top: -5px;
     }
 
+    .file_checkbox {
+        width: 120%;
+        height: 120%;
+        margin-top: -8px;
+    }
+
+    .edit_button {
+        width: 100%;
+    }
+
     #search_input {
         width: auto;
         margin-left: 20px;
     }
 
-    #create_div {
+    #create_div,
+    #edit_div {
         display: none;
         position: absolute;
         background-color: white;
@@ -231,7 +242,12 @@
         padding: 5px;
     }
 
-    #plus_button {
+    #edit_div {
+        width: 300px;
+    }
+
+    #plus_button,
+    #edit_button {
         width: 40px;
         height: 40px;
         border-radius: 20px;
@@ -249,7 +265,10 @@
 <div id="file_explorer">
     <div id="tree_search">Here comes the search and tree</div>
     <div id="folder_explorer_header">
-        <div id="add_header" class="header_div"><button id="plus_button" onclick="show_create_div(this);">+</button>
+        <div id="edit_header" class="header_div"><button id="edit_button"
+                onclick="show_div(this, 'edit_div');">&#9998;</button></div>
+        <div id="add_header" class="header_div"><button id="plus_button"
+                onclick="show_div(this, 'create_div');">+</button>
         </div>
         <div id="name_header" class="header_div">Name</div>
         <div id="size_header" class="header_div">Gr&ouml;sse</div>
@@ -275,14 +294,23 @@
         <label for="create_folder" style="clear:both">
             <div class="folder" style="float:left; margin-left:5px; margin-top: 18px; margin-right: 5px;"></div>
         </label>
-        <input id="new_folder_input" type="text" style="width:auto;"/>
+        <input id="new_folder_input" type="text" style="width:auto;" />
         <button onclick="create_folder();" style="float:right">Ordner erstellen</button>
     </div>
+</div>
+<div id="edit_div">
+    <button class="edit_button" onclick="copy_selected()">&#128247; Kopieren</button>
+    <button class="edit_button" onclick="cut_selected()">✂️ Ausschneiden</button>
+    <button class="edit_button" onclick="paste_selected()">&#128203; Einf&uuml;gen</button>
+    <hr>
+    <button class="edit_button" style="background-color:red" onclick="delete_selected()">&#128465; L&ouml;schen</button>
 </div>
 
 <script>
     const base_dir = "";
     var cur_directory = base_dir;
+    var copy_files = [];
+    var copy = true;
 
     function setup_file_explorer() {
         reload_cur_directory();
@@ -338,6 +366,7 @@
             return a.name < b.name;
         });
         for (let element of files_json.elements) {
+            list.innerHTML += "<div class='le_div'><input type='checkbox' class='file_checkbox' file='" + element.full_path + "'/></div>";
             list.innerHTML += "<div class='le_div'>" + get_icon(element.extension) + "</div>";
             if (element.extension.length > 0)
                 list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
@@ -398,8 +427,8 @@
         window.open(url);
     }
 
-    function show_create_div(element) {
-        let div = document.getElementById("create_div");
+    function show_div(element, id) {
+        let div = document.getElementById(id);
         let rect = element.getBoundingClientRect();
         div.style.top = rect.bottom + "px";
         div.style.left = rect.left + "px";
@@ -425,7 +454,7 @@
         reader.onload = async function (evt) {
             const metadata = `name: ${file_input.name}, type: ${file_input.type}, size: ${file_input.size}, contents:`;
             const contents = evt.target.result;
-            let res = await fetch("/upload", {
+            let res = await fetch("/upload_daten", {
                 headers: {
                     credentials: user_credentials,
                     path: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_input.name,
@@ -453,9 +482,51 @@
             reload_cur_directory();
     }
 
-    // takes care of all deletion etc
-    async function delete_element() {
+    function update_selected_files() {
+        copy_files = [];
+        for (let c of document.getElementsByClassName("file_checkbox")) {
+            if (c.checked)
+                copy_files.push(c.getAttribute("file"));
+        }
+    }
+    function copy_selected() {
+        update_selected_files();
+        copy = true;
+    }
 
+    function cut_selected() {
+        update_selected_files();
+        copy = false;
+    }
+
+    async function paste_selected() {
+        let send_data = {
+            copy: copy,
+            files: copy_files,
+            files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/"),
+        };
+        let res = await fetch("/move_daten", { 
+            headers: {credentials: user_credentials},
+            method: "POST",
+            body: JSON.stringify(send_data),
+        });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
+    }
+
+    async function delete_selected() {
+        update_selected_files();
+        let res = await fetch("/delete_daten", {
+            headers: {credentials: user_credentials},
+            method: "POST",
+            body: JSON.stringify(copy_files),
+        });
+        res = await res.json();
+        if(!("success" in res))
+            console.log(res);
+        reload_cur_directory();
     }
 
     setup_file_explorer();

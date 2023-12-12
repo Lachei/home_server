@@ -45,9 +45,39 @@ namespace data_util
         return {};
     }
 
-    nlohmann::json delete_file(std::string_view file)
+    nlohmann::json delete_files(std::string_view base_dir, const nlohmann::json &files)
     {
-        return {};
+        if (!files.is_array())
+            return {{"error", "Expected array for files to delete"}};
+        for (const auto& f: files) {
+            const auto file = base_dir.data() + f.get<std::string>();
+            if (!std::filesystem::exists(file))
+                continue;
+            std::filesystem::remove_all(file);
+        }
+        return nlohmann::json{{"success", "Removed the files/directories"}};
+    }
+
+    nlohmann::json move_files(std::string_view base_dir, const nlohmann::json &move_infos)
+    {
+        const bool copy = move_infos["copy"].get<bool>();
+        const auto file_list = move_infos["files"];
+        const auto new_file_folder = base_dir.data() + move_infos["files_to"].get<std::string>(); // this is a folder
+        if (!std::filesystem::exists(new_file_folder))
+            std::filesystem::create_directories(new_file_folder);
+        for(auto i: i_range(file_list.size()))
+        {
+            const std::string src = base_dir.data() + file_list[i].get<std::string>();
+            if (!std::filesystem::exists(src))
+                continue;
+            const std::string new_file = new_file_folder + std::filesystem::path(src).filename().string();
+
+            if (copy)
+                std::filesystem::copy(src, new_file);
+            else
+                std::filesystem::rename(src, new_file);
+        }
+        return nlohmann::json{{"success", "copied/moved the files"}};
     }
 
     nlohmann::json write_file(std::string_view file, std::span<const std::byte> data)
