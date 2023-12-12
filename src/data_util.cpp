@@ -3,6 +3,7 @@
 #include "util.hpp"
 
 #include <filesystem>
+#include <fstream>
 
 namespace data_util
 {
@@ -50,7 +51,9 @@ namespace data_util
 
     nlohmann::json write_file(std::string_view file, std::span<const std::byte> data)
     {
-        return {};
+        std::ofstream f(file.data(), std::ios_base::binary);
+        f.write(reinterpret_cast<const char*>(data.data()), data.size());
+        return nlohmann::json{{"success", "The file was successfully stored"}};
     }
 
     std::vector<std::byte> read_file(std::string_view file)

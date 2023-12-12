@@ -236,7 +236,7 @@ int main(int argc, const char** argv) {
     });
     
     // ------------------------------------------------------------------------------------------------
-    // Data loading...
+    // Data processing
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/daten/")([&credentials, &data_base_folder](const crow::request &req) {
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
@@ -254,6 +254,14 @@ int main(int argc, const char** argv) {
             res.body = data_util::get_dir_infos(data_base_folder, path).dump();
 
         return res;
+    });
+    CROW_ROUTE(app, "/upload").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (req.headers.find("path") == req.headers.end())
+            return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
+        const auto res = data_util::write_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
+        return res.dump();
     });
     
     // ------------------------------------------------------------------------------------------------
@@ -294,7 +302,7 @@ int main(int argc, const char** argv) {
     const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
-    CROW_ROUTE(app, "/sha256.js")([&sha_js](){return sha_js;});
+    CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});

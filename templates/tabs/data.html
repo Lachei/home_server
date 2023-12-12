@@ -405,12 +405,24 @@
     function upload_data() {
         let file_input = document.getElementById("upload_file").files[0];
         let reader = new FileReader();
-        reader.onload = function (evt) {
+        reader.onload = async function (evt) {
             const metadata = `name: ${file_input.name}, type: ${file_input.type}, size: ${file_input.size}, contents:`;
             const contents = evt.target.result;
-            console.log(metadata, contents);
+            let res = await fetch("/upload", {
+                headers: {
+                    credentials: user_credentials,
+                    path: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_input.name,
+                },
+                method: "POST",
+                body: contents,
+            });
+            res = await res.json();
+            if ("error" in res)
+                console.log(res);
+            else
+                reload_cur_directory();
         };
-        reader.readAsDataURL(file_input);
+        reader.readAsBinaryString(file_input);
     }
 
     setup_file_explorer();
