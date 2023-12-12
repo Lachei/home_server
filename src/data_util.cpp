@@ -36,7 +36,8 @@ namespace data_util
 
     nlohmann::json create_dir(std::string_view dir)
     {
-        return {};
+        std::filesystem::create_directories(dir);
+        return nlohmann::json{{"success", "Directory was created successfully"}};
     }
 
     nlohmann::json create_file(std::string_view file)

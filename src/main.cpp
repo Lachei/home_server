@@ -263,6 +263,14 @@ int main(int argc, const char** argv) {
         const auto res = data_util::write_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
         return res.dump();
     });
+    CROW_ROUTE(app, "/create_folder")([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (req.headers.find("path") == req.headers.end())
+            return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
+        const auto res = data_util::create_dir(data_base_folder.data() + req.headers.find("path")->second);
+        return res.dump();
+    });
     
     // ------------------------------------------------------------------------------------------------
     // General page loading

@@ -240,6 +240,10 @@
         margin-top: -10px;
         margin-bottom: -10px;
     }
+
+    #upload_icon::after {
+        font-size: 20px;
+    }
 </style>
 
 <div id="file_explorer">
@@ -258,9 +262,22 @@
     </object>
 </div>
 <div id="create_div">
-    <label for="upload_file">Datei</label>
-    <input id="upload_file" name="file" type="file" />
-    <button onclick="upload_data();">Hochladen</button>
+    <div>
+        <label for="upload_file">
+            <div id="upload_icon" class="file-icon" data-type="&#8657;"
+                style="float:left; margin-left:5px; margin-top: 18px; margin-right: 5px;"></div>
+        </label>
+        <input id="upload_file" name="file" type="file" />
+        <button onclick="upload_data();">Datei Hochladen</button>
+    </div>
+
+    <div>
+        <label for="create_folder" style="clear:both">
+            <div class="folder" style="float:left; margin-left:5px; margin-top: 18px; margin-right: 5px;"></div>
+        </label>
+        <input id="new_folder_input" type="text" style="width:auto;"/>
+        <button onclick="create_folder();" style="float:right">Ordner erstellen</button>
+    </div>
 </div>
 
 <script>
@@ -423,6 +440,22 @@
                 reload_cur_directory();
         };
         reader.readAsBinaryString(file_input);
+    }
+
+    async function create_folder() {
+        let folder_name = document.getElementById("new_folder_input").value;
+        let folder_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + folder_name;
+        let res = await fetch("/create_folder", { headers: { credentials: user_credentials, path: folder_path } });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        else
+            reload_cur_directory();
+    }
+
+    // takes care of all deletion etc
+    async function delete_element() {
+
     }
 
     setup_file_explorer();
