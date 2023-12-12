@@ -27,7 +27,7 @@ namespace data_util
                 {"name", p.filename()},
                 {"size", e.is_directory() ? 0: e.file_size()},
                 {"changed_by", "Nobody"},
-                {"change_date", to_json_date_string(std::chrono::time_point_cast<std::chrono::utc_clock::duration>(std::chrono::utc_clock::from_sys(std::chrono::sys_time<std::chrono::nanoseconds>(e.last_write_time().time_since_epoch()))))},
+                {"change_date", to_json_date_string(std::chrono::time_point_cast<std::chrono::utc_clock::duration>(std::chrono::utc_clock::from_sys(std::chrono::file_clock::to_sys(e.last_write_time()))))},
                 {"full_path", p.string().substr(base.length())}
             });
         }
@@ -42,7 +42,9 @@ namespace data_util
 
     nlohmann::json create_file(std::string_view file)
     {
-        return {};
+        std::ofstream f(file.data(), std::ios_base::binary);
+        f << "";
+        return {{"success", "Created the file"}};
     }
 
     nlohmann::json delete_files(std::string_view base_dir, const nlohmann::json &files)

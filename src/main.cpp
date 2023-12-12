@@ -271,6 +271,14 @@ int main(int argc, const char** argv) {
         const auto res = data_util::create_dir(data_base_folder.data() + req.headers.find("path")->second);
         return res.dump();
     });
+    CROW_ROUTE(app, "/create_file")([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (req.headers.find("path") == req.headers.end())
+            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
+        const auto res = data_util::create_file(data_base_folder.data() + req.headers.find("path")->second);
+        return res.dump();
+    });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
@@ -285,6 +293,11 @@ int main(int argc, const char** argv) {
         const auto res = data_util::delete_files(data_base_folder, delete_files);
         return res.dump();
     });
+
+    // ------------------------------------------------------------------------------------------------
+    // File editing
+    // ------------------------------------------------------------------------------------------------
+
     
     // ------------------------------------------------------------------------------------------------
     // General page loading

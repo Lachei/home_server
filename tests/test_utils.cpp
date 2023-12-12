@@ -57,11 +57,30 @@ int test_string_split()
     return result::success;
 }
 
+int file_check()
+{
+    try
+    {
+        using namespace std::chrono;
+        constexpr auto s = "/home/lachei/Dokumente/github/home_server/index.html";
+        auto t = std::filesystem::last_write_time(s);
+        auto sys_t = file_clock::to_sys(t);
+        auto utc_t = utc_clock::from_sys(sys_t);
+        auto utc_c = time_point_cast<utc_clock::duration>(utc_t);
+        std::cout << "file_time" << t << " , sys_t " << sys_t << " , utc_t " << utc_t << " , utc_c " << utc_c << std::endl;
+    }
+    catch (const std::exception &e)
+    {
+    }
+    return result::success;
+}
+
 int main()
 {
     check_res(test_string_serialization());
     check_res(test_string_split());
     check_res(test_js_time());
+    file_check();
 
     return result::success;
 }

@@ -227,6 +227,10 @@
         width: 100%;
     }
 
+    .no_c:nth-child(even) {
+        background-color: white;
+    }
+
     #search_input {
         width: auto;
         margin-left: 20px;
@@ -281,22 +285,23 @@
     </object>
 </div>
 <div id="create_div">
-    <div>
-        <label for="upload_file">
-            <div id="upload_icon" class="file-icon" data-type="&#8657;"
-                style="float:left; margin-left:5px; margin-top: 18px; margin-right: 5px;"></div>
-        </label>
-        <input id="upload_file" name="file" type="file" />
-        <button onclick="upload_data();">Datei Hochladen</button>
-    </div>
-
-    <div>
-        <label for="create_folder" style="clear:both">
-            <div class="folder" style="float:left; margin-left:5px; margin-top: 18px; margin-right: 5px;"></div>
-        </label>
-        <input id="new_folder_input" type="text" style="width:auto;" />
-        <button onclick="create_folder();" style="float:right">Ordner erstellen</button>
-    </div>
+    <table>
+        <tr class="no_c">
+            <td> <label for="upload_file"> <div id="upload_icon" class="file-icon" data-type="&#8657;"></div> </label> </td>
+            <td><input id="upload_file" name="file" type="file" /></td>
+            <td><button onclick="upload_data();" style="width:100%">Datei Hochladen</button> </td>
+        </tr>
+        <tr class="no_c">
+            <td><label for="create_folder" style="clear:both"> <div class="folder" ></div> </label> </td>
+            <td><input id="new_folder_input" type="text" style="width:auto;" /></td>
+            <td><button onclick="create_folder();" style="width:100%">Ordner erstellen</button></td>
+        </tr>
+        <tr class="no_c">
+            <td><label for="new_table_file_input" style="clear:both"> <div class="file-icon" data-type="tbl" > </div> </label></td>
+            <td><input id="new_table_file_input" type="text" style="width:auto;" /></td>
+            <td><button onclick="create_table_file();" style="width:100%">Tabellendatei erstellen</button></td>
+        </tr>
+    </table>
 </div>
 <div id="edit_div">
     <button class="edit_button" onclick="copy_selected()">&#128247; Kopieren</button>
@@ -399,31 +404,6 @@
         let data = await fetch(data_file, { headers: { credentials: user_credentials } });
         data = await data.blob();
         let url = URL.createObjectURL(data);
-        //let renderer = document.getElementById("document_renderer");
-        //renderer.setAttribute("data", url);
-        //switch(extension){
-        //case "json":
-        //case "xml":
-        //case "pdf": renderer.setAttribute("type", "application/" + extension); break;
-        //case "ods":
-        //case "xlsm":
-        //case "xls":
-        //case "xltx":
-        //case "xltm":
-        //case "xlsx": renderer.setAttribute("type", "application/vnd.ms-excel");
-        //case "jpeg":
-        //case "jpg":
-        //case "gif":
-        //case "svg":
-        //case "png": renderer.setAttribute("type", "image/" + extension); break;
-        //case "wav":
-        //case "ogg":
-        //case "mp3": renderer.setAttribute("type", "audio/" + extension); break;
-        //case "webm":
-        //case "mp4": renderer.setAttribute("type", "video/" + extension); break;
-        //default : renderer.setAttribute("type", "text/plain"); break;
-        //}
-        //document.getElementById("document_viewer").style.display = "block";
         window.open(url);
     }
 
@@ -478,8 +458,17 @@
         res = await res.json();
         if (!("success" in res))
             console.log(res);
-        else
-            reload_cur_directory();
+        reload_cur_directory();
+    }
+
+    async function create_table_file() {
+        let file_name = document.getElementById("new_table_file_input").value;
+        let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".tbl";
+        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
     }
 
     function update_selected_files() {
@@ -505,8 +494,8 @@
             files: copy_files,
             files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/"),
         };
-        let res = await fetch("/move_daten", { 
-            headers: {credentials: user_credentials},
+        let res = await fetch("/move_daten", {
+            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(send_data),
         });
@@ -519,12 +508,12 @@
     async function delete_selected() {
         update_selected_files();
         let res = await fetch("/delete_daten", {
-            headers: {credentials: user_credentials},
+            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(copy_files),
         });
         res = await res.json();
-        if(!("success" in res))
+        if (!("success" in res))
             console.log(res);
         reload_cur_directory();
     }
