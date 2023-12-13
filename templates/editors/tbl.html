@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+    <title>Tbl Editor</title>
+    <style>
+        html * {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 115%;
+        }
+
+        body {
+            width: auto;
+        }
+
+        a {
+            cursor: pointer;
+        }
+
+        button {
+            border: none;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        input {
+            border-style: solid;
+            border-color: lightgray;
+        }
+
+        .tool_bar {
+            display: block;
+            white-space: nowrap;
+            background-color: #eaebff;
+            padding: 15px;
+            border-radius: 35px;
+        }
+
+        .tool_bar_separator {
+            display: inline-block;
+            width: 0px;
+            border-style: solid;
+            border-width: 1px;
+            border-color: lightgrey;
+            height: 1.5em;
+            margin-bottom: -.6em;
+        }
+
+        .input_bar {
+            display: block;
+            padding: 15px;
+        }
+
+        .tool_item {
+            vertical-align: middle;
+            display: inline-block;
+            background: none;
+            overflow: hidden;
+        }
+
+        .table_field {
+            border-style: solid;
+            border-width: 1px;
+            border-color: lightgrey;
+            user-select: none;
+        }
+
+        .table_field_selected,
+        .table_field:hover,
+        .table_col_header:hover,
+        .table_row_header:hover {
+            background-color: lightblue;
+        }
+
+        .table_col_header,
+        .table_row_header {
+            border-style: solid;
+            cursor: pointer;
+            user-select: none;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .table_row_header {
+            border-width: 1px;
+        }
+
+        .flip {
+            transform: scale(-1, 1);
+        }
+
+        #font_size_input {
+            border-radius: 4px;
+            width: 60px;
+        }
+
+        #table,
+        #column_labels {
+            width: 100%;
+            display: grid;
+            border-collapse: collapse;
+        }
+
+        #table,
+        #row_labels {
+            height: 100%;
+        }
+
+        #row_labels,
+        #empty_cell {
+            width: 50px;
+        }
+
+        #empty_cell,
+        #column_labels {
+            height: 40px;
+        }
+
+        #column_labels,
+        #row_labels,
+        #table {
+            overflow: scroll;
+        }
+
+        #table_container {
+            display: grid;
+            grid-template-columns: auto auto;
+            grid-template-rows: auto auto;
+            height: calc(100vh - 400px);
+            width: calc(100vw - 30px);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="editor_header">
+        <p style="font-size:200%; text-align:center">{{file_name}}</p>
+        <div id="tool_bar" class="tool_bar">
+            <div id="font_size" class="tool_item">
+                <a onclick="font_delta(1./9.);">+</a>
+                <input id="font_size_input" value="10" onchange="font_size_changed()" />
+                <a onclick="font_delta(-.1);">-</a>
+            </div>
+            <div class="tool_bar_separator"></div>
+            <div class="tool_item">
+                <button onclick="toggle_font_bold();"><b>B</b></button>
+            </div>
+            <div class="tool_item">
+                <button onclick="toggle_font_italic();"><i>I</i></button>
+            </div>
+            <div class="tool_item">
+                <button onclick="toggle_font_del();"><del>D</del></button>
+            </div>
+            <div class="tool_bar_separator"></div>
+            <input id="text_color_picker" type="color" class="tool_item">A</input>
+            <input id="background_color_picker" type="color" class="tool_item" value="#ffffff">&#129699;</input>
+            <div class="tool_bar_separator"></div>
+            <button id="align_left" onclick="" class="flip">&#8694;</button>
+            <button id="align_right" onclick="">&#8694;</button>
+            <div class="tool_bar_separator"></div>
+            <button id="add_new_row_below" onclick="" class="tool_item">&#9088;</button>
+        </div>
+    </div>
+
+    <div id="input_bar" class="input_bar">
+        <input id="cell_selection" class="tool_item" type="dropdown" value="A1" onchange="update_selected();" />
+        <div class="tool_item">f(x) = </div>
+        <input id="tool_item_content" class="tool_item" type="text" onchange="update_text(this)" />
+    </div>
+
+    <div id="table_container">
+        <div id="empty_cell"></div>
+        <div id="column_labels" onscroll="sync_scroll(this)"></div>
+        <div id="row_labels" onscroll="sync_scroll(this)"></div>
+        <div id="table" onscroll="sync_scroll(this)"></div>
+        <!--The table is created programmatically, see init_table()-->
+    </div>
+</body>
+<script>
+    const a_code = "A".charCodeAt(0);
+    const user_credentials = "{{user_credentials}}";
+    const file_data = "{{file_data}}";
+
+    var table_data = null;
+
+    try {
+        table_data = JSON.parse(file_data);
+    }
+    catch (e) {
+        table_data = {};
+    }
+
+    function create_cell(cell_pos, options) {
+        return {
+            type: "cell",
+            cell_pos: cell_pos,
+            content: "content" in options ? options.content : "",
+            style: "style" in options ? options.style : {}
+        }
+    }
+    function update_cell_div(cell) {
+    }
+    function font_size_changed() {
+        let font_size = parseFloat(document.getElementById("font_size_input").value);
+    }
+    function font_delta(p) {
+        let size_input = document.getElementById("font_size_input");
+        size_input.value = String(parseFloat(size_input.value) * (1 + p));
+    }
+    function toggle_font_bold() {
+        if (cur_selected_field in table_data) {
+            let c = table_data[cur_selected_field];
+            if ("font-weight" in c)
+                delete c["font-weight"];
+            else
+                c["font-weight"] = "bold";
+        }
+        else
+            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
+    }
+    function toggle_font_italic() {
+        if (cur_selected_field in table_data) {
+            let c = table_data[cur_selected_field];
+            if ("font-weight" in c)
+                delete c["font-weight"];
+            else
+                c["font-weight"] = "bold";
+        }
+        else
+            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
+    }
+    function toggle_font_del() {
+        if (cur_selected_field in table_data) {
+            let c = table_data[cur_selected_field];
+            if ("font-weight" in c)
+                delete c["font-weight"];
+            else
+                c["font-weight"] = "bold";
+        }
+        else
+            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
+    }
+    function update_text(input_field) {
+
+    }
+    function sync_scroll(div) {
+        let t = document.getElementById("table");
+        let cl = document.getElementById("column_labels");
+        let rl = document.getElementById("row_labels");
+
+        if (div.id == "column_labels" || div.id == "table") {
+            let left = div.scrollLeft;
+            t.scrollLeft = left;
+            cl.scrollLeft = left;
+        }
+        if (div.id == "row_labels" || div.id == "table") {
+            let top = div.scrollTop;
+            t.scrollTop = top;
+            rl.scrollTop = top;
+        }
+    }
+
+    function init_table() {
+        const col_range = ["A".charCodeAt(0), "Z".charCodeAt(0)];
+        const row_range = [1, 200];
+        const num_cols = col_range[1] - col_range[0] + 1;
+        const num_rows = row_range[1] - row_range[0] + 1;
+        let table_div = document.getElementById("table");
+        let column_labels = document.getElementById("column_labels");
+        let row_labels = document.getElementById("row_labels");
+        table_div.style.gridTemplateColumns = column_labels.style.gridTemplateColumns = "repeat(" + num_cols + ", 100px)";
+        table_div.style.gridTemplateRows = row_labels.style.gridTemplateRows = "repeat(" + num_rows + ", auto)";
+        let inner = "";
+        let inner_cols = "";
+        let inner_rows = "";
+        for (let r = 0; r < num_rows; r++) {
+            for (let c = 0; c < num_cols; c++) {
+                let row = String(row_range[0] + r);
+                let col = String.fromCharCode(col_range[0] + c);
+                let id = col + row;
+
+                inner += `<div id="${id}" class="table_field" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${id}</div>`;
+
+                if (r == 0)
+                    inner_cols += `<div id="${col}:${col}" class="table_col_header" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${col}</div>`;
+                if (c == 0)
+                    inner_rows += `<div id="${row}:${row}" class="table_row_header" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${row}</div>`;
+            }
+        }
+        table_div.innerHTML = inner;
+        column_labels.innerHTML = inner_cols;
+        row_labels.innerHTML = inner_rows;
+    }
+    
+    function get_start_end_cell(cell_ids) {
+        let start_end = cell_ids.split(":");
+        let start_row = 1;
+        let start_col = 0;
+        if (start_end[0].length == 1 && isNaN(parseInt(start_end[0]))) { // only col
+            start_col = start_end[0].charCodeAt(0) - "A".charCodeAt(0);
+        }
+        else if (!isNaN(parseInt(start_end[0]))) { // only row
+            start_row = parseInt(start_end[0]);
+        }
+        else {  // col and row
+            start_col = start_end[0].charCodeAt(0) - "A".charCodeAt(0);
+            start_row = parseInt(start_end[0].slice(1));
+        }
+        let end_row = start_row;
+        let end_col = start_col;
+        if (start_end.length == 2) {
+            if (start_end[1].length == 1 && isNaN(parseInt(start_end[1]))) { // only col
+                end_col = start_end[1].charCodeAt(0) - "A".charCodeAt(0);
+                end_row = 1 << 20;
+            }
+            else if (!isNaN(parseInt(start_end[1]))) { // only row
+                end_row = parseInt(start_end[1]);
+                end_col = "Z".charCodeAt(0) - a_code;
+            }
+            else {  // col and row
+                end_col = start_end[1].charCodeAt(0) - "A".charCodeAt(0);
+                end_row = parseInt(start_end[1].slice(1));
+            }
+        }
+        return [start_row, end_row, start_col, end_col];
+    }
+    var drag_start_cell = null;
+    function select_cell(cell) {
+        document.getElementById("cell_selection").value = cell.id;
+        drag_start_cell = cell.id;
+        update_selected();
+    }
+    function select_end_cell(cell) {
+        let sra, era, sca, eca;
+        let srb, erb, scb, ecb;
+        [sra, era, sca, eca] = get_start_end_cell(drag_start_cell);
+        [srb, erb, scb, ecb] = get_start_end_cell(cell.id);
+        sra = Math.min(sra, srb);
+        era = Math.max(era, erb);
+        sca = Math.min(sca, scb);
+        eca = Math.max(eca, ecb);
+        document.getElementById("cell_selection").value = String.fromCharCode(a_code + sca) + sra + ":" + String.fromCharCode(a_code + eca) + era;
+        update_selected();
+    }
+
+    function update_selected() {
+        // parsing the cur_selected_string and then marking all divs which are selected
+        let start_row, end_row, start_col, end_col;
+        [start_row, end_row, start_col, end_col] = get_start_end_cell(document.getElementById("cell_selection").value);
+
+        // clearing all painted fields
+        let divs = document.getElementsByClassName("table_field_selected");
+        while (divs.length)
+            divs[0].classList.remove("table_field_selected");
+        let exists = true;
+        for (let r = start_row; r <= end_row && exists; ++r) {
+            for (let c = start_col; c <= end_col && exists; ++c) {
+                let div_id = String.fromCharCode(c + "A".charCodeAt(0)) + r;
+                let element = document.getElementById(div_id);
+                if (element == null)
+                    exists = false;
+                else
+                    element.classList.add("table_field_selected");
+            }
+        }
+    }
+
+    init_table();
+    document.ondragstart = (e) => {
+        
+    }
+    document.ondrag = (e) => {
+
+    }
+</script>
+
+</html>

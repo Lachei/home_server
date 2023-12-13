@@ -276,7 +276,7 @@
         </div>
         <div id="name_header" class="header_div">Name</div>
         <div id="size_header" class="header_div">Gr&ouml;sse</div>
-        <div id="changed_header" class="header_div">Bearbeitet von</div>
+        <div id="edit" class="header_div">Bearbeiten</div>
         <div id="change_date_header" class="header_div">Ge&auml;ndert</div>
     </div>
 </div>
@@ -358,6 +358,16 @@
         return (n.toFixed(n < 10 && l > 0 ? 1 : 0) + ' ' + units[l]);
     }
 
+    function edit_icon(data_extension, data_path) {
+        const edit_icon = "✍";
+        switch(data_extension) { 
+            case "tbl": return `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>`;
+        default:
+            // all other data extensions are not editable
+            return "";
+        }
+    }
+
     function update_explorer_list(files_json) {
         let list = document.getElementById("folder_explorer_header");
         for (let node of list.querySelectorAll(".le_div")) {
@@ -378,7 +388,7 @@
             else
                 list.innerHTML += "<div class='le_div'><a onclick='cur_directory=\"" + element.full_path + "\"; reload_cur_directory();'>" + element.name + "</a></div>";
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
-            list.innerHTML += "<div class='le_div'>" + element.changed_by + "</div>";
+            list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path) + "</div>";
             list.innerHTML += "<div class='le_div'>" + data_pretty_date(element.change_date) + "</div>";
         }
     }
@@ -516,6 +526,17 @@
         if (!("success" in res))
             console.log(res);
         reload_cur_directory();
+    }
+
+    async function open_editor(file_path, file_extension) {
+        // opening the editor works by retrieving the editor page with credentials
+        // and then opening a new window with the retrieved body as blob in new window
+        let url = `/edit_${file_extension}/${file_path}`;
+        let res = await fetch(url, {headers: {credentials: user_credentials}});
+        let new_site = await res.blob();
+
+        let new_site_url = URL.createObjectURL(new_site);
+        window.open(new_site_url);
     }
 
     setup_file_explorer();

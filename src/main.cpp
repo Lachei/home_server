@@ -297,6 +297,24 @@ int main(int argc, const char** argv) {
     // ------------------------------------------------------------------------------------------------
     // File editing
     // ------------------------------------------------------------------------------------------------
+    const auto tbl_editor_page = crow::mustache::load("editors/tbl.html");
+    CROW_ROUTE(app, "/edit_tbl/<path>")([&credentials, &data_base_folder, &tbl_editor_page](const crow::request& req, const std::string& path) {
+        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+
+        if (std::filesystem::path(path).extension() != ".tbl")
+            return crow::response{nlohmann::json{{"error", "Only tbl files allowed for edit_tbl route"}}.dump()};
+        std::string data_path = data_base_folder.data() + path;
+        std::ifstream data(data_path, std::ios_base::binary);
+        std::string d; d.resize(std::filesystem::file_size(data_path));
+        data.read(d.data(), d.size());
+        crow::mustache::context crow_context{};
+        crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
+        crow_context["file_data"] = d;
+        crow_context["file_name"] = std::filesystem::path(data_path).filename().string();
+        crow::response r(tbl_editor_page.render_string(crow_context));
+        r.add_header("Content-Type", crow::mime_types.at("html"));
+        return r;
+    });
 
     
     // ------------------------------------------------------------------------------------------------
