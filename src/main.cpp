@@ -319,6 +319,7 @@ int main(int argc, const char** argv) {
         crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
         crow_context["file_data"] = d;
         crow_context["file_name"] = std::filesystem::path(data_path).filename();
+        crow_context["file_path"] = path;
         crow::response r(tbl_editor_page.render_string(crow_context));
         r.add_header("Content-Type", crow::mime_types.at("html"));
         return r;

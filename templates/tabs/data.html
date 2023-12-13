@@ -533,10 +533,7 @@
         // and then opening a new window with the retrieved body as blob in new window
         let url = `/edit_${file_extension}/${file_path}`;
         let res = await fetch(url, {headers: {credentials: user_credentials}});
-        let contents = await res.text();
-        contents = contents.replace("[[file_path]]", file_path).replace("[[update_path]]", location.origin + "/update_file");
-
-        let new_site = new Blob([contents], {type: "text/html"});
+        let new_site = await res.blob();
 
         let new_site_url = URL.createObjectURL(new_site);
         window.open(new_site_url);
