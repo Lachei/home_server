@@ -32,8 +32,8 @@
         .tool_bar {
             display: block;
             white-space: nowrap;
-            background-color: #eaebff;
-            padding: 15px;
+            background-color: #e2e3ff;
+            padding: 6px;
             border-radius: 35px;
         }
 
@@ -162,9 +162,9 @@
             <button id="save" class="tool_item" onclick="save();">&#128190;</button>
             <div class="tool_bar_separator"></div>
             <div id="font_size" class="tool_item">
-                <a onclick="font_delta(1./9.);">+</a>
-                <input id="font_size_input" value="10" onchange="font_size_changed()" />
-                <a onclick="font_delta(-.1);">-</a>
+                <a onclick="font_delta(1);">+</a>
+                <input id="font_size_input" value="8" onchange="font_size_changed()" />
+                <a onclick="font_delta(-1);">-</a>
             </div>
             <div class="tool_bar_separator"></div>
             <div class="tool_item">
@@ -177,8 +177,8 @@
                 <button onclick="toggle_font_del();"><del>D</del></button>
             </div>
             <div class="tool_bar_separator"></div>
-            <input id="text_color_picker" type="color" class="tool_item">A</input>
-            <input id="background_color_picker" type="color" class="tool_item" value="#ffffff">&#129699;</input>
+            <input id="text_color_picker" type="color" class="tool_item" onchange="change_color('color', this)">A</input>
+            <input id="background_color_picker" type="color" class="tool_item" onchange="change_color('background-color', this)" value="#ffffff">&#129699;</input>
             <div class="tool_bar_separator"></div>
             <button id="align_left" onclick="align('left');" class="flip">&#8694;</button>
             <button id="align_center" onclick="align('center');">&#9776;</button>
@@ -242,11 +242,21 @@
         }
     }
     function font_size_changed() {
-        let font_size = parseFloat(document.getElementById("font_size_input").value);
+        let font_size = (document.getElementById("font_size_input").value);
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data) {
+                table_data[id].style["font-size"] = font_size + "mm";
+            }
+            else
+                table_data[id] = create_cell(id, {style: {"font-size": font_size}});
+
+            update_cell_div(table_data[id]);
+        }
     }
     function font_delta(p) {
         let size_input = document.getElementById("font_size_input");
-        size_input.value = String(parseFloat(size_input.value) * (1 + p));
+        size_input.value = String(Math.max(parseFloat(size_input.value) + p, 1));
+        font_size_changed();
     }
     function toggle_font_bold() {
         for (let id of iterate_selected_cells_id()) {
@@ -449,6 +459,17 @@
                 checked = table_data[id].content == ballot_box;
 
             table_data[id].content = checked ? ballot_box_checked : ballot_box;
+            update_cell_div(table_data[id]);
+        }
+    }
+    
+    function change_color(style_name, color) {
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data)
+                table_data[id].style[style_name] = color.value;
+            else
+                table_data[id] = create_cell(id, {style : {style_name: color.value}});
+            
             update_cell_div(table_data[id]);
         }
     }
