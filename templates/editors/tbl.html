@@ -80,10 +80,6 @@
             user-select: none;
             text-align: center;
             font-weight: bold;
-        }
-
-        .table_row_header,
-        .table_col_header {
             border-width: 1px;
         }
 
@@ -122,6 +118,21 @@
             border-color: gray;
             margin-top: -2px;
             margin-left: -2px;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        #column_labels::-webkit-scrollbar,
+        #row_labels::-webkit-scrollbar {
+            display: none;
+        }
+
+        .col_width {
+            width: 200px;
+        }
+
+        .row_height {
+            height: 40px;
         }
 
         #column_labels,
@@ -131,14 +142,14 @@
             overflow: scroll;
         }
 
-        .table_row_header,
-        .table_field {
-            height: 40px;
+        .table_col_header {
+            resize: horizontal;
+            overflow: auto;
         }
 
-        .table_col_header,
-        .table_field {
-            width: 200px;
+        .table_row_header {
+            resize: vertical;
+            overflow: auto;
         }
 
         #table_container {
@@ -148,7 +159,7 @@
             height: calc(100vh - 400px);
             width: calc(100vw - 30px);
         }
-        
+
         #select_end {
             vertical-align: middle;
         }
@@ -177,8 +188,10 @@
                 <button onclick="toggle_font_del();"><del>D</del></button>
             </div>
             <div class="tool_bar_separator"></div>
-            <input id="text_color_picker" type="color" class="tool_item" onchange="change_color('color', this)">A</input>
-            <input id="background_color_picker" type="color" class="tool_item" onchange="change_color('background-color', this)" value="#ffffff">&#129699;</input>
+            <input id="text_color_picker" type="color" class="tool_item"
+                onchange="change_color('color', this)">A</input>
+            <input id="background_color_picker" type="color" class="tool_item"
+                onchange="change_color('background-color', this)" value="#ffffff">&#129699;</input>
             <div class="tool_bar_separator"></div>
             <button id="align_left" onclick="align('left');" class="flip">&#8694;</button>
             <button id="align_center" onclick="align('center');">&#9776;</button>
@@ -195,6 +208,7 @@
         <button id="select_end" onclick="next_end=true;">&#9974;</button>
         <div class="tool_item">f(x) = </div>
         <input id="tool_item_content" class="tool_item" type="text" onchange="update_text(this)" />
+        <button id="insert_cells_toggle" onclick="toggle_insert_cells();">&#9633;</button>
     </div>
 
     <div id="table_container">
@@ -208,8 +222,10 @@
 <script>
     const a_code = "A".charCodeAt(0);
     const user_credentials = "{{user_credentials}}";
-    const file_data = new DOMParser().parseFromString("{{file_data}}", "text/html").body.firstChild.textContent;
-    const file_path = new DOMParser().parseFromString("{{file_path}}", "text/html").body.firstChild.textContent;
+    const parsed_data = new DOMParser().parseFromString("{{file_data}}", "text/html").body.firstChild
+    const parsed_path = new DOMParser().parseFromString("{{file_path}}", "text/html").body.firstChild
+    const file_data = parsed_data == null ? "" : parsed_data.textContent;
+    const file_path = parsed_path.textContent;
     const ballot_box = "&#9744;";
     const ballot_box_checked = "&#9745;";
 
@@ -233,12 +249,36 @@
             style: "style" in options ? options.style : {}
         }
     }
+    function create_col_header(cell_pos, width) {
+        return {
+            type: "col_header",
+            cell_pos: cell_pos,
+            width: width,
+        }
+    }
+    function create_row_header(cell_pos, height) {
+        return {
+            type: "row_header",
+            cell_pos: cell_pos,
+            height: height,
+        }
+    }
     function update_cell_div(cell) {
         let div = document.getElementById(cell.cell_pos);
-        div.innerHTML = cell.content;
-        div.removeAttribute("style");
-        for (let [s, v] of Object.entries(cell.style)) {
-            div.style[s] = v;
+        switch (cell.type) {
+            case "cell":
+                div.innerHTML = cell.content;
+                div.removeAttribute("style");
+                for (let [s, v] of Object.entries(cell.style)) {
+                    div.style[s] = v;
+                }
+                break;
+            case "col_header":
+                resize_col([{ target: { id: cell.cell_pos }, contentRect: { width: cell.width } }]);
+                break;
+            case "row_header":
+                resize_row([{ target: { id: cell.cell_pos }, contentRect: { height: cell.height } }]);
+                break;
         }
     }
     function font_size_changed() {
@@ -248,7 +288,7 @@
                 table_data[id].style["font-size"] = font_size + "mm";
             }
             else
-                table_data[id] = create_cell(id, {style: {"font-size": font_size}});
+                table_data[id] = create_cell(id, { style: { "font-size": font_size } });
 
             update_cell_div(table_data[id]);
         }
@@ -307,6 +347,8 @@
         }
     }
     function update_text(input_field) {
+        if (insert_cells_text)
+            return;
         for (let id of iterate_selected_cells_id()) {
             if (!(id in table_data))
                 table_data[id] = create_cell(id);
@@ -350,17 +392,25 @@
                 let col = String.fromCharCode(col_range[0] + c);
                 let id = col + row;
 
-                inner += `<div id="${id}" class="table_field" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);"></div>`;
+                inner += `<div id="${id}" class="table_field col_width row_height row_${row} col_${col}" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);"></div>`;
 
                 if (r == 0)
-                    inner_cols += `<div id="${col}:${col}" class="table_col_header" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${col}</div>`;
+                    inner_cols += `<div id="${col}:${col}" class="table_col_header col_width col_${col}" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${col}</div>`;
                 if (c == 0)
-                    inner_rows += `<div id="${row}:${row}" class="table_row_header" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${row}</div>`;
+                    inner_rows += `<div id="${row}:${row}" class="table_row_header row_height row_${row}" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${row}</div>`;
             }
         }
         table_div.innerHTML = inner;
         column_labels.innerHTML = inner_cols;
         row_labels.innerHTML = inner_rows;
+        for (let r = 0; r < num_rows; r++) {
+            let id = `${r + row_range[0]}:${r + row_range[0]}`;
+            new ResizeObserver((e) => resize_row(e)).observe(document.getElementById(id));
+        }
+        for (let c = 0; c < num_cols; c++) {
+            let id = `${String.fromCharCode(c + a_code)}:${String.fromCharCode(c + a_code)}`;
+            new ResizeObserver((e) => resize_col(e)).observe(document.getElementById(id));
+        }
     }
 
     function get_start_end_cell(cell_ids) {
@@ -404,16 +454,38 @@
         return "A0";
     }
     var drag_start_cell = null;
+    var insert_cells_text = false;
+    var insert_cells_id = null;
+    function toggle_insert_cells() {
+        insert_cells_text = !insert_cells_text;
+        if (insert_cells_text) {
+            document.getElementById("insert_cells_toggle").innerHTML = "&#9635;";
+            insert_cells_id = document.getElementById("cell_selection").value;
+        }
+        else {
+            document.getElementById("insert_cells_toggle").innerHTML = "&#9633;";
+            document.getElementById("cell_selection").value = insert_cells_id;
+            update_text(document.getElementById("tool_item_content"));
+            update_selected();
+        }
+    }
     function select_cell(cell) {
         if (next_end) {
             select_end_cell(cell);
             next_end = false;
-            return;
         }
-        document.getElementById("cell_selection").value = cell.id;
-        drag_start_cell = cell.id;
-        update_selected();
-        document.getElementById("tool_item_content").value = cell.id in table_data ? table_data[cell.id].content : "";
+        else {
+            document.getElementById("cell_selection").value = cell.id;
+            drag_start_cell = cell.id;
+            update_selected();
+        }
+        let tic = document.getElementById("tool_item_content");
+        if (!insert_cells_text) {
+            let c = cell.id in table_data && table_data[cell.id].type == "cell" ? table_data[cell.id].content : "";
+            tic.value = c;
+        }
+        else
+            select_cell_function_input();
     }
     function select_end_cell(cell) {
         let sra, era, sca, eca;
@@ -426,6 +498,17 @@
         eca = Math.max(eca, ecb);
         document.getElementById("cell_selection").value = String.fromCharCode(a_code + sca) + sra + ":" + String.fromCharCode(a_code + eca) + era;
         update_selected();
+        select_cell_function_input();
+    }
+    function select_cell_function_input() {
+        if (!insert_cells_text)
+            return;
+        let tic = document.getElementById("tool_item_content");
+        if (tic.value.slice(-1) == '"') {
+            tic.value = tic.value.slice(0, -1);
+            tic.value = tic.value.slice(0, tic.value.lastIndexOf('"'));
+        }
+        tic.value += '"' + document.getElementById("cell_selection").value + '"';
     }
 
     function update_selected() {
@@ -462,21 +545,60 @@
             update_cell_div(table_data[id]);
         }
     }
-    
+
     function change_color(style_name, color) {
         for (let id of iterate_selected_cells_id()) {
             if (id in table_data)
                 table_data[id].style[style_name] = color.value;
             else
-                table_data[id] = create_cell(id, {style : {style_name: color.value}});
-            
+                table_data[id] = create_cell(id, { style: { style_name: color.value } });
+
             update_cell_div(table_data[id]);
         }
     }
-    
+
+    function resize_col(element) {
+        let width = element[0].contentRect.width;
+        let id = element[0].target.id;
+        let col_id = "col_" + id[0];
+        let style_id = "style_" + col_id;
+        let prev_style = document.getElementById(style_id);
+        if (prev_style != null) {
+            delete table_data[id];
+            prev_style.remove();
+        }
+        if (width == 200)
+            return;
+        let style = document.createElement("style");
+        style.id = style_id;
+        style.type = "text/css";
+        style.innerHTML = `.${col_id}{width: ${width}px;}`;
+        document.getElementsByTagName('head')[0].appendChild(style);
+        table_data[id] = create_col_header(id, width);
+    }
+    function resize_row(element) {
+        let height = element[0].contentRect.height;
+        let id = element[0].target.id;
+        let row_id = "row_" + id.slice(":")[0];
+        let style_id = "style_" + row_id;
+        let prev_style = document.getElementById(style_id);
+        if (prev_style != null) {
+            delete table_data[id];
+            prev_style.remove();
+        }
+        if (height == 40)
+            return;
+        let style = document.createElement("style");
+        style.id = style_id;
+        style.type = "text/css";
+        style.innerHTML = `.${row_id}{height: ${height}px;}`;
+        document.getElementsByTagName('head')[0].appendChild(style);
+        table_data[id] = create_row_header(id, height);
+    }
+
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
-            headers: {credentials: user_credentials, path: file_path},
+            headers: { credentials: user_credentials, path: file_path },
             method: "POST",
             body: JSON.stringify(table_data),
         });
@@ -485,9 +607,11 @@
     }
 
     init_table();
-    for (let [id, e] of Object.entries(table_data)) {
-        update_cell_div(e);
-    }
+    setTimeout(() => {
+        for (let [id, e] of Object.entries(table_data)) {
+            update_cell_div(e);
+        }
+    }, 100);
 </script>
 
 </html>
