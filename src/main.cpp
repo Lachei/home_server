@@ -276,7 +276,15 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        const auto res = data_util::create_file(data_base_folder.data() + req.headers.find("path")->second);
+        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second);
+        return res.dump();
+    });
+    CROW_ROUTE(app, "/update_file").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (req.headers.find("path") == req.headers.end())
+            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
+        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
         return res.dump();
     });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
@@ -310,7 +318,7 @@ int main(int argc, const char** argv) {
         crow::mustache::context crow_context{};
         crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
         crow_context["file_data"] = d;
-        crow_context["file_name"] = std::filesystem::path(data_path).filename().string();
+        crow_context["file_name"] = std::filesystem::path(data_path).filename();
         crow::response r(tbl_editor_page.render_string(crow_context));
         r.add_header("Content-Type", crow::mime_types.at("html"));
         return r;

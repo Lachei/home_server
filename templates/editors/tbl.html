@@ -82,7 +82,8 @@
             font-weight: bold;
         }
 
-        .table_row_header {
+        .table_row_header,
+        .table_col_header {
             border-width: 1px;
         }
 
@@ -102,10 +103,7 @@
             border-collapse: collapse;
         }
 
-        #table,
-        #row_labels {
-            height: 100%;
-        }
+        #table {}
 
         #row_labels,
         #empty_cell {
@@ -118,9 +116,29 @@
         }
 
         #column_labels,
+        #row_labels {
+            border-style: solid;
+            border-width: 2px;
+            border-color: gray;
+            margin-top: -2px;
+            margin-left: -2px;
+        }
+
+        #column_labels,
         #row_labels,
         #table {
+            height: 100%;
             overflow: scroll;
+        }
+
+        .table_row_header,
+        .table_field {
+            height: 40px;
+        }
+
+        .table_col_header,
+        .table_field {
+            width: 200px;
         }
 
         #table_container {
@@ -137,6 +155,8 @@
     <div id="editor_header">
         <p style="font-size:200%; text-align:center">{{file_name}}</p>
         <div id="tool_bar" class="tool_bar">
+            <button id="save" class="tool_item" onclick="save();">&#128190;</button>
+            <div class="tool_bar_separator"></div>
             <div id="font_size" class="tool_item">
                 <a onclick="font_delta(1./9.);">+</a>
                 <input id="font_size_input" value="10" onchange="font_size_changed()" />
@@ -156,15 +176,19 @@
             <input id="text_color_picker" type="color" class="tool_item">A</input>
             <input id="background_color_picker" type="color" class="tool_item" value="#ffffff">&#129699;</input>
             <div class="tool_bar_separator"></div>
-            <button id="align_left" onclick="" class="flip">&#8694;</button>
-            <button id="align_right" onclick="">&#8694;</button>
+            <button id="align_left" onclick="align('left');" class="flip">&#8694;</button>
+            <button id="align_center" onclick="align('center');">&#9776;</button>
+            <button id="align_right" onclick="align('end');">&#8694;</button>
             <div class="tool_bar_separator"></div>
             <button id="add_new_row_below" onclick="" class="tool_item">&#9088;</button>
+            <div class="tool_bar_separator"></div>
+            <button id="add_ballot_box" onclick="add_ballot_box();">&#9745;</button>
         </div>
     </div>
 
     <div id="input_bar" class="input_bar">
         <input id="cell_selection" class="tool_item" type="dropdown" value="A1" onchange="update_selected();" />
+        <button id="select_end" onclick="next_end=true;">&#9974;</button>
         <div class="tool_item">f(x) = </div>
         <input id="tool_item_content" class="tool_item" type="text" onchange="update_text(this)" />
     </div>
@@ -180,9 +204,16 @@
 <script>
     const a_code = "A".charCodeAt(0);
     const user_credentials = "{{user_credentials}}";
-    const file_data = "{{file_data}}";
+    const file_data = new DOMParser().parseFromString("{{file_data}}", "text/html").body.firstChild.textContent;
+    const file_path = "[[file_path]]";
+    const update_path = "[[update_path]]";
+    const ballot_box = "&#9744;";
+    const ballot_box_checked = "&#9745;";
 
     var table_data = null;
+    try { table_data = JSON.parse(file_data); }
+    catch (e) { table_data = {}; }
+    var next_end = false;
 
     try {
         table_data = JSON.parse(file_data);
@@ -191,7 +222,7 @@
         table_data = {};
     }
 
-    function create_cell(cell_pos, options) {
+    function create_cell(cell_pos, options = {}) {
         return {
             type: "cell",
             cell_pos: cell_pos,
@@ -200,6 +231,12 @@
         }
     }
     function update_cell_div(cell) {
+        let div = document.getElementById(cell.cell_pos);
+        div.innerHTML = cell.content;
+        div.removeAttribute("style");
+        for (let [s, v] of Object.entries(cell.style)) {
+            div.style[s] = v;
+        }
     }
     function font_size_changed() {
         let font_size = parseFloat(document.getElementById("font_size_input").value);
@@ -209,40 +246,60 @@
         size_input.value = String(parseFloat(size_input.value) * (1 + p));
     }
     function toggle_font_bold() {
-        if (cur_selected_field in table_data) {
-            let c = table_data[cur_selected_field];
-            if ("font-weight" in c)
-                delete c["font-weight"];
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data) {
+                if ("font-weight" in table_data[id].style)
+                    delete table_data[id].style["font-weight"];
+                else
+                    table_data[id].style["font-weight"] = "bold";
+            }
             else
-                c["font-weight"] = "bold";
+                table_data[id] = create_cell(id, { style: { "font-weight": "bold" } });
+            update_cell_div(table_data[id]);
         }
-        else
-            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
     }
     function toggle_font_italic() {
-        if (cur_selected_field in table_data) {
-            let c = table_data[cur_selected_field];
-            if ("font-weight" in c)
-                delete c["font-weight"];
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data) {
+                if ("fontStyle" in table_data[id].style)
+                    delete table_data[id].style.fontStyle;
+                else
+                    table_data[id].style.fontStyle = "italic";
+            }
             else
-                c["font-weight"] = "bold";
+                table_data[id] = create_cell(id, { style: { fontStyle: "italic" } });
+            update_cell_div(table_data[id]);
         }
-        else
-            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
     }
     function toggle_font_del() {
-        if (cur_selected_field in table_data) {
-            let c = table_data[cur_selected_field];
-            if ("font-weight" in c)
-                delete c["font-weight"];
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data) {
+                if ("textDecoration" in table_data[id].style)
+                    delete table_data[id].style.textDecoration;
+                else
+                    table_data[id].style.textDecoration = "line-through";
+            }
             else
-                c["font-weight"] = "bold";
+                table_data[id] = create_cell(id, { style: { textDecoration: "line-through" } });
+            update_cell_div(table_data[id]);
         }
-        else
-            table_data[cur_selected_field] = create_cell(cur_selected_field, { style: { "font-weight": "bold" } });
+    }
+    function align(at) {
+        for (let id of iterate_selected_cells_id()) {
+            if (id in table_data)
+                table_data[id].style.textAlign = at;
+            else
+                table_data[id] = create_cell(id, { style: { textAlign: at } });
+            update_cell_div(table_data[id]);
+        }
     }
     function update_text(input_field) {
-
+        for (let id of iterate_selected_cells_id()) {
+            if (!(id in table_data))
+                table_data[id] = create_cell(id);
+            table_data[id].content = input_field.value;
+            update_cell_div(table_data[id]);
+        }
     }
     function sync_scroll(div) {
         let t = document.getElementById("table");
@@ -269,7 +326,7 @@
         let table_div = document.getElementById("table");
         let column_labels = document.getElementById("column_labels");
         let row_labels = document.getElementById("row_labels");
-        table_div.style.gridTemplateColumns = column_labels.style.gridTemplateColumns = "repeat(" + num_cols + ", 100px)";
+        table_div.style.gridTemplateColumns = column_labels.style.gridTemplateColumns = "repeat(" + num_cols + ", auto)";
         table_div.style.gridTemplateRows = row_labels.style.gridTemplateRows = "repeat(" + num_rows + ", auto)";
         let inner = "";
         let inner_cols = "";
@@ -280,7 +337,7 @@
                 let col = String.fromCharCode(col_range[0] + c);
                 let id = col + row;
 
-                inner += `<div id="${id}" class="table_field" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${id}</div>`;
+                inner += `<div id="${id}" class="table_field" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);"></div>`;
 
                 if (r == 0)
                     inner_cols += `<div id="${col}:${col}" class="table_col_header" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${col}</div>`;
@@ -292,7 +349,7 @@
         column_labels.innerHTML = inner_cols;
         row_labels.innerHTML = inner_rows;
     }
-    
+
     function get_start_end_cell(cell_ids) {
         let start_end = cell_ids.split(":");
         let start_row = 1;
@@ -325,11 +382,25 @@
         }
         return [start_row, end_row, start_col, end_col];
     }
+    function* iterate_selected_cells_id() {
+        let rs, re, cs, ce;
+        [rs, re, cs, ce] = get_start_end_cell(document.getElementById("cell_selection").value);
+        for (let r = rs; r <= re; ++r)
+            for (let c = cs; c <= ce; ++c)
+                yield String.fromCharCode(a_code + c) + r;
+        return "A0";
+    }
     var drag_start_cell = null;
     function select_cell(cell) {
+        if (next_end) {
+            select_end_cell(cell);
+            next_end = false;
+            return;
+        }
         document.getElementById("cell_selection").value = cell.id;
         drag_start_cell = cell.id;
         update_selected();
+        document.getElementById("tool_item_content").value = cell.id in table_data ? table_data[cell.id].content : "";
     }
     function select_end_cell(cell) {
         let sra, era, sca, eca;
@@ -366,12 +437,32 @@
         }
     }
 
-    init_table();
-    document.ondragstart = (e) => {
-        
-    }
-    document.ondrag = (e) => {
+    function add_ballot_box() {
+        let checked = null;
+        for (let id of iterate_selected_cells_id()) {
+            if (!(id in table_data))
+                table_data[id] = create_cell(id);
+            if (checked == null)
+                checked = table_data[id].content == ballot_box;
 
+            table_data[id].content = checked ? ballot_box_checked : ballot_box;
+            update_cell_div(table_data[id]);
+        }
+    }
+    
+    async function save() {
+        let res = await fetch(update_path, {
+            headers: {credentials: user_credentials, path: file_path},
+            method: "POST",
+            body: JSON.stringify(table_data),
+        });
+        res = await res.json();
+        console.log(res);
+    }
+
+    init_table();
+    for (let [id, e] of Object.entries(table_data)) {
+        update_cell_div(e);
     }
 </script>
 

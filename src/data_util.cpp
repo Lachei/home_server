@@ -40,11 +40,11 @@ namespace data_util
         return nlohmann::json{{"success", "Directory was created successfully"}};
     }
 
-    nlohmann::json create_file(std::string_view file)
+    nlohmann::json update_file(std::string_view file, std::span<const std::byte> data)
     {
         std::ofstream f(file.data(), std::ios_base::binary);
-        f << "";
-        return {{"success", "Created the file"}};
+        f.write(reinterpret_cast<const char*>(data.data()), data.size());
+        return {{"success", "Updated/created the file"}};
     }
 
     nlohmann::json delete_files(std::string_view base_dir, const nlohmann::json &files)
