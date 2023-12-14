@@ -9193,7 +9193,9 @@ namespace crow
                 return {};
             }
             std::ifstream inf(path);
-            return {std::istreambuf_iterator<char>(inf), std::istreambuf_iterator<char>()};
+            std::string r; r.resize(std::filesystem::file_size(path));
+            inf.read(r.data(), r.size());
+            return r;//{std::istreambuf_iterator<char>(inf), std::istreambuf_iterator<char>()};
         }
 
         namespace detail
