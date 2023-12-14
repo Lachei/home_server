@@ -50,9 +50,9 @@ int main(int argc, const char** argv) {
     
     std::string_view data_base_folder = get_parameter(args, "--data");
     if (data_base_folder.empty()) {
-        std::cout << "[error] Missing --data argument.\n";
+        std::cout << "[warning] Missing --data argument.\n";
         print_help();
-        return -1;
+        data_base_folder = "daten/";
     }
 
     crow::App<AccessControlHeader> app;
