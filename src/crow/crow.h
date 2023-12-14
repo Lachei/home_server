@@ -8541,7 +8541,7 @@ namespace crow
 #include <fstream>
 #include <iterator>
 #include <functional>
-
+#include <filesystem>
 
 
 
@@ -9187,12 +9187,12 @@ namespace crow
             if (!(path.back() == '/' || path.back() == '\\'))
                 path += '/';
             path += filename;
-            std::ifstream inf(path);
-            if (!inf)
+            if (!std::filesystem::exists(path))
             {
                 CROW_LOG_WARNING << "Template \"" << filename << "\" not found.";
                 return {};
             }
+            std::ifstream inf(path);
             return {std::istreambuf_iterator<char>(inf), std::istreambuf_iterator<char>()};
         }
 
