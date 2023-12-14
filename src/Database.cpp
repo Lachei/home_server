@@ -51,9 +51,9 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
         std::filesystem::create_directory(file_parent_path);
 
     // loading from file --------------------------------------------------------
-    std::ifstream data_file(this->storage_location, std::ios_base::binary);
-    if (data_file)
+    if (std::filesystem::exists(this->storage_location))
     {
+        std::ifstream data_file(this->storage_location, std::ios_base::binary);
         GeneralHeader general_header{};
         data_file.read(reinterpret_cast<char *>(&general_header), sizeof(general_header));
         if (general_header.magic_num != DBTABLEMAGICNUM)
