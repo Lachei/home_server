@@ -308,6 +308,12 @@
     <button class="edit_button" onclick="cut_selected()">✂️ Ausschneiden</button>
     <button class="edit_button" onclick="paste_selected()">&#128203; Einf&uuml;gen</button>
     <hr>
+    <input id="duplicate_count" type="number" value="1"/>
+    <button class="edit_button" onclick="duplicate_selected(parseInt(document.getElementById('duplicate_count').value));">&#10697;Duplizieren</button>
+    <hr>
+    <input id="renamed_filename" type="text"/>
+    <button class="edit_button" onclick="rename_selected(document.getElementById('renamed_filename').value);">&#9998;Umbenennen</button>
+    <hr>
     <button class="edit_button" style="background-color:red" onclick="delete_selected()">&#128465; L&ouml;schen</button>
 </div>
 
@@ -504,6 +510,44 @@
             files: copy_files,
             files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/"),
         };
+        let res = await fetch("/move_daten", {
+            headers: { credentials: user_credentials },
+            method: "POST",
+            body: JSON.stringify(send_data),
+        });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
+    }
+    
+    async function duplicate_selected(n_copies) {
+        update_selected_files();
+        let send_data = {
+            copy: true,
+            duplicate: n_copies,
+            files: copy_files,
+            files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/")
+        }
+        let res = await fetch("/move_daten", {
+            headers: { credentials: user_credentials },
+            method: "POST",
+            body: JSON.stringify(send_data),
+        });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
+    }
+
+    async function rename_selected(new_name) {
+        update_selected_files();
+        let send_data = {
+            copy: true,
+            new_name: new_name,
+            files: copy_files,
+            files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/")
+        }
         let res = await fetch("/move_daten", {
             headers: { credentials: user_credentials },
             method: "POST",

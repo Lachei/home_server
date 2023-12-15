@@ -72,12 +72,32 @@ namespace data_util
             const std::string src = base_dir.data() + file_list[i].get<std::string>();
             if (!std::filesystem::exists(src))
                 continue;
-            const std::string new_file = new_file_folder + std::filesystem::path(src).filename().string();
-
-            if (copy)
-                std::filesystem::copy(src, new_file);
-            else
+            
+            if (move_infos.contains("duplicate"))
+            {
+                for (auto j: i_range(move_infos["duplicate"].get<int>()))
+                {
+                    const std::filesystem::path src_path(src);
+                    const std::string new_file = new_file_folder + src_path.stem().string() + std::to_string(j) + src_path.extension().string();
+                    std::filesystem::copy(src, new_file);
+                }
+            }
+            else if (move_infos.contains("new_name"))
+            {
+                const std::filesystem::path new_name(move_infos["new_name"].get<std::string>());
+                const std::filesystem::path src_path(src);
+                const std::string new_file = new_file_folder + new_name.stem().string() + (new_name.has_extension() ? new_name.extension().string(): src_path.extension().string());
                 std::filesystem::rename(src, new_file);
+            }
+            else
+            {
+                const std::string new_file = new_file_folder + std::filesystem::path(src).filename().string();
+
+                if (copy)
+                    std::filesystem::copy(src, new_file);
+                else
+                    std::filesystem::rename(src, new_file);
+            }
         }
         return nlohmann::json{{"success", "copied/moved the files"}};
     }
