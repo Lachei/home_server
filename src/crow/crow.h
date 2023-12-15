@@ -9192,10 +9192,12 @@ namespace crow
                 CROW_LOG_WARNING << "Template \"" << filename << "\" not found.";
                 return {};
             }
+            if (path.size() >= 200)
+            {
+                CROW_LOG_WARNING << "Path too long. change max path lenght in crow::mustache::default_loader()";
+            }
             std::ifstream inf(path);
-            std::string r; r.resize(std::filesystem::file_size(path));
-            inf.read(r.data(), r.size());
-            return r;//{std::istreambuf_iterator<char>(inf), std::istreambuf_iterator<char>()};
+            return std::string{std::istreambuf_iterator<char>(inf), std::istreambuf_iterator<char>()};
         }
 
         namespace detail
