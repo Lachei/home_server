@@ -12,7 +12,7 @@ struct AccessControlHeader{
     void before_handle(crow::request& req, crow::response& res, context& ctx){}
     void after_handle(crow::request& req, crow::response& res, context& ctx){
         // only add access control allow for login/main page
-        if(req.url.find("18080") - req.url.size() <= 1) {
+        if(req.url.size() == 1) {
             res.add_header("Access-Control-Allow-Origin", "*");
             res.add_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             res.add_header("Access-Control-Allow-Headers", "Content-Type");
