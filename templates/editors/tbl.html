@@ -612,6 +612,22 @@
             update_cell_div(e);
         }
     }, 100);
+
+    function deepEqual(x, y) {
+        return (x && y && typeof x === 'object' && typeof y === 'object') ?
+            (Object.keys(x).length === Object.keys(y).length) &&
+            Object.keys(x).reduce(function (isEqual, key) {
+                return isEqual && deepEqual(x[key], y[key]);
+            }, true) : (x === y);
+    }
+
+    var saved_table_data = structuredClone(table_data);
+    window.setInterval(() => {
+        if (!deepEqual(saved_table_data, table_data)) {
+            save();
+            saved_table_data = structuredClone(table_data);
+        }
+    }, 5000);
 </script>
 
 </html>
