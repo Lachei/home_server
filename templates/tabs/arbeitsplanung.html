@@ -147,7 +147,6 @@
         for (e of events) {
             parsed_events.push(db_event_to_cal_event(e));
         }
-        console.log(parsed_events[0].backgroundColor);
 
         event_calendar = new EventCalendar(document.getElementById("timetable"), {
             view: 'timeGridWeek',
