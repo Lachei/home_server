@@ -18,5 +18,5 @@ fi
 fi
 
 #copying all needed files
-cp $install_path/home_server "build/GCC 13.2.0 aarch64-linux-gnu/Debug/home_server"
+cp $install_path/home_server "build/GCC 13.2.0 aarch64-linux-gnu/$build_type/home_server"
 cp -r $install_path/templates templates
