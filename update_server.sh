@@ -17,4 +17,4 @@ fi
 
 #copying all needed files
 cp "build/GCC 13.2.0 aarch64-linux-gnu/$build_type/home_server" $install_path/home_server
-cp -r templates $install_path/templates
+cp -r templates $install_path
