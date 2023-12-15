@@ -378,7 +378,7 @@
                 return -1;
             if (b.size == 0 && a.size != 0)
                 return 1;
-            return a.name > b.name;
+            return +(a.name > b.name) * 2 - 1;
         });
         for (let element of files_json.elements) {
             list.innerHTML += "<div class='le_div'><input type='checkbox' class='file_checkbox' file='" + element.full_path + "'/></div>";
