@@ -105,10 +105,10 @@
     </div>
     <div id="shift_inspector" class="inspector">
         <a class="close_x" onclick="hide_shift_inspector()">x</a>
-        <p><b>Shift details</b></p>
+        <p><b>Schicht details</b></p>
         <div id="shift_inspector_content"></div>
         <hr>
-        <p><b>Shift Aktionen</b></p>
+        <p><b>Schicht Aktionen</b></p>
         <div id="shift_inspector_actions">
             <button id="shift_delete_b" class="delete_button" onclick="delete_shift(cur_inspected_shift);">Schicht l&ouml;schen</button>
         </div>
@@ -138,6 +138,9 @@
 
         <label for="original_end">Schicht Ende (exakt)</label>
         <input id="original_end" type="datetime-local">
+        
+        <label for="comment">Kommentar</label>
+        <input id="comment" type="text"/>
     </div>
 </div>
 
@@ -171,7 +174,7 @@
         return new Intl.DateTimeFormat('de-DE', { weekday: 'short', month: 'numeric', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric' }).format(new Date(Date.parse(date)));
     };
     async function update_shifts_table() {
-        let table_header = "<tr><th>Id</th> <th>Genauer Start</th><th>Geanues Ende</th><th>Start</th><th>Ende</th></tr>";
+        let table_header = "<tr><th>Id</th> <th>Kommentar</th><th>Start</th><th>Ende</th></tr>";
         fetch(location.origin + "/get_shifts", { headers: { credentials: user_credentials } })
             .then(response => {
                 response.json().then(entries => {
@@ -182,7 +185,7 @@
                         user_shifts += "<div class='collapsible_content'><table>";
                         user_shifts += table_header;
                         for (let shift of shifts)
-                            user_shifts += "<tr> <td> <button class='shift_button' onclick='inspect_shift(" + shift.id + ");'>" + shift.id + "</button></td><td>" + shift_table_date(shift.original_start_time) + "</td><td>" + shift_table_date(shift.original_end_time) + "</td><td>" + shift_table_date(shift.start_time) + "</td><td>" + shift_table_date(shift.end_time) + "</td></tr>";
+                            user_shifts += "<tr> <td> <button class='shift_button' onclick='inspect_shift(" + shift.id + ");'>" + shift.id + "</button></td><td>" + shift.comment + "</td><td>" + shift_table_date(shift.start_time) + "</td><td>" + shift_table_date(shift.end_time) + "</td></tr>";
                         user_shifts += "</table></div>";
                     }
                     document.getElementById("shift_entries").innerHTML = user_shifts;
@@ -279,6 +282,7 @@
             inner += "<p><b>Genaues Ende:</b> " + orig_end + "</p>";
             inner += "<label for='ins_start'>Startzeit</label><input id='ins_start' type='datetime-local' onchange='update_inspected_shift();'" + disabled + " value='" + start + "'>";
             inner += "<label for='ins_end'>Endzeit</label><input id='ins_end' type='datetime-local' onchange='update_inspected_shift();'" + disabled + " value='" + end + "'>";
+            inner += "<label for='ins_comment'>Kommentar</label><input id='ins_comment' type='text' onchange='update_inspected_shift();'" + disabled + " value='" + shift.comment + "'>";
 
             document.getElementById("shift_inspector_content").innerHTML = inner;
 
@@ -297,7 +301,8 @@
         let end = timepoint_local_to_utc(form.querySelector("#end").value);
         let original_start = timepoint_local_to_utc(form.querySelector("#original_start").value);
         let original_end = timepoint_local_to_utc(form.querySelector("#original_end").value);
-        return { user: user, start_time: start, end_time: end, visibility: "[Alle]", original_start_time: original_start, original_end_time: original_end };
+        let comment = form.querySelector("#comment").value;
+        return { user: user, start_time: start, end_time: end, visibility: "[Alle]", original_start_time: original_start, original_end_time: original_end , comment: comment};
     }
 
     async function update_inspected_shift() {
@@ -307,6 +312,7 @@
         else {
             shift.start_time = timepoint_local_to_utc(document.getElementById("ins_start").value);
             shift.end_time = timepoint_local_to_utc(document.getElementById("ins_end").value);
+            shift.comment = document.getElementById("ins_comment").value;
             let res = await fetch("/update_shift", {
                 headers: { credentials: user_credentials, },
                 method: "POST",

@@ -22,8 +22,8 @@ static Database::Table::ColumnInfos active_shifts_infos{
     .column_types = {t<std::string>, t<Date>},
     .id_column = 0};
 static Database::Table::ColumnInfos finished_shifts_infos{
-    .column_names = {"id", "user", "start_time", "end_time", "visibility", "original_start_time", "original_end_time"},
-    .column_types = {t<uint64_t>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<Date>, t<Date>},
+    .column_names = {"id", "user", "start_time", "end_time", "visibility", "original_start_time", "original_end_time", "comment"},
+    .column_types = {t<uint64_t>, t<std::string>, t<Date>, t<Date>, t<std::string>, t<Date>, t<Date>, t<std::string>},
     .id_column = 0};
 
 std::vector<Database::ElementType> json_event_to_db_event(const nlohmann::json &event)
@@ -211,7 +211,7 @@ namespace database_util
             const auto original_end_time = std::chrono::utc_clock::now();
             const auto start_time = std::chrono::round<std::chrono::minutes>(original_start_time);
             const auto end_time = std::chrono::round<std::chrono::minutes>(original_end_time);
-            std::vector<Database::ElementType> row{person_s, start_time, end_time, "[Alle]", original_start_time, original_end_time};
+            std::vector<Database::ElementType> row{person_s, start_time, end_time, "[Alle]", original_start_time, original_end_time, ""};
             const auto res = db.insert_row_without_id(finished_shifts_table_name, row);
             db.store_table_caches();
             return nlohmann::json{{"status", "success"}};
@@ -228,7 +228,8 @@ namespace database_util
             {"end_time", to_json_date_string(std::get<std::vector<Date>>(data[3])[i])},
             {"visibility", std::get<std::vector<std::string>>(data[4])[i]},
             {"original_start_time", to_json_date_string(std::get<std::vector<Date>>(data[5])[i])},
-            {"original_end_time", to_json_date_string(std::get<std::vector<Date>>(data[6])[i])}};
+            {"original_end_time", to_json_date_string(std::get<std::vector<Date>>(data[6])[i])},
+            {"comment", std::get<std::vector<std::string>>(data[7])[i]}};
     }
     std::vector<Database::ElementType> json_shift_to_db_shift(const nlohmann::json &shift)
     {
@@ -240,7 +241,8 @@ namespace database_util
                 from_json_date_string(shift["end_time"].get<std::string>()),
                 shift["visibility"].get<std::string>(),
                 from_json_date_string(shift["original_start_time"].get<std::string>()),
-                from_json_date_string(shift["original_end_time"].get<std::string>())};
+                from_json_date_string(shift["original_end_time"].get<std::string>()),
+                shift["comment"].get<std::string>()};
         else
             return {
                 shift["user"].get<std::string>(),
@@ -248,7 +250,8 @@ namespace database_util
                 from_json_date_string(shift["end_time"].get<std::string>()),
                 shift["visibility"].get<std::string>(),
                 from_json_date_string(shift["original_start_time"].get<std::string>()),
-                from_json_date_string(shift["original_end_time"].get<std::string>())};
+                from_json_date_string(shift["original_end_time"].get<std::string>()),
+                shift["comment"].get<std::string>()};
     }
 
     nlohmann::json get_shifts_grouped(Database &db)
