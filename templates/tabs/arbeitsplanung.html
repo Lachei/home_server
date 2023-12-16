@@ -19,6 +19,10 @@
         overflow: auto;
     }
 
+    #number_daily_repetitions {
+        display: none;
+    }
+
     .close_x {
         color: white;
         float: right;
@@ -50,7 +54,8 @@
         <hr>
         <p><b>Event Aktionen</b></p>
         <div id="inspector_event_actions">
-            <button id="ins_event_delete_b" class="delete_button" onclick="delete_event(cur_inspected_event)">Event l&ouml;schen</button>
+            <button id="ins_event_delete_b" class="delete_button" onclick="delete_event(cur_inspected_event)">Event
+                l&ouml;schen</button>
         </div>
     </div>
 </div>
@@ -60,8 +65,35 @@
     <div class="inset">
         <div id="create_event_input"> </div>
 
+        <div>
+            <label for="daily_repetition"><b>T&auml;gliche Widerholung</b></label>
+            <input id="daily_repetition" type="checkbox" onchange="
+                let i = document.getElementById('number_daily_repetitions');
+                if (this.checked)
+                    i.style.display = 'block';
+                else
+                    i.style.display = 'none'; " />
+        </div>
+        <div id="number_daily_repetitions" class="inset">
+            <label for="number_daily_repetitions_input">Anzahl wiederholungen</label>
+            <input id="number_daily_repetitions_input" type="number" value="5" />
+        </div>
+
         <button onclick="
-            create_new_event(parse_event_from_form(getElementById('create_event_input')));">Event erstellen</button>
+            let base_event = parse_event_from_form(getElementById('create_event_input'));
+            create_new_event(base_event);
+            if (document.getElementById('daily_repetition').checked) {
+                for (let i = 1; i < parseInt(document.getElementById('number_daily_repetitions_input').value); ++i) {
+                    let start = new Date(Date.parse(base_event.start_time));
+                    start = new Date(start.getTime() + 86400000);
+                    base_event.start_time = start.toISOString();
+                    let end = new Date(Date.parse(base_event.end_time));
+                    end = new Date(end.getTime() + 86400000);
+                    base_event.end_time = end.toISOString();
+                    create_new_event(base_event);
+                }
+            }
+            ">Event erstellen</button>
     </div>
 </div>
 <div id="templates" style="display:none">
@@ -314,7 +346,7 @@
                 inputs.querySelector("#ne_end_time").setAttribute("disabled", "");
 
                 mitarbeiter_selector.innerHTML = "<p class='inset'>" + event.people + "</p>";
-                vis_selector.innerHTML = "<p class='inset'>"  + event.visibility + "</p>";
+                vis_selector.innerHTML = "<p class='inset'>" + event.visibility + "</p>";
 
                 inputs.querySelector("#ne_expected_hours").setAttribute("disabled", "");
                 document.getElementById("ins_event_delete_b").setAttribute("disabled", "");
