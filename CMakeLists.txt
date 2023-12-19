@@ -11,6 +11,7 @@ if(WIN32)
 else()
     add_compile_options(-fpermissive)
 endif()
+#add_compile_definitions(CROW_ENABLE_SSL BOOST_NETWORK_ENABLE_HTTPS)
 
 if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
     message("Setting cpu capabilities for the raspberry pi")
@@ -81,6 +82,7 @@ else()
     find_package(Boost REQUIRED)
     include_directories(${Boost_INCLUDE_DIR})
 endif()
+
 add_executable(home_server ${SRC})
 target_link_libraries(home_server PRIVATE -static ${Boost_LIBRARIES})
 

@@ -44,6 +44,31 @@
         border-radius: 10px;
         height: fit-content;
     }
+
+    .side_select {
+        width: 100%;
+        border: 1px lightgrey solid;
+        background-color: white;
+        padding: 0px;
+        color: black;
+        text-align: left;
+        padding-left: 20px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+
+    .side_select:hover {
+        opacity: 1;
+    }
+
+    .side_select:disabled {
+        color: gray;
+        background-color: #f0f0f0;
+    }
+
+    .side_selection_tooltip {
+        z-index: 100;
+    }
 </style>
 <div id="main_time_view">
     <div id="timetable"></div>
@@ -97,24 +122,28 @@
     </div>
 </div>
 <div id="templates" style="display:none">
-    <div id="side_select"
-        style="display:grid; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px;">
-        <div id="side_select_left_title" style="border:solid thin gray; border-bottom:none">
-            Title links
-            <hr>
+    <button id="side_select_template" class="side_select" onclick="show_side_select_tooltip(event, this);">
+        <div class="selection_text">[]</div>
+        <div class="side_select_tooltip"
+            style="position:absolute; display:none; grid-template-columns: auto auto; grid-template-rows: auto auto; margin: 5px; background-color: white;">
+            <div class="side_select_left_title" style="border:solid thin gray; border-bottom:none; padding:5px;">
+                Nicht dabei
+                <hr>
+            </div>
+            <div class="side_select_right_title" style="border:solid thin gray; border-bottom:none; padding:5px;">
+                Mit dabei
+                <hr>
+            </div>
+            <div class="side_select_left"
+                style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll; padding:5px;">
+                left
+            </div>
+            <div class="side_select_right"
+                style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll; padding:5px;">
+                right
+            </div>
         </div>
-        <div id="side_select_right_title" style="border:solid thin gray; border-bottom:none">
-            Title rechts
-            <hr>
-        </div>
-        <div id="side_select_left" style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll">
-            left
-        </div>
-        <div id="side_select_right"
-            style="border:solid thin gray; border-top:none; max-height: 120px; overflow: scroll;">
-            right
-        </div>
-    </div>
+    </button>
     <div id="event_input_template">
         <label for="ne_title"><b>Titel</b></label>
         <input id="ne_title" type="text">
@@ -128,10 +157,10 @@
         <label for="ne_end_time"><b>End Datum</b></label>
         <input id="ne_end_time" type="datetime-local">
 
-        <label for="ne_people"><b>Mitarbeiter</b></label>
+        <label for="associates"><b>Mitarbeiter</b></label>
         <div id="associates" class="select_users"></div>
 
-        <label for="ne_visibility"><b>Sichtbar f&uuml;r</b></label>
+        <label for="visible"><b>Sichtbar f&uuml;r</b></label>
         <div id="visible" class="select_users select_all"></div>
 
         <label for="ne_expected_hours"><b>Voraussichtliche Arbeitsstunden</b></label>
@@ -141,8 +170,6 @@
 <script>
     let event_calendar = null;
     let cur_inspected_event = null;
-    let inspector_observer = new MutationObserver(inspector_observer_callback);
-    let inspector_observer_config = { childList: true, subtree: true };
     function generateDivergingColors() {
         const colorTable = ['#a6cee3', '#1f78b4', '#b2df8a', '#33a02c', '#fb9a99', '#e31a1c', '#fdbf6f', '#ff7f00', '#cab2d6', '#6a3d9a', '#ffff99', '#b15928'];
 
@@ -211,66 +238,115 @@
         else
             event_calendar.addEvent(db_event_to_cal_event(event_result_json));
     }
+    function show_side_select_tooltip(click_event, side_select_button) {
+        let tooltip = side_select_button.querySelector(".side_select_tooltip");
+        if (tooltip.style.display != "none")
+            return;
+        let possible_values = side_select_button.getAttribute("possible_values").slice(1, -1).split(",");
+        let value = side_select_button.getAttribute("value");
+        let right_values = value.length <= 2 ? [] : value.slice(1, -1).split(",");
+        let left_values = possible_values.filter(x => right_values.indexOf(x) < 0);
+        let left_select = tooltip.querySelector(".side_select_left");
+        let right_select = tooltip.querySelector(".side_select_right");
+        left_select.innerHTML = "";
+        right_select.innerHTML = "";
+        tooltip.style.top = click_event.pageY + "px";
+        tooltip.style.left = click_event.pageX + "px";
+        // setting up the buttons
+        for (user of left_values)
+            if (user != "{{benutzername}}")
+                left_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+        for (user of right_values)
+            if (user != "{{benutzername}}")
+                right_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+
+        tooltip.style.display = "grid";
+        let ignore_next = true;
+        window.addEventListener("click", function hand(e) {
+            if (ignore_next) {
+                ignore_next = false;
+                return;
+            }
+            let div_rect = tooltip.getBoundingClientRect();
+            let prev_value = side_select_button.value;
+            if (e.clientX < div_rect.left || e.clientX > div_rect.right ||
+                e.clientY < div_rect.top || e.clientY > div_rect.bottom) {
+                tooltip.style.display = "none";
+
+                let new_value = user == "admin" ? "" : ",{{benutzername}}";
+                let all_included = false;
+                for (e of right_select.childNodes) {
+                    if ("id" in e) {
+                        if (e.id.slice(3) == "Alle") {
+                            all_included = true;
+                            break;
+                        }
+                        new_value += "," + e.id.slice(3);
+                    }
+                }
+
+                if (all_included)
+                    new_value = ",Alle";
+
+                new_value = "[" + (new_value.length ? new_value.slice(1) : new_value) + "]";
+                selection_update_selected(side_select_button, new_value);
+                if ((typeof side_select_button.onchange == 'function') && new_value != prev_value)
+                    side_select_button.onchange();
+
+                window.removeEventListener('click', hand);
+            }
+        });
+    }
+    function selection_update_selected(selection, new_value) {
+        selection.value = new_value;
+        selection.querySelector(".selection_text").innerHTML = new_value;
+    }
     async function setup_user_selections() {
         let users = await fetch(location.origin + "/get_all_users", { headers: { "credentials": user_credentials } });
-        users = await users.json();
-        const create_selector = (id, contains_all) => {
-            let select = document.getElementById("side_select");
-            let selector = select.cloneNode(true);
-            selector.setAttribute("id", id);
-            selector.querySelector("#side_select_left_title").innerHTML = "<p class='p_title'>Nicht dabei <hr>";
-            selector.querySelector("#side_select_right_title").innerHTML = "<p class='p_title'>Mit dabei <hr>";
+        let users_array = await users.json();
+        users = "[";
+        for (e of users_array)
+            users += e + ",";
+        users = (users.length > 1 ? users.slice(0, -1) : users) + "]";
 
-            let user_buttons = "";
-            for (user of users)
-                if (user != "{{benutzername}}")
-                    user_buttons += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
-            selector.querySelector("#side_select_left").innerHTML = user_buttons;
-            let right_buttons = "";
-            if (contains_all)
-                right_buttons += "<button id='bn_Alle' class='selector_button' onclick=\"switch_side(this);\">Alle</button>\n";
-            selector.querySelector("#side_select_right").innerHTML = right_buttons;
-            return selector;
-        }
         let selectors = document.getElementsByClassName("select_users");
-        for (s of selectors) {
+        while (selectors.length) {
+            s = selectors[0];
             const contains_all = s.classList.contains("select_all");
-            const id = s.getAttribute("id") + "_selector";
-            const selector = create_selector(id, contains_all);
-            s.appendChild(selector);
+            const id = s.getAttribute("id")
+            s.id = id + "old";
+            let selector_copy = document.getElementById("side_select_template").cloneNode(true);
+            selector_copy.id = id;
+            let available_values = users;
+            let selected_values = user == "admin" ? "[]": "[{{benutzername}}]";
+            if (contains_all) {
+                available_values = available_values.slice(0, 1) + "Alle," + available_values.slice(1);
+                selected_values = "[Alle]";
+            }
+
+            //console.log(selector_copy);
+            selector_copy.setAttribute("possible_values", available_values);
+            //selection_update_selected(selector_copy. selected_values);
+            selector_copy.value = selected_values;
+            selector_copy.querySelector(".selection_text").innerHTML = selected_values;
+            s.parentNode.replaceChild(selector_copy, s);
         }
     }
     function switch_side(button) {
         if (button == null)
             return;
         let p = button.parentNode;
-        let other_side = p.getAttribute("id") == "side_select_left" ? "side_select_right" : "side_select_left";
+        let other_side = p.getAttribute("class") == "side_select_left" ? "side_select_right" : "side_select_left";
         p.removeChild(button);
-        p.parentNode.querySelector("#" + other_side).appendChild(button);
+        p.parentNode.querySelector("." + other_side).appendChild(button);
     }
     function setup_event_input() {
         const input_template = document.getElementById("event_input_template").cloneNode(true);
         document.getElementById("create_event_input").appendChild(input_template);
     }
     function parse_event_from_form(event_inputs) {
-        let people = "{{benutzername}}" == "admin" ? "[" : "[{{benutzername}}";
-        for (p of document.getElementById('associates').querySelector('#side_select_right').childNodes) {
-            if (p.innerHTML == 'Alle') {
-                people = '[Alle';
-                break;
-            }
-            people += ',' + p.innerHTML;
-        }
-        people += ']';
-        let visibility = "{{benutzername}}" == "admin" ? "[" : "[{{benutzername}}";
-        for (p of document.getElementById('visible').querySelector('#side_select_right').childNodes) {
-            if (p.innerHTML == 'Alle') {
-                visibility = '[Alle';
-                break;
-            }
-            visibility += ',' + p.innerHTML;
-        }
-        visibility += ']';
+        let people = event_inputs.querySelector("#associates").value;
+        let visibility = event_inputs.querySelector("#visible").value;
         let creator = event_inputs.querySelector('#creator_name');
         let start = new Date(Date.parse(event_inputs.querySelector('#ne_start_time').value));
         let end = new Date(Date.parse(event_inputs.querySelector('#ne_end_time').value));
@@ -295,7 +371,6 @@
         if (!force_update && info.event.id == cur_inspected_event)
             return;
         cur_inspected_event = info.event.id;
-        inspector_observer.disconnect();
         let inspector = document.getElementById("inspector");
         let content = document.getElementById("inspector_content");
         let event = await get_event(info.event.id);
@@ -316,26 +391,8 @@
             inputs.querySelector("#ne_start_time").value = start.toISOString().slice(0, 16);
             inputs.querySelector("#ne_end_time").value = end.toISOString().slice(0, 16);
 
-            let mitarbeiter = event.people.slice(1, -1).split(',');
-            let mitarbeiter_selector = inputs.querySelector("#associates");
-            for (m of mitarbeiter) {
-                if (m == "{{benutzername}}") continue;
-                switch_side(mitarbeiter_selector.querySelector("#bn_" + m));
-            }
-
-            let vis = event.visibility.slice(1, -1).split(',');
-            let vis_selector = inputs.querySelector("#visible");
-            let all_included = false;
-            for (m of vis) {
-                if (m == "{{mitarbeiter}}") continue;
-                if (m == "Alle") {
-                    all_included = true;
-                    continue;
-                }
-                switch_side(vis_selector.querySelector("#bn_" + m));
-            }
-            if (!all_included)
-                switch_side(vis_selector.querySelector("#bn_Alle"));
+            selection_update_selected(inputs.querySelector("#associates"), event.people);
+            selection_update_selected(inputs.querySelector("#visible"), event.visibility);
 
             inputs.querySelector("#ne_expected_hours").value = event.expected_hours;
 
@@ -345,22 +402,23 @@
                 inputs.querySelector("#ne_start_time").setAttribute("disabled", "");
                 inputs.querySelector("#ne_end_time").setAttribute("disabled", "");
 
-                mitarbeiter_selector.innerHTML = "<p class='inset'>" + event.people + "</p>";
-                vis_selector.innerHTML = "<p class='inset'>" + event.visibility + "</p>";
+                inputs.querySelector("#associates").setAttribute("disabled", "");
+                inputs.querySelector("#visible").setAttribute("disabled", "");
 
                 inputs.querySelector("#ne_expected_hours").setAttribute("disabled", "");
                 document.getElementById("ins_event_delete_b").setAttribute("disabled", "");
             }
+            else {
+                document.getElementById("ins_event_delete_b").removeAttribute("disabled");
+            }
 
             content.appendChild(inputs);
             attach_event_update_on_value_change(content);
-            inspector_observer.observe(content, inspector_observer_config);
         }
     }
     function hide_inspector() {
         document.getElementById("inspector").style.display = 'none';
         cur_inspected_event = null;
-        inspector_observer.disconnect();
     }
     async function update_event(event) {
         let res = await fetch(location.origin + "/update_event",
@@ -390,7 +448,7 @@
         update_event(event);
     }
     function attach_event_update_on_value_change(base_node) {
-        let input_elements = base_node.querySelectorAll("input,textarea");
+        let input_elements = base_node.querySelectorAll("input,textarea,.side_select");
         for (e of input_elements)
             e.onchange = inspector_observer_callback;
     }
