@@ -103,9 +103,16 @@
             <label for="number_daily_repetitions_input">Anzahl wiederholungen</label>
             <input id="number_daily_repetitions_input" type="number" value="5" />
         </div>
+        
+        <div id="error_date_invalid" style="color:red; display:none">
+            ERROR: Das Start Datum ist sp&auml;ter als das Dnd Datum.
+        </div>
 
         <button onclick="
             let base_event = parse_event_from_form(getElementById('create_event_input'));
+            document.getElementById('error_date_invalid').style.display = 'none';
+            if (base_event.start_time > base_event.end_time)
+                document.getElementById('error_date_invalid').style.display = 'block';
             create_new_event(base_event);
             if (document.getElementById('daily_repetition').checked) {
                 for (let i = 1; i < parseInt(document.getElementById('number_daily_repetitions_input').value); ++i) {
