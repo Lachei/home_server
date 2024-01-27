@@ -27,6 +27,7 @@ void print_help()
     std::cout << "    ./home_server [OptionalArgs] --data data/path\n";
     std::cout << "RequiredArgs:\n";
     std::cout << "    --data    : The directory where the data tab stores all data files\n";
+    std::cout << "    --cert    : The directory where the certificate files can be found\n";
     std::cout << "OptionalArgs:\n";
     std::cout << "    --help    : Prints this help dialogue\n";
 }
@@ -45,15 +46,24 @@ std::string_view get_parameter(std::span<const char*> args, std::string_view par
 using namespace std::string_view_literals;
 int main(int argc, const char** argv) {
     std::span<const char*> args(argv, argc);
-    if (std::ranges::contains(args, "--help"sv))
-        print_help();
+    bool show_help = std::ranges::contains(args, "--help"sv);
     
     std::string_view data_base_folder = get_parameter(args, "--data");
     if (data_base_folder.empty()) {
         std::cout << "[warning] Missing --data argument.\n";
-        print_help();
+        show_help = true;
         data_base_folder = "daten/";
     }
+
+    std::string_view certificates_folder = get_parameter(args, "--cert");
+    if (certificates_folder.empty()) {
+        std::cout << "[warning] Missing --data argument, defaulting to data/certificates/\n";
+        show_help = true;
+        certificates_folder = "data/certification/";
+    }
+    
+    if (show_help)
+        print_help();
 
     crow::App<AccessControlHeader> app;
     
@@ -369,6 +379,20 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
     CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
+    
+    // checking the certificates folder
+    if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
+        std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
+        app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
+                     std::string(certificates_folder) + "/rsa.key");
+    else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
+        app.ssl_file(std::string(certificates_folder) + "/rsa.pem");
+    else {
+        bool folder_exists = std::filesystem::exists(certificates_folder.data());
+        std::cout << "[error] Could not find the certificates files in the given"
+                     "certificates folder: " << certificates_folder << "\n";
+        return 0;
+    }
 
     app.port(18080).multithreaded().run();
     return 0;
