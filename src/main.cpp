@@ -381,18 +381,20 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
     
     // checking the certificates folder
-    // if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
-    //     std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
-    //     app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
-    //                  std::string(certificates_folder) + "/rsa.key");
-    // else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
-    //     app.ssl_file(std::string(certificates_folder) + "/rsa.pem");
-    // else {
-    //     bool folder_exists = std::filesystem::exists(certificates_folder.data());
-    //     std::cout << "[error] Could not find the certificates files in the given"
-    //                  "certificates folder: " << certificates_folder << "\n";
-    //     return 0;
-    // }
+#ifdef CROW_ENABLE_SSL
+    if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
+        std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
+        app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
+                     std::string(certificates_folder) + "/rsa.key");
+    else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
+        app.ssl_file(std::string(certificates_folder) + "/rsa.pem");
+    else {
+        bool folder_exists = std::filesystem::exists(certificates_folder.data());
+        std::cout << "[error] Could not find the certificates files in the given"
+                     "certificates folder: " << certificates_folder << "\n";
+        return 0;
+    }
+#endif
 
     app.port(18080).multithreaded().run();
     return 0;

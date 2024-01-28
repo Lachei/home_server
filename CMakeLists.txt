@@ -11,23 +11,31 @@ if(WIN32)
 else()
     add_compile_options(-fpermissive)
 endif()
-#add_compile_definitions(CROW_ENABLE_SSL BOOST_NETWORK_ENABLE_HTTPS)
+add_executable(home_server ${SRC})
+target_compile_definitions(home_server PUBLIC CROW_ENABLE_SSL BOOST_NETWORK_ENABLE_HTTPS)
 
 if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
     message("Setting cpu capabilities for the raspberry pi")
-    set(CMAKE_CXX_FLAGS "-mtune=cortex-a76 $CMAKE_CXX_FLAGS")
+    set(CMAKE_CXX_FLAGS "-mtune=cortex-a76 ${CMAKE_CXX_FLAGS}")
+    set(CMAKE_C_FLAGS "-mtune=cortex-a76 ${CMAKE_C_FLAGS}")
+    message("c flags: ${CMAKE_C_FLAGS}")
     set(CMAKE_SYSTEM_PROCESSOR "aarch64")
 
     include(FetchContent)
+    set(FETCHCONTENT_QUIET FALSE)
 
-    # FetchContent_Declare(openssl
-    #     GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
-    #     GIT_PROGRESS TRUE
-    # )
-    # FetchContent_MakeAvailable(openssl)
-    # include_directories(${openssl_BINARY_DIR}/include)
+    set(CMAKE_VERBOSE_MAKEFILE TRUE)
+    FetchContent_Declare(openssl
+        GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
+        GIT_PROGRESS TRUE
+    )
+    option(WITH_APPS "" OFF)
+    FetchContent_MakeAvailable(openssl)
+    target_link_libraries(home_server ssl)
+    include_directories(${openssl_BINARY_DIR}/include)
+    set(CMAKE_VERBOSE_MAKEFILE FALSE)
+    # add_subdirectory(${openssl_SOURCE_DIR})
     # set(additional_lib_opts "-static \"${openssl_BINARY_DIR}/ssl/libssl.a\" \"${openssl_BINARY_DIR}/crypto/libcrypto.a\"")
-    set(additional_lib_opts "-static")
 
     # boost is added as submodule to be compiled correctly for the platform
     function (fetch_boost_component component)
@@ -37,6 +45,7 @@ if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
             GIT_PROGRESS TRUE
         )
         FetchContent_MakeAvailable(boost_${component})
+        target_link_libraries(home_server boost_${component})
         include_directories(${boost_${component}_SOURCE_DIR}/include)
     endfunction()
     fetch_boost_component(align)
@@ -93,11 +102,8 @@ else()
     include_directories(${Boost_INCLUDE_DIR})
     # find_package(OpenSSL REQUIRED)
     # set(additional_lib_opts OpenSSL::SSL)
+    target_link_libraries(home_server PRIVATE OpenSSL::SSL ${Boost_LIBRARIES})
 endif()
-
-add_executable(home_server ${SRC})
-# target_compile_definitions(home_server PUBLIC CROW_ENABLE_SSL)
-target_link_libraries(home_server PRIVATE ${additional_lib_opts} ${Boost_LIBRARIES})
 
 include(CTest)
 add_subdirectory(tests)
