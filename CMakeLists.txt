@@ -18,20 +18,24 @@ if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
     message("Setting cpu capabilities for the raspberry pi")
     set(CMAKE_CXX_FLAGS "-mtune=cortex-a76 ${CMAKE_CXX_FLAGS}")
     set(CMAKE_C_FLAGS "-mtune=cortex-a76 ${CMAKE_C_FLAGS}")
-    message("c flags: ${CMAKE_C_FLAGS}")
     set(CMAKE_SYSTEM_PROCESSOR "aarch64")
+    string(REPLACE "g++" "" COMPILER_PREFIX ${CMAKE_CXX_COMPILER})
 
     include(FetchContent)
     set(FETCHCONTENT_QUIET FALSE)
 
     set(CMAKE_VERBOSE_MAKEFILE TRUE)
+    set(BUILD_OPENSSL ON CACHE BOOL "Automated OpenSSL building" FORCE)
+    set(CROSS ON CACHE BOOL "" FORCE)
+    set(CROSS_TARGET "linux-aarch64" CACHE STRING "Compiling for aarch64" FORCE)
+    set(CROSS_PREFIX "${COMPILER_PREFIX}" CACHE STRING "" FORCE)
+    set(OPENSSL_BUILD_VERSION 3.1.5 )
     FetchContent_Declare(openssl
-        GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
+        GIT_REPOSITORY https://github.com/viaduck/openssl-cmake.git
         GIT_PROGRESS TRUE
     )
-    option(WITH_APPS "" OFF)
     FetchContent_MakeAvailable(openssl)
-    target_link_libraries(home_server -static ssl)
+    target_link_libraries(home_server -static ssl ssl_lib crypto_lib)
     include_directories(${openssl_BINARY_DIR}/include)
     set(CMAKE_VERBOSE_MAKEFILE FALSE)
     # add_subdirectory(${openssl_SOURCE_DIR})
