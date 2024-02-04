@@ -11292,7 +11292,8 @@ namespace crow
                     CROW_LOG_ERROR << "Could not start adaptor: " << ec.message()
                                    << "[" << boost::lexical_cast<std::string>(ERR_GET_LIB(ec.value()))
                                    //<< ", " << boost::lexical_cast<std::string>(ERR_GET_FUNC(ec.value()))
-                                   << ", " << boost::lexical_cast<std::string>(ERR_GET_REASON(ec.value())) << "]";
+                                   << ", " << boost::lexical_cast<std::string>(ERR_GET_REASON(ec.value()))
+                                   << ", " << ERR_error_string(ec.value(), NULL) << "]";
                     check_destroy();
                 }
             });
