@@ -29,7 +29,7 @@ if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
     set(CROSS ON CACHE BOOL "" FORCE)
     set(CROSS_TARGET "linux-aarch64" CACHE STRING "Compiling for aarch64" FORCE)
     set(CROSS_PREFIX "${COMPILER_PREFIX}" CACHE STRING "" FORCE)
-    set(OPENSSL_BUILD_VERSION 3.1.5 )
+    set(OPENSSL_BUILD_VERSION "3.0.8" CACHE STRING "" FORCE)
     FetchContent_Declare(openssl
         GIT_REPOSITORY https://github.com/viaduck/openssl-cmake.git
         GIT_PROGRESS TRUE
