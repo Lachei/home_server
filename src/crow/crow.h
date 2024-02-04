@@ -11191,6 +11191,7 @@ namespace crow
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/array.hpp>
+#include <err.h>
 #include <atomic>
 #include <chrono>
 #include <vector>
@@ -11288,7 +11289,10 @@ namespace crow
                 }
                 else
                 {
-                    CROW_LOG_ERROR << "Could not start adaptor: " << ec.message();
+                    CROW_LOG_ERROR << "Could not start adaptor: " << ec.message()
+                                   << "[" << boost::lexical_cast<std::string>(ERR_GET_LIB(ec.value()))
+                                   //<< ", " << boost::lexical_cast<std::string>(ERR_GET_FUNC(ec.value()))
+                                   << ", " << boost::lexical_cast<std::string>(ERR_GET_REASON(ec.value())) << "]";
                     check_destroy();
                 }
             });

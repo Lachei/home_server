@@ -35,7 +35,7 @@ if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
         GIT_PROGRESS TRUE
     )
     FetchContent_MakeAvailable(openssl)
-    target_link_libraries(home_server -static ssl ssl_lib crypto_lib)
+    target_link_libraries(home_server -static ssl crypto ssl_lib crypto_lib)
     include_directories(${openssl_BINARY_DIR}/include)
     set(CMAKE_VERBOSE_MAKEFILE FALSE)
     # add_subdirectory(${openssl_SOURCE_DIR})
