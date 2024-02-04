@@ -45,6 +45,7 @@ std::string_view get_parameter(std::span<const char*> args, std::string_view par
 
 using namespace std::string_view_literals;
 int main(int argc, const char** argv) {
+    load_admin_credentials();
     std::span<const char*> args(argv, argc);
     bool show_help = std::ranges::contains(args, "--help"sv);
     
@@ -392,9 +393,14 @@ int main(int argc, const char** argv) {
         bool folder_exists = std::filesystem::exists(certificates_folder.data());
         std::cout << "[error] Could not find the certificates files in the given"
                      "certificates folder: " << certificates_folder << "\n";
-        return 0;
+        return -1;
     }
 #endif
+    
+    if (admin_salt.empty() || admin_sha256.empty()){
+        std::cout << "[error] Missing admin salt or credentials\n";
+        return -1;
+    }
 
     app.port(18080).multithreaded().run();
     return 0;
