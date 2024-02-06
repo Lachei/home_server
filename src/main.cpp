@@ -335,6 +335,25 @@ int main(int argc, const char** argv) {
         r.add_header("Content-Type", crow::mime_types.at("html"));
         return r;
     });
+    const auto md_editor_page = crow::mustache::load("editors/md.html");
+    CROW_ROUTE(app, "/edit_md/<path>")([&credentials, &data_base_folder, &md_editor_page](const crow::request& req, const std::string& path) {
+        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+
+        if (std::filesystem::path(path).extension() != ".md")
+            return crow::response{nlohmann::json{{"error", "Only md files allowed for edit_md route"}}.dump()};
+        std::string data_path = data_base_folder.data() + path;
+        std::ifstream data(data_path, std::ios_base::binary);
+        std::string d; d.resize(std::filesystem::file_size(data_path));
+        data.read(d.data(), d.size());
+        crow::mustache::context crow_context{};
+        crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
+        crow_context["editor_text"] = d;
+        crow_context["file_path"] = path;
+        crow_context["site_url"] = req.headers.find("site_url")->second;
+        crow::response r(md_editor_page.render_string(crow_context));
+        r.add_header("Content-Type", crow::mime_types.at("html"));
+        return r;
+    });
 
     
     // ------------------------------------------------------------------------------------------------
@@ -369,6 +388,7 @@ int main(int argc, const char** argv) {
     const std::string admin_css = crow::mustache::load_text("admin.css");
     const std::string user_css = crow::mustache::load_text("user.css");
     const std::string sha_js = crow::mustache::load_text("sha256.js");
+    const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
     const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
     const std::string tab_data = crow::mustache::load_text("tabs/data.html");
@@ -376,6 +396,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});

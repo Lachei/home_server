@@ -301,6 +301,11 @@
             <td><input id="new_table_file_input" type="text" style="width:auto;" /></td>
             <td><button onclick="create_table_file();" style="width:100%">Tabellendatei erstellen</button></td>
         </tr>
+        <tr class="no_c">
+            <td><label for="new_md_file_input" style="clear:both"> <div class="file-icon" data-type="md" > </div> </label></td>
+            <td><input id="new_md_file_input" type="text" style="width:auto;" /></td>
+            <td><button onclick="create_md_file();" style="width:100%">Readme datei erstellen</button></td>
+        </tr>
     </table>
 </div>
 <div id="edit_div">
@@ -367,6 +372,7 @@
     function edit_icon(data_extension, data_path) {
         const edit_icon = "✍";
         switch(data_extension) { 
+            case "md" :
             case "tbl": return `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>`;
         default:
             // all other data extensions are not editable
@@ -486,6 +492,16 @@
             console.log(res);
         reload_cur_directory();
     }
+    
+    async function create_md_file() {
+        let file_name = document.getElementById("new_md_file_input").value;
+        let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".md";
+        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
+    }
 
     function update_selected_files() {
         copy_files = [];
@@ -576,7 +592,7 @@
         // opening the editor works by retrieving the editor page with credentials
         // and then opening a new window with the retrieved body as blob in new window
         let url = `/edit_${file_extension}/${file_path}`;
-        let res = await fetch(url, {headers: {credentials: user_credentials}});
+        let res = await fetch(url, {headers: {credentials: user_credentials, site_url: window.origin}});
         let new_site = await res.blob();
 
         let new_site_url = URL.createObjectURL(new_site);
