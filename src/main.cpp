@@ -66,7 +66,7 @@ int main(int argc, const char** argv) {
     if (show_help)
         print_help();
 
-    crow::App<AccessControlHeader> app;
+    crow::App app;
     
     Credentials credentials("credentials/cred.json");
     Database database("data/events");

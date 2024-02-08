@@ -272,6 +272,7 @@
                 for (let [s, v] of Object.entries(cell.style)) {
                     div.style[s] = v;
                 }
+                update_functions();
                 break;
             case "col_header":
                 resize_col([{ target: { id: cell.cell_pos }, contentRect: { width: cell.width } }]);
@@ -415,6 +416,11 @@
 
     function get_start_end_cell(cell_ids) {
         let start_end = cell_ids.split(":");
+        if (start_end.length == 1) {
+            const col = start_end[0].charCodeAt(0) - "A".charCodeAt(0);
+            const row = parseInt(start_end[0].slice(1));
+            return [row, row, col, col];
+        }
         let start_row = 1;
         let start_col = 0;
         if (start_end[0].length == 1 && isNaN(parseInt(start_end[0]))) { // only col
@@ -445,11 +451,11 @@
         }
         return [start_row, end_row, start_col, end_col];
     }
-    function* iterate_selected_cells_id() {
+    function* iterate_selected_cells_id(selected = document.getElementById("cell_selection").value) {
         let rs, re, cs, ce;
-        [rs, re, cs, ce] = get_start_end_cell(document.getElementById("cell_selection").value);
-        for (let r = rs; r <= re; ++r)
-            for (let c = cs; c <= ce; ++c)
+        [rs, re, cs, ce] = get_start_end_cell(selected);
+        for (let r = Math.max(rs, 1); r <= Math.min(re, 200); ++r)
+            for (let c = Math.max(cs, 0); c <= Math.min(ce, 200); ++c)
                 yield String.fromCharCode(a_code + c) + r;
         return "A0";
     }
@@ -595,6 +601,100 @@
         document.getElementsByTagName('head')[0].appendChild(style);
         table_data[id] = create_row_header(id, height);
     }
+    // ------------------------------------------------------
+    // Available excel functions
+    // ------------------------------------------------------
+    const summe = (fields) => {if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +a, 0); return fields; }
+    const durchschnitt= (fields) => {if(typeof fields === 'string') return +fields; if (Array.isArray(fields)) return summe(fields) / fields.length; return summe(fields);}
+    const wenn= (cond, succ, fail) => {if (cond) return succ; return fail;}
+    const anzahl= (fields) => { }
+    const sinus= Math.sin
+    const cosinus= Math.cos
+    const tangenz= Math.tan
+    const asinus= Math.asin
+    const acosinus= Math.acos
+    const atangenz= Math.atan
+    const max= (arr) => Math.max.apply(Math, arr)
+    const min= (arr) => Math.min.apply(Math, arr)
+    const cos= Math.cos
+    const sin= Math.sin
+    const tan= Math.tan
+    const acos= Math.acos
+    const asin= Math.asin
+    const atan= Math.atan
+    const grad_zu_rad= (g) => { return g * PI / 180; }
+    const rad_zu_grad= (r) => { return r * 180 / PI; }
+    const runden= (n, s=0) => { return +((+n).toFixed(s)); }
+    const PI= Math.PI
+    const E= Math.E
+    // ------------------------------------------------------
+    // Available excel functions end
+    // ------------------------------------------------------
+    function update_functions() {
+        function executor(table_data, field, finished_fields, unfinished_fields) {
+            if (unfinished_fields.has(field))
+                throw ("Schleiffe in Feld " + field);
+            if (field in finished_fields)
+                return finished_fields[field];
+            if (table_data[field].content.charAt(0) != "=")
+                return table_data[field].content;
+
+            unfinished_fields.add(field);
+
+            // resolving all needed things
+            let c = table_data[field].content;
+            let fields_values = [];
+            let exec_string = "";
+            let prev = 1;
+            for (let p = c.indexOf('"'); p != -1; p = c.indexOf('"', p + 1)) {
+                exec_string += c.slice(prev, p); 
+                let end = c.indexOf('"', p + 1) + 1;
+                let fields = c.substring(p, end);
+                p = end;
+                prev = p;
+                console.log("Resolving " + fields);
+                for (let f of iterate_selected_cells_id(fields.slice(1, -1))) {
+                    console.log(f);
+                    if (!(f in table_data))
+                        continue;
+                    let r = executor.call({}, table_data, f, finished_fields, unfinished_fields);
+                    fields_values.push(r);
+                }
+                if (fields_values.length == 0)
+                    fields_values = 0;
+                else if (fields_values.length == 1)
+                    fields_values = fields_values[0];
+                exec_string += JSON.stringify(fields_values);
+                fields_values = []
+            }
+            // adding the last part of the string
+            exec_string += c.substring(prev);
+            exec_string = "return " + exec_string;
+
+            unfinished_fields.delete(field);
+            let result = "";
+            try {
+                // executing the line
+                console.log(exec_string);
+                const f = new Function(exec_string);
+                result = f.call({});
+            }
+            catch (e) {
+                result = e;
+            }
+            document.getElementById(field).innerHTML = result;
+            finished_fields[field] = result;
+        }
+
+        "use strict";
+        let finished_fields = {};
+        let unfinished_fields = new Set();
+        for (const key in table_data) {
+            if (table_data[key].content.charAt(0) == "=")
+                executor.call({}, table_data, key, finished_fields, unfinished_fields);
+        }
+    }
+
 
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
