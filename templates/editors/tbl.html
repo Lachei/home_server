@@ -59,6 +59,10 @@
             overflow: hidden;
         }
 
+        #tool_item_content {
+            width: 50%;
+        }
+
         .table_field {
             border-style: solid;
             border-width: 1px;
@@ -200,6 +204,8 @@
             <button id="add_new_row_below" onclick="" class="tool_item">&#9088;</button>
             <div class="tool_bar_separator"></div>
             <button id="add_ballot_box" onclick="add_ballot_box();">&#9745;</button>
+            <div class="tool_bar_separator"></div>
+            <button id="fit_col_to_text_width" onclick="fit_col_to_text_width();">Textbreite</button>
         </div>
     </div>
 
@@ -222,24 +228,19 @@
 <script>
     const a_code = "A".charCodeAt(0);
     const user_credentials = "{{user_credentials}}";
-    const parsed_data = new DOMParser().parseFromString("{{file_data}}", "text/html").body.firstChild
-    const parsed_path = new DOMParser().parseFromString("{{file_path}}", "text/html").body.firstChild
-    const file_data = parsed_data == null ? "" : parsed_data.textContent;
-    const file_path = parsed_path.textContent;
+    const file_path = '{{&file_path}}';
     const ballot_box = "&#9744;";
     const ballot_box_checked = "&#9745;";
 
     var table_data = null;
-    try { table_data = JSON.parse(file_data); }
-    catch (e) { table_data = {}; }
-    var next_end = false;
-
     try {
-        table_data = JSON.parse(file_data);
+        table_data = JSON.parse('{{&file_data}}');
     }
     catch (e) {
         table_data = {};
+        console.log(e);
     }
+    var next_end = false;
 
     function create_cell(cell_pos, options = {}) {
         return {
@@ -272,7 +273,6 @@
                 for (let [s, v] of Object.entries(cell.style)) {
                     div.style[s] = v;
                 }
-                update_functions();
                 break;
             case "col_header":
                 resize_col([{ target: { id: cell.cell_pos }, contentRect: { width: cell.width } }]);
@@ -356,6 +356,7 @@
             table_data[id].content = input_field.value;
             update_cell_div(table_data[id]);
         }
+        update_functions();
     }
     function sync_scroll(div) {
         let t = document.getElementById("table");
@@ -489,6 +490,18 @@
         if (!insert_cells_text) {
             let c = cell.id in table_data && table_data[cell.id].type == "cell" ? table_data[cell.id].content : "";
             tic.value = c;
+            if (cell.id in table_data && "background-color" in table_data[cell.id].style)
+                document.getElementById("background_color_picker").value = table_data[cell.id].style["background-color"];
+            else
+                document.getElementById("background_color_picker").value = "#ffffff";
+            if (cell.id in table_data && "color" in table_data[cell.id].style)
+                document.getElementById("text_color_picker").value = table_data[cell.id].style["color"];
+            else
+                document.getElementById("text_color_picker").value = "#000000";
+            if (cell.id in table_data && "font-size" in table_data[cell.id].style)
+                document.getElementById("font_size_input").value = table_data[cell.id].style["font-size"].slice(0, -2);
+            else
+                document.getElementById("font_size_input").value = 8;
         }
         else
             select_cell_function_input();
@@ -604,29 +617,47 @@
     // ------------------------------------------------------
     // Available excel functions
     // ------------------------------------------------------
-    const summe = (fields) => {if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +a, 0); return fields; }
-    const durchschnitt= (fields) => {if(typeof fields === 'string') return +fields; if (Array.isArray(fields)) return summe(fields) / fields.length; return summe(fields);}
-    const wenn= (cond, succ, fail) => {if (cond) return succ; return fail;}
-    const anzahl= (fields) => { }
-    const sinus= Math.sin
-    const cosinus= Math.cos
-    const tangenz= Math.tan
-    const asinus= Math.asin
-    const acosinus= Math.acos
-    const atangenz= Math.atan
-    const max= (arr) => Math.max.apply(Math, arr)
-    const min= (arr) => Math.min.apply(Math, arr)
-    const cos= Math.cos
-    const sin= Math.sin
-    const tan= Math.tan
-    const acos= Math.acos
-    const asin= Math.asin
-    const atan= Math.atan
-    const grad_zu_rad= (g) => { return g * PI / 180; }
-    const rad_zu_grad= (r) => { return r * 180 / PI; }
-    const runden= (n, s=0) => { return +((+n).toFixed(s)); }
-    const PI= Math.PI
-    const E= Math.E
+    const color_map = {
+        weiss: "white",
+        schwarz: "black",
+        blau: "blue",
+        gruen: "green",
+        gelb: "yellow",
+        rot: "red",
+        braun: "brown",
+        lila: "lila",
+        violett: "violet",
+        hellblau: "lightblue",
+        hellgruen: "lightgreen",
+        hellgelb: "lightyellow",
+        hellbraun: "lightbrown",
+        pink: "pink"
+    };
+    const summe = (fields) => { if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +(a.replace(/[^\d].*/, '')), 0); return fields; }
+    const durchschnitt = (fields) => { if (typeof fields === 'string') return +fields; if (Array.isArray(fields)) return summe(fields) / fields.length; return summe(fields); }
+    const wenn = (cond, succ, fail) => { if (cond) return succ; return fail; }
+    const anzahl = (fields) => { }
+    const sinus = Math.sin
+    const cosinus = Math.cos
+    const tangenz = Math.tan
+    const asinus = Math.asin
+    const acosinus = Math.acos
+    const atangenz = Math.atan
+    const max = (arr) => Math.max.apply(Math, arr)
+    const min = (arr) => Math.min.apply(Math, arr)
+    const cos = Math.cos
+    const sin = Math.sin
+    const tan = Math.tan
+    const acos = Math.acos
+    const asin = Math.asin
+    const atan = Math.atan
+    const grad_zu_rad = (g) => { return g * PI / 180; }
+    const rad_zu_grad = (r) => { return r * 180 / PI; }
+    const runden = (n, s = 0) => { return +((+n).toFixed(s)); }
+    const hintergrundfarbe = (farbe) => { change_color("background-color", farbe in color_map ? { value: color_map[farbe] } : { value: farbe }); return null; }
+    const hf = hintergrundfarbe;
+    const PI = Math.PI
+    const E = Math.E
     // ------------------------------------------------------
     // Available excel functions end
     // ------------------------------------------------------
@@ -642,56 +673,95 @@
             unfinished_fields.add(field);
 
             // resolving all needed things
+            let prev_selection = document.getElementById("cell_selection").value;
+            document.getElementById("cell_selection").value = field;
             let c = table_data[field].content;
             let fields_values = [];
             let exec_string = "";
             let prev = 1;
-            for (let p = c.indexOf('"'); p != -1; p = c.indexOf('"', p + 1)) {
-                exec_string += c.slice(prev, p); 
-                let end = c.indexOf('"', p + 1) + 1;
-                let fields = c.substring(p, end);
-                p = end;
-                prev = p;
-                console.log("Resolving " + fields);
-                for (let f of iterate_selected_cells_id(fields.slice(1, -1))) {
-                    console.log(f);
-                    if (!(f in table_data))
-                        continue;
-                    let r = executor.call({}, table_data, f, finished_fields, unfinished_fields);
-                    fields_values.push(r);
-                }
-                if (fields_values.length == 0)
-                    fields_values = 0;
-                else if (fields_values.length == 1)
-                    fields_values = fields_values[0];
-                exec_string += JSON.stringify(fields_values);
-                fields_values = []
-            }
-            // adding the last part of the string
-            exec_string += c.substring(prev);
-            exec_string = "return " + exec_string;
-
-            unfinished_fields.delete(field);
             let result = "";
             try {
+                for (let p = c.indexOf('"'); p != -1; p = c.indexOf('"', p + 1)) {
+                    exec_string += c.slice(prev, p);
+                    let end = c.indexOf('"', p + 1) + 1;
+                    let fields = c.substring(p, end);
+                    p = end;
+                    prev = p;
+                    for (let f of iterate_selected_cells_id(fields.slice(1, -1))) {
+                        if (!(f in table_data))
+                            continue;
+                        let r = executor.call({}, table_data, f, finished_fields, unfinished_fields);
+                        fields_values.push(r);
+                    }
+                    if (fields_values.length == 0)
+                        fields_values = 0;
+                    else if (fields_values.length == 1)
+                        fields_values = fields_values[0];
+                    exec_string += JSON.stringify(fields_values);
+                    fields_values = []
+                }
+                // adding the last part of the string
+                exec_string += c.substring(prev);
+                exec_string = "return " + exec_string;
+
+                unfinished_fields.delete(field);
                 // executing the line
-                console.log(exec_string);
                 const f = new Function(exec_string);
                 result = f.call({});
             }
             catch (e) {
                 result = e;
             }
-            document.getElementById(field).innerHTML = result;
-            finished_fields[field] = result;
+            if (result != null) { // only set cell context if the function execution returned something
+                document.getElementById(field).innerHTML = result;
+                finished_fields[field] = result;
+            }
+            document.getElementById("cell_selection").value = prev_selection;
         }
 
         "use strict";
         let finished_fields = {};
         let unfinished_fields = new Set();
         for (const key in table_data) {
+            if (table_data[key].type != "cell")
+                continue;
             if (table_data[key].content.charAt(0) == "=")
-                executor.call({}, table_data, key, finished_fields, unfinished_fields);
+                try { executor.call({}, table_data, key, finished_fields, unfinished_fields); }
+                catch (e) {}
+        }
+    }
+
+    function getTextDim(text, font) {
+        // re-use canvas object for better performance
+        const canvas = getTextDim.canvas || (getTextDim.canvas = document.createElement("canvas"));
+        const context = canvas.getContext("2d");
+        context.font = font;
+        const metrics = context.measureText(text);
+        return [metrics.width * 1.01, (metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent) * 1.3];
+    }
+    function getCssStyle(element, prop) {
+        return window.getComputedStyle(element, null).getPropertyValue(prop);
+    }
+    function getCanvasFont(el = document.body) {
+        const fontWeight = getCssStyle(el, 'font-weight') || 'normal';
+        const fontSize = getCssStyle(el, 'font-size') || '16px';
+        const fontFamily = getCssStyle(el, 'font-family') || 'Times New Roman';
+
+        return `${fontWeight} ${fontSize} ${fontFamily}`;
+    }
+    function fit_col_to_text_width() {
+        for (let a of iterate_selected_cells_id()) {
+            if (!(a in table_data))
+                continue;
+            let [cur_w, cur_h] = getTextDim(table_data[a].content, getCanvasFont(document.getElementById(a)));
+
+            cur_w = Math.max(cur_w, 200);
+            cur_h = Math.max(cur_h, 40);
+            console.log(cur_w, cur_h);
+            col_id = a.slice(0, 1); col_id += ":" + col_id;
+            row_id = a.slice(1); row_id += ":" + row_id;
+            resize_col([{ target: { id: col_id }, contentRect: { width: cur_w } }]);
+            resize_row([{ target: { id: row_id }, contentRect: { height: cur_h } }]);
         }
     }
 
@@ -703,7 +773,6 @@
             body: JSON.stringify(table_data),
         });
         res = await res.json();
-        console.log(res);
     }
 
     init_table();
@@ -711,6 +780,7 @@
         for (let [id, e] of Object.entries(table_data)) {
             update_cell_div(e);
         }
+        update_functions();
     }, 100);
 
     function deepEqual(x, y) {

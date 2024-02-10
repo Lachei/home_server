@@ -1,4 +1,5 @@
 #include <iostream>
+#include <regex>
 #include "crow/crow.h"
 
 #include "Credentials.hpp"
@@ -326,6 +327,11 @@ int main(int argc, const char** argv) {
         std::ifstream data(data_path, std::ios_base::binary);
         std::string d; d.resize(std::filesystem::file_size(data_path));
         data.read(d.data(), d.size());
+        d = std::regex_replace(d, std::regex("\\\\\""), "\\\\\"");
+        d = std::regex_replace(d, std::regex("\\\'"), "\\\'");
+        d = std::regex_replace(d, std::regex("\\€"), "&euro;");
+        while (d.size() && d.back() == '\n')
+            d.pop_back();
         crow::mustache::context crow_context{};
         crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
         crow_context["file_data"] = d;
@@ -345,6 +351,10 @@ int main(int argc, const char** argv) {
         std::ifstream data(data_path, std::ios_base::binary);
         std::string d; d.resize(std::filesystem::file_size(data_path));
         data.read(d.data(), d.size());
+        d = std::regex_replace(d, std::regex("\\\\\""), "\\\\\"");
+        d = std::regex_replace(d, std::regex("\\\'"), "\\\'");
+        while (d.size() && d.back() == '\n')
+            d.pop_back();
         crow::mustache::context crow_context{};
         crow_context["user_credentials"] = req.headers.find("credentials")->second; // simple copy paste
         crow_context["editor_text"] = d;
