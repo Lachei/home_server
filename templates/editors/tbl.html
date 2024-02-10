@@ -633,7 +633,7 @@
         hellbraun: "lightbrown",
         pink: "pink"
     };
-    const summe = (fields) => { if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +(a.replace(/[^\d].*/, '')), 0); return fields; }
+    const summe = (fields) => { if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')), 0); return fields; }
     const durchschnitt = (fields) => { if (typeof fields === 'string') return +fields; if (Array.isArray(fields)) return summe(fields) / fields.length; return summe(fields); }
     const wenn = (cond, succ, fail) => { if (cond) return succ; return fail; }
     const anzahl = (fields) => { }
