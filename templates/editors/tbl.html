@@ -633,7 +633,7 @@
         hellbraun: "lightbrown",
         pink: "pink"
     };
-    const summe = (fields) => { if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')), 0); return fields; }
+    const summe = (fields) => { if (fields == null) return 0; if (Array.isArray(fields)) return fields.reduce((partialSum, a) => partialSum + zahl(a), 0); return fields; }
     const durchschnitt = (fields) => { if (typeof fields === 'string') return +fields; if (Array.isArray(fields)) return summe(fields) / fields.length; return summe(fields); }
     const wenn = (cond, succ, fail) => { if (cond) return succ; return fail; }
     const anzahl = (fields) => { }
@@ -654,6 +654,7 @@
     const grad_zu_rad = (g) => { return g * PI / 180; }
     const rad_zu_grad = (r) => { return r * 180 / PI; }
     const runden = (n, s = 0) => { return +((+n).toFixed(s)); }
+    const zahl = (a) => {return +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')); }
     const hintergrundfarbe = (farbe) => { change_color("background-color", farbe in color_map ? { value: color_map[farbe] } : { value: farbe }); return null; }
     const hf = hintergrundfarbe;
     const PI = Math.PI
@@ -706,6 +707,7 @@
 
                 unfinished_fields.delete(field);
                 // executing the line
+                console.log(exec_string);
                 const f = new Function(exec_string);
                 result = f.call({});
             }
