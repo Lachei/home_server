@@ -24,20 +24,31 @@
             cursor: pointer;
         }
 
+        textarea {
+            font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
+        }
+
         #content {
             width: 100%;
             height: 100%;
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 50%;
         }
 
         #editor_text {
             width: 100%;
-            height: 92vh;
+            height: 90vh;
         }
 
         #preview {
             margin-left: 15px;
+            height: 90vh;
+            overflow: scroll;
+        }
+        
+        #title {
+            font-size: 2em;
+            font-weight: bold;
         }
 
         h1 {
@@ -134,8 +145,8 @@
 </head>
 
 <body>
-    <div header>
-        <center>Readme Editor</center>
+    <div id="header">
+        <center id="title">Readme Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
     </div>
     <div id="content" {{editor_style}}>
@@ -164,11 +175,22 @@
     function recompile() {
         // update the render window
         const t = document.getElementById("editor_text").value;
+
+        // add table of contents (toc) if requested
+        let toc_start = t.indexOf("+inhaltsverzeichnis");
+        if (toc_start != -1) {
+            // going through the file and getting all needed information
+            let toc = [];
+            // starting from the declaration of the table of contents
+            console.log("Detected inhaltsverzeichnis");
+        }
+        
+        // basic readme update
         let out_div = document.getElementById("preview");
         out_div.innerHTML = '';
         out_div.innerHTML = markdown(t, MathJax.getMetricsFor(out_div));
-        console.log(out_div.innerHTML);
-        // starting to convert the mathjax stuff
+
+        // starting to convert formulas with mathjax
         MathJax.texReset();
         document.querySelectorAll('math').forEach((m) => {
             let c = m.innerHTML.trim().replaceAll("&amp;", "&");

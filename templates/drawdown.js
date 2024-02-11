@@ -48,8 +48,8 @@ function markdown(src) {
         src = src.replace(rex, fn);
     }
 
-    function element(tag, content) {
-        return '<' + tag + '>' + content + '</' + tag + '>';
+    function element(tag, content, attributes = '') {
+        return '<' + tag  + ' ' + attributes + '>' + content + '</' + tag + '>';
     }
 
     function blockquote(src) {
@@ -142,7 +142,8 @@ function markdown(src) {
     });
 
     // heading
-    replace(rx_heading, function(all, _, p1, p2) { return _ + element('h' + p1.length, unesc(highlight(p2))) });
+    let header_id = 0;
+    replace(rx_heading, function(all, _, p1, p2) { return _ + element('h' + p1.length, unesc(highlight(p2)), 'id=' + header_id++) });
 
     // paragraph
     replace(rx_para, function(all, content) { return element('p', unesc(highlight(content))) });
