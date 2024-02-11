@@ -129,6 +129,8 @@
             line-height: 1.3;
         }
     </style>
+    <script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
+    <script type="text/javascript" id="MathJax-script" async src="{{&site_url}}/math_jax.js" onload="setup();"></script>
 </head>
 
 <body>
@@ -145,16 +147,13 @@
         </div>
     </div>
 </body>
-<script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
-<script type="text/javascript" src="{{&site_url}}/math_jax.js"></script>
 <script>
     const user_credentials = "{{user_credentials}}";
     const file_path = "{{&file_path}}";
 
     MathJax = {
         tex: {
-            inlineMath: [['$', '$'], ['\\(', '\\)']],
-            packages: ['base', 'newcommand', 'configMacros']
+            inlineMath: [['$', '$'], ['\\(', '\\)']]
         },
         svg: {
             fontCache: 'global'
@@ -165,7 +164,22 @@
     function recompile() {
         // update the render window
         const t = document.getElementById("editor_text").value;
-        document.getElementById("preview").innerHTML = markdown(t);
+        let out_div = document.getElementById("preview");
+        out_div.innerHTML = '';
+        out_div.innerHTML = markdown(t, MathJax.getMetricsFor(out_div));
+        console.log(out_div.innerHTML);
+        // starting to convert the mathjax stuff
+        MathJax.texReset();
+        document.querySelectorAll('math').forEach((m) => {
+            let c = m.innerHTML.trim().replaceAll("&amp;", "&");
+            m.innerHTML = '';
+            let options = MathJax.getMetricsFor(m);
+            options.display = false;
+            let node = MathJax.tex2svg(c, options);
+            m.appendChild(node);
+        });
+        MathJax.startup.document.clear();
+        MathJax.startup.document.updateDocument();
     }
 
     async function save() {
@@ -176,6 +190,10 @@
         });
         res = await res.json();
         console.log(res);
+    }
+
+    function setup() {
+        recompile();
     }
 </script>
 

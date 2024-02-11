@@ -23,16 +23,17 @@ SOFTWARE.
 */
 
 function markdown(src) {
-
     var rx_lt = /</g;
     var rx_gt = />/g;
     var rx_space = /\t|\r|\uf8ff/g;
     var rx_escape = /\\([\\\|`*_{}\[\]()#+\-~])/g;
     var rx_hr = /^([*\-=_] *){3,}$/gm;
-    var rx_blockquote = /\n *&gt; *([^]*?)(?=(\n|$){2})/g;
+    //var rx_blockquote = /\n *&gt; *([^]*?)(?=(\n|$){2})/g;
+    var rx_blockquote = /\n *> *([^]*?)(?=(\n|$){2})/g;
     var rx_list = /\n( *)(?:[*\-+]|((\d+)|([a-z])|[A-Z])[.)]) +([^]*?)(?=(\n|$){2})/g;
     var rx_listjoin = /<\/(ol|ul)>\n\n<\1>/g;
     var rx_highlight = /(^|[^A-Za-z\d\\])(([*_])|(~)|(\^)|(--)|(\+\+)|`)(\2?)([^<]*?)\2\8(?!\2)(?=\W|_|$)/g;
+    var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
     var rx_code = /\n((```|~~~).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
     var rx_link = /((!?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;
     var rx_table = /\n(( *\|.*?\| *\n)+)/g;
@@ -92,8 +93,8 @@ function markdown(src) {
 
     src = '\n' + src + '\n';
 
-    replace(rx_lt, '&lt;');
-    replace(rx_gt, '&gt;');
+    // replace(rx_lt, '&lt;');
+    // replace(rx_gt, '&gt;');
     replace(rx_space, '  ');
 
     // blockquote
@@ -105,6 +106,12 @@ function markdown(src) {
     // list
     src = list(src);
     replace(rx_listjoin, '');
+    
+    // mathe
+    replace(rx_math, function(all, p1, p2, p3, p4) {
+        stash[--si] = element('math', p3||p4);
+        return si + '\uf8ff';
+    });
 
     // code
     replace(rx_code, function(all, p1, p2, p3, p4) {

@@ -329,7 +329,6 @@ int main(int argc, const char** argv) {
         data.read(d.data(), d.size());
         d = std::regex_replace(d, std::regex("\\\\\""), "\\\\\"");
         d = std::regex_replace(d, std::regex("\\\'"), "\\\'");
-        d = std::regex_replace(d, std::regex("\\€"), "&euro;");
         while (d.size() && d.back() == '\n')
             d.pop_back();
         crow::mustache::context crow_context{};
@@ -399,6 +398,7 @@ int main(int argc, const char** argv) {
     const std::string user_css = crow::mustache::load_text("user.css");
     const std::string sha_js = crow::mustache::load_text("sha256.js");
     const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
+    const std::string math_jax_js = crow::mustache::load_text("math_jax.js");
     const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
     const std::string tab_data = crow::mustache::load_text("tabs/data.html");
@@ -407,6 +407,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    CROW_ROUTE(app, "/math_jax.js")([&math_jax_js](){crow::response r(math_jax_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
