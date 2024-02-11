@@ -43,12 +43,15 @@
         h1 {
             font-size: 2.5rem;
         }
+
         h2 {
             font-size: 2rem;
         }
+
         h3 {
             font-size: 1.7rem;
         }
+
         hr {
             margin: 1em 0;
             border: 0;
@@ -142,10 +145,22 @@
         </div>
     </div>
 </body>
-<script type="text/javascript" src="{{site_url}}/drawdown.js"></script>
+<script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
+<script type="text/javascript" src="{{&site_url}}/math_jax.js"></script>
 <script>
     const user_credentials = "{{user_credentials}}";
-    const file_path = "{{file_path}}";
+    const file_path = "{{&file_path}}";
+
+    MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            packages: ['base', 'newcommand', 'configMacros']
+        },
+        svg: {
+            fontCache: 'global'
+        },
+        startup: { typeset: false }
+    };
 
     function recompile() {
         // update the render window

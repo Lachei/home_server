@@ -108,9 +108,9 @@ The Crow logo and other graphic material (excluding third party logos) used are 
 namespace crow
 {
     const std::unordered_map<std::string, std::string> mime_types{
-      {"shtml", "text/html"},
-      {"htm", "text/html"},
-      {"html", "text/html"},
+      {"shtml", "text/html; charset=utf-8"},
+      {"htm", "text/html; charset=utf-8"},
+      {"html", "text/html; charset=utf-8"},
       {"css", "text/css"},
       {"xml", "text/xml"},
       {"gif", "image/gif"},
@@ -8574,10 +8574,10 @@ namespace crow
         struct rendered_template : returnable
         {
             rendered_template():
-              returnable("text/html") {}
+              returnable("text/html; charset=utf-8") {}
 
             rendered_template(std::string& body):
-              returnable("text/html"), body_(std::move(body)) {}
+              returnable("text/html; charset=utf-8"), body_(std::move(body)) {}
 
             std::string body_;
 
