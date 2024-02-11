@@ -22,4 +22,5 @@ fi
 
 #copying all needed files
 cp "build/GCC_13.2.0_aarch64-linux-gnu/$build_type/home_server" $install_path/home_server
+cp update_admin_pwd.sh $install_path
 cp -r templates $install_path
