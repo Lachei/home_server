@@ -674,7 +674,7 @@
     const grad_zu_rad = (g) => { return g * PI / 180; }
     const rad_zu_grad = (r) => { return r * 180 / PI; }
     const runden = (n, s = 0) => { return +((+n).toFixed(s)); }
-    const zahl = (a) => { return +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')); }
+    const zahl = (a) => { if(!(a.replace)) return a; return +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')); }
     const hintergrundfarbe = (farbe) => { change_color("background-color", farbe in color_map ? { value: color_map[farbe] } : { value: farbe }); return null; }
     const hf = hintergrundfarbe;
     const PI = Math.PI
