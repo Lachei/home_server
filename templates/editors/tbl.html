@@ -618,7 +618,7 @@
     function resize_row(element) {
         let height = element[0].contentRect.height;
         let id = element[0].target.id;
-        let row_id = "row_" + id.slice(":")[0];
+        let row_id = "row_" + id.split(":")[0];
         let style_id = "style_" + row_id;
         let prev_style = document.getElementById(style_id);
         if (prev_style != null) {
