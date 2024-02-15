@@ -31,9 +31,9 @@
             font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
             resize: horizontal;
         }
-        
+
         math {
-            display: block;
+            display: inline-block;
         }
 
         #content {
@@ -122,6 +122,21 @@
             border-bottom: 1px solid #aaa;
         }
 
+        ol {
+            counter-reset: list_counter;
+            padding-left: 32px;
+        }
+
+        ol li {
+            counter-increment: list_counter;
+        }
+
+        ol li::marker {
+            content: counters(list_counter, '.') ' ';
+            /* Whatever custom styles you want here */
+            font-weight: bold;
+        }
+
         .plain,
         .markdown {
             position: absolute;
@@ -192,15 +207,6 @@
         // update the render window
         const t = document.getElementById("editor_text").value;
 
-        // add table of contents (toc) if requested
-        let toc_start = t.indexOf("+inhaltsverzeichnis");
-        if (toc_start != -1) {
-            // going through the file and getting all needed information
-            let toc = [];
-            // starting from the declaration of the table of contents
-            console.log("Detected inhaltsverzeichnis");
-        }
-
         // basic readme update
         let out_div = document.getElementById("preview");
         let prev_scroll = out_div.scrollTop;
@@ -219,7 +225,49 @@
         });
         MathJax.startup.document.clear();
         MathJax.startup.document.updateDocument();
+
+        // add table of contents (toc) if requested
+        document.querySelectorAll('toc').forEach((toc_e) => {
+            // collect all headers following the toc
+            let toc = [];
+            let cur = toc_e;
+            while (cur.nextElementSibling != null && cur.nextElementSibling.tagName != 'toc') {
+                cur = cur.nextElementSibling;
+                // we have got a header
+                if (['H1', 'H2', 'H3', 'H4'].includes(cur.tagName)) {
+                    let header_lvl = +cur.tagName.slice(1);
+                    let cur_header = {
+                        text: '<a href=#' + cur.id + '>' + cur.innerHTML + '</a>',
+                        lvl: header_lvl,
+                        subsections: []
+                    };
+                    let arr = toc;
+                    for (; arr.length > 0 && arr[arr.length - 1].lvl < header_lvl; arr = arr[arr.length - 1].subsections) { }
+                    arr.push(cur_header);
+                }
+            }
+            if (toc.length == 0)
+                return;
+            let list_string = "<ol>";
+            const print_arr_form = (arr, inset) => {
+                for (let e of arr) {
+                    list_string += "\n<li>" + e.text + "</li>";
+                    if (e.subsections.length) {
+                        list_string += "\n<ol>";
+                        print_arr_form(e.subsections, inset + 2);
+                        list_string += "\n</ol>";
+                    }
+                }
+            }
+            print_arr_form(toc, 0);
+            toc_e.innerHTML = list_string + "</ol>";
+        });
+
         out_div.scroll(0, prev_scroll);
+        if (!rescaled) {
+            document.getElementById("editor_text").style.width = document.body.offsetWidth / 2 + "px";
+            rescaled = true;
+        }
     }
 
     async function save() {
@@ -231,7 +279,7 @@
         res = await res.json();
         console.log(res);
     }
-    
+
     var saved_md_data = document.getElementById("editor_text").value;
     window.setInterval(() => {
         if (saved_md_data != document.getElementById("editor_text").value) {
@@ -240,6 +288,7 @@
         }
     }, 5000);
 
+    let rescaled = false;
     function setup() {
         recompile();
     }

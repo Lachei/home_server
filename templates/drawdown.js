@@ -43,6 +43,7 @@ function markdown(src) {
     var rx_heading = /(?=^|>|\n)([>\s]*?)(#{1,6}) (.*?)( #*)? *(?=\n|$)/g;
     var rx_para = /(?=^|>|\n)\s*\n+([^<]+?)\n+\s*(?=\n|<|$)/g;
     var rx_stash = /-\d+\uf8ff/g;
+    var rx_toc = /\+inhaltsverzeichnis\+/g;
 
     function replace(rex, fn) {
         src = src.replace(rex, fn);
@@ -144,6 +145,9 @@ function markdown(src) {
     // heading
     let header_id = 0;
     replace(rx_heading, function(all, _, p1, p2) { return _ + element('h' + p1.length, unesc(highlight(p2)), 'id=' + header_id++) });
+    
+    // table of contents
+    replace(rx_toc, function(all) { return element('toc', unesc('')); });
 
     // paragraph
     replace(rx_para, function(all, content) { return element('p', unesc(highlight(content))) });
