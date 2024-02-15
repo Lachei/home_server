@@ -122,16 +122,16 @@
             border-bottom: 1px solid #aaa;
         }
 
-        ol {
+        ol.decimal {
             counter-reset: list_counter;
             padding-left: 32px;
         }
 
-        ol li {
+        ol li.decimal{
             counter-increment: list_counter;
         }
 
-        ol li::marker {
+        ol li.decimal::marker{
             content: counters(list_counter, '.') ' ';
             /* Whatever custom styles you want here */
             font-weight: bold;
@@ -248,12 +248,12 @@
             }
             if (toc.length == 0)
                 return;
-            let list_string = "<ol>";
+            let list_string = "<ol class='decimal'>";
             const print_arr_form = (arr, inset) => {
                 for (let e of arr) {
-                    list_string += "\n<li>" + e.text + "</li>";
+                    list_string += "\n<li class='decimal'>" + e.text + "</li>";
                     if (e.subsections.length) {
-                        list_string += "\n<ol>";
+                        list_string += "\n<ol class='decimal'>";
                         print_arr_form(e.subsections, inset + 2);
                         list_string += "\n</ol>";
                     }
