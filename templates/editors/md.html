@@ -231,7 +231,7 @@
             // collect all headers following the toc
             let toc = [];
             let cur = toc_e;
-            while (cur.nextElementSibling != null && cur.nextElementSibling.tagName != 'toc') {
+            while (cur.nextElementSibling != null && !['toc', 'TOC'].includes(cur.nextElementSibling.tagName)) {
                 cur = cur.nextElementSibling;
                 // we have got a header
                 if (['H1', 'H2', 'H3', 'H4'].includes(cur.tagName)) {
