@@ -39,18 +39,24 @@
         #content {
             width: 100%;
             height: 100%;
+            {{#editor}}
             display: grid;
             grid-template-columns: auto auto;
+            {{/editor}}
         }
 
         #editor_text {
             width: 100%;
+            {{#editor}}
             height: 88vh;
+            {{/editor}}
         }
 
         #preview {
             margin-left: 15px;
+            {{#editor}}
             height: 88vh;
+            {{/editor}}
             overflow: scroll;
         }
 
@@ -144,6 +150,12 @@
             height: 100%;
             margin: 0;
         }
+        
+        {{^editor}}
+        .editor {
+            display: none;
+        }
+        {{/editor}}
 
         .plain {
             border: 0;
@@ -173,13 +185,15 @@
 </head>
 
 <body>
+    {{#editor}}
     <div id="header">
         <center id="title">Readme Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
     </div>
-    <div id="content" {{editor_style}}>
+    {{/editor}}
+    <div id="content">
         <div id="editor" class="editor">
-            <textarea id="editor_text" oninput="recompile();">{{editor_text}}</textarea>
+            <textarea id="editor_text" oninput="recompile();">{{file_data}}</textarea>
         </div>
         <div id="preview" class="preview">
             <!-- This window is filled by the recompile function -->
@@ -187,7 +201,7 @@
     </div>
 </body>
 <script>
-    const user_credentials = "{{user_credentials}}";
+    const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
 
     MathJax = {
@@ -281,12 +295,14 @@
     }
 
     var saved_md_data = document.getElementById("editor_text").value;
+    {{#editor}}
     window.setInterval(() => {
         if (saved_md_data != document.getElementById("editor_text").value) {
             save();
             saved_md_data = document.getElementById("editor_text").value;
         }
     }, 5000);
+    {{/editor}}
 
     let rescaled = false;
     function setup() {

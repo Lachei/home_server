@@ -14,7 +14,9 @@
         body {
             width: auto;
             margin: 0px 4px 0px 4px;
+            {{#editor}}
             height: 100vh;
+            {{/editor}}
         }
 
         a {
@@ -66,6 +68,7 @@
             width: 50%;
         }
 
+        {{#editor}}
         .table_field {
             border-style: solid;
             border-width: 1px;
@@ -79,6 +82,7 @@
         .table_row_header:hover {
             background-color: lightblue;
         }
+        {{/editor}}
 
         .table_col_header,
         .table_row_header {
@@ -183,6 +187,12 @@
         #flex_container #table_container {
             flex: 1 1 auto;
         }
+
+        {{^editor}}
+        #empty_cell, #column_labels, #row_labels, #tool_bar, #input_bar{
+            display: none;
+        }
+        {{/editor}}
     </style>
 </head>
 
@@ -247,7 +257,7 @@
 </body>
 <script>
     const a_code = "A".charCodeAt(0);
-    const user_credentials = "{{user_credentials}}";
+    const user_credentials = "{{credentials}}";
     const file_path = '{{&file_path}}';
     const ballot_box = "&#9744;";
     const ballot_box_checked = "&#9745;";
@@ -425,6 +435,7 @@
         table_div.innerHTML = inner;
         column_labels.innerHTML = inner_cols;
         row_labels.innerHTML = inner_rows;
+        {{#editor}}
         for (let r = 0; r < num_rows; r++) {
             let id = `${r + row_range[0]}:${r + row_range[0]}`;
             new ResizeObserver((e) => resize_row(e)).observe(document.getElementById(id));
@@ -433,6 +444,7 @@
             let id = `${String.fromCharCode(c + a_code)}:${String.fromCharCode(c + a_code)}`;
             new ResizeObserver((e) => resize_col(e)).observe(document.getElementById(id));
         }
+        {{/editor}}
     }
 
     function get_start_end_cell(cell_ids) {
@@ -600,7 +612,8 @@
         let width = element[0].contentRect.width;
         let id = element[0].target.id;
         let col_id = "col_" + id[0];
-        let style_id = "style_" + col_id;
+        let style_id = "style_" + id[0];
+        document.getElementById(id).style.width = width + "px";
         let prev_style = document.getElementById(style_id);
         if (prev_style != null) {
             delete table_data[id];
@@ -620,6 +633,7 @@
         let id = element[0].target.id;
         let row_id = "row_" + id.split(":")[0];
         let style_id = "style_" + row_id;
+        document.getElementById(id).style.height = height + "px";
         let prev_style = document.getElementById(style_id);
         if (prev_style != null) {
             delete table_data[id];
@@ -814,12 +828,14 @@
     }
 
     var saved_table_data = structuredClone(table_data);
+    {{#editor}}
     window.setInterval(() => {
         if (!deepEqual(saved_table_data, table_data)) {
             save();
             saved_table_data = structuredClone(table_data);
         }
     }, 5000);
+    {{/editor}}
 </script>
 
 </html>

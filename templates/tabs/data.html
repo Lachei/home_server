@@ -423,7 +423,7 @@
 
     async function open_data(data_file, extension) {
         // todo: store fetched pdf to show
-        let data = await fetch(data_file, { headers: { credentials: user_credentials } });
+        let data = await fetch(data_file, { headers: { credentials: user_credentials, site_url: window.origin} });
         data = await data.blob();
         let url = URL.createObjectURL(data);
         window.open(url);

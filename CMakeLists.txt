@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
 
 file(GLOB SRC "src/*")
+message("${SRC}")
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
 else()
