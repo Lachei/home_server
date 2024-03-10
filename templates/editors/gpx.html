@@ -1,0 +1,61 @@
+
+<!DOCTYPE html>
+
+<html>
+
+<head>
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Md Editor</title>
+    <style>
+        html * {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: min(2vw, .5cm);
+        }
+
+        body {
+            width: auto;
+        }
+
+        a {
+            cursor: pointer;
+        }
+
+        button {
+            border: none;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        textarea {
+            font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
+            resize: horizontal;
+        }
+
+    </style>
+</head>
+
+<body>
+    {{#editor}}
+    <div id="header">
+        <center id="title">GPX Editor</center>
+        <button id="save" onclick="save();">&#128190;</button>
+    </div>
+    {{/editor}}
+    <div id="content">
+        <div id="editor" class="editor">
+            <textarea id="editor_text" oninput="recompile();">{{file_data}}</textarea>
+        </div>
+        <div id="preview" class="preview">
+            <!-- This window is filled by the recompile function -->
+        </div>
+    </div>
+</body>
+<script>
+    const user_credentials = "{{credentials}}";
+    const file_path = "{{&file_path}}";
+
+</script>
+
+</html>

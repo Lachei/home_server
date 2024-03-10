@@ -373,7 +373,8 @@
         const edit_icon = "✍";
         switch(data_extension) { 
             case "md" :
-            case "tbl": return `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>`;
+            case "tbl": 
+            case "gpx": return `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>`;
         default:
             // all other data extensions are not editable
             return "";

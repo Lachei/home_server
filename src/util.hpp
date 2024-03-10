@@ -73,7 +73,14 @@ inline std::optional<std::pair<std::string_view, std::string_view>> extract_cred
     }
     else
     {
+        // check for credentials header field
         auto cred = req.headers.find("credentials");
+        if (cred != req.headers.end())
+        {
+            return std::optional{extract_credentials(cred->second)};
+        }
+        // check for Authorization field
+        cred = req.headers.find("Authorization");
         if (cred != req.headers.end())
         {
             return std::optional{extract_credentials(cred->second)};

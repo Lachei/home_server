@@ -263,7 +263,7 @@ int main(int argc, const char** argv) {
         std::filesystem::path file_path = data_base_folder.data() + path;
         if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path)) {
             std::string ext = file_path.extension();
-            if (ext == ".md" || ext == ".tbl")
+            if (editor_util::is_extension_editor(ext))
                 res = editor_util::get_editor(false, req, path, data_base_folder);
             else
                 res.set_static_file_info(file_path.string());

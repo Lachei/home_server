@@ -2,27 +2,35 @@
 
 #include <regex>
 #include "nlohmann/json.hpp"
+#include "robin_hood/robin_hood.h"
 
 #define TRY_ADD_HEADER(c, h_name, req) if (req.headers.find(h_name) != req.headers.end()) {c[h_name] = req.headers.find(h_name)->second;}
 
+// maps the extension name to the storage file of the editor
+static robin_hood::unordered_map<std::string, std::string> extension_editors{
+    {".md", "editors/md.html"},
+    {".tbl", "editors/tbl.html"},
+    {".gpx", "editors/gpx.html"},
+};
+// cached and already loaded editors
+static robin_hood::unordered_map<std::string, crow::mustache::template_t> extension_loaded_editors{};
+
 namespace editor_util
 {
+    bool is_extension_editor(const std::string &ext)
+    {
+        return extension_editors.contains(ext);
+    }
+
     crow::response get_editor(bool editor, const crow::request &req, std::string_view path, std::string_view data_base_folder)
     {
-        const crow::mustache::template_t *md_editor_page{};
         std::string ext = std::filesystem::path(path).extension();
-        if (ext == ".md")
-        {
-            static const auto md_editor = crow::mustache::load("editors/md.html");
-            md_editor_page = &md_editor;
-        }
-        else if (ext == ".tbl")
-        {
-            static const auto md_editor = crow::mustache::load("editors/tbl.html");
-            md_editor_page = &md_editor;
-        }
-        else
+        if (!extension_editors.contains(ext))
             return crow::response{nlohmann::json{{"error", "Only md files allowed for edit_md route"}}.dump()};
+        
+        if (!extension_loaded_editors.contains(ext))
+            extension_loaded_editors.emplace(ext, crow::mustache::load(extension_editors.at(ext)));
+
         std::string data_path = std::string(data_base_folder) + path.data();
         std::ifstream data(data_path, std::ios_base::binary);
         std::string d;
@@ -40,7 +48,7 @@ namespace editor_util
         crow_context["file_path"] = std::string(path);
         TRY_ADD_HEADER(crow_context, "site_url", req);
         crow_context["editor"] = editor;
-        crow::response r(md_editor_page->render_string(crow_context));
+        crow::response r(extension_loaded_editors.at(ext).render_string(crow_context));
         r.add_header("Content-Type", crow::mime_types.at("html"));
         return r;
     }
