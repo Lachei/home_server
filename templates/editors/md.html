@@ -48,8 +48,14 @@
         #editor_text {
             width: 100%;
             {{#editor}}
-            height: 88vh;
+            height: 75vh;
             {{/editor}}
+        }
+
+        #log_div {
+            width: 100%;
+            height: 10vh;
+            overflow: scroll;
         }
 
         #preview {
@@ -179,6 +185,10 @@
         .MathJax_Preview {
             display: contents;
         }
+        
+        .log_line:nth-child(even) {
+            background-color: lightgrey;
+        }
     </style>
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
@@ -195,6 +205,8 @@
     <div id="content">
         <div id="editor" class="editor">
             <textarea id="editor_text" oninput="recompile();">{{file_data}}</textarea>
+            <p><b>Compile log:</b></p>
+            <div id="log_div"></div>
         </div>
         <div id="preview" class="preview">
             <!-- This window is filled by the recompile function -->
@@ -321,6 +333,30 @@
     function setup() {
         recompile();
     }
+    
+    // reroute logging to log div
+    function reroute(type) {
+        let logger = document.getElementById("log_div");
+        console["old" + type] = console[type];
+        console[type] = function (...arguments) {
+            for (var i = 0; i < arguments.length; ++i) {
+                if (typeof arguments[i] == "object")
+                    logger.innerHTML += "<div class='log_line'>" + (JSON && JSON.stringify ? JSON.stringify(arguments[i], undefined, 2): arguments[i]) + "</div>";
+                else
+                    logger.innerHTML += "<div class='log_line'>" + arguments[i] + "</div>";
+            }
+            console["old" + type](...arguments);
+        };
+    }
+    reroute('log');
+    reroute('error');
+    reroute('warn');
+    reroute('debug');
+    reroute('info');
+    // rerouting window error
+    window.onerror = (message, source, lineno, colno, error) => {
+        console.error(message);
+    };
 </script>
 
 </html>
