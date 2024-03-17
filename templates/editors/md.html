@@ -218,6 +218,13 @@
         }
     };
 
+    function reattach_script(script_node) {
+        let new_script_node = document.createElement("script");
+        new_script_node.innerHTML = script_node.innerHTML;
+        [...script_node.attributes].forEach(a => new_script_node.setAttribute(a.nodeName, a.nodeValue));
+        script_node.parentNode.replaceChild(new_script_node, script_node);
+    }
+
     function recompile() {
         // update the render window
         const t = document.getElementById("editor_text").value;
@@ -277,6 +284,11 @@
             print_arr_form(toc, 0);
             toc_e.innerHTML = list_string + "</ol>";
         });
+        
+        scripts = [...out_div.getElementsByTagName('script')];
+        scripts.map(
+            s => reattach_script(s)
+        );
 
         out_div.scroll(0, prev_scroll);
         if (!rescaled) {

@@ -35,6 +35,7 @@ function markdown(src) {
     var rx_highlight = /(^|[^A-Za-z\d\\])(([*_])|(~)|(\^)|(--)|(\+\+)|`)(\2?)([^<]*?)\2\8(?!\2)(?=\W|_|$)/g;
     var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
     var rx_code = /\n((```|~~~).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
+    var rx_script = /<script>([^]*?)<\/script>/g;
     var rx_link = /((!?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;
     var rx_table = /\n(( *\|.*?\| *\n)+)/g;
     var rx_thead = /^.*\n( *\|( *\:?-+\:?-+\:? *\|)* *\n|)/;
@@ -117,6 +118,12 @@ function markdown(src) {
     // code
     replace(rx_code, function(all, p1, p2, p3, p4) {
         stash[--si] = element('pre', element('code', p3||p4.replace(/^    /gm, '')));
+        return si + '\uf8ff';
+    });
+
+    // script
+    replace(rx_script, function(all, p1, p2, p3, p4) {
+        stash[--si] = element('script', p1);
         return si + '\uf8ff';
     });
 
