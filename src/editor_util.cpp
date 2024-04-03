@@ -11,6 +11,7 @@ static robin_hood::unordered_map<std::string, std::string> extension_editors{
     {".md", "editors/md.html"},
     {".tbl", "editors/tbl.html"},
     {".gpx", "editors/gpx.html"},
+    {".rech", "editors/invoice.html"},
 };
 // cached and already loaded editors
 static robin_hood::unordered_map<std::string, crow::mustache::template_t> extension_loaded_editors{};
@@ -26,7 +27,7 @@ namespace editor_util
     {
         std::string ext = std::filesystem::path(path).extension();
         if (!extension_editors.contains(ext))
-            return crow::response{nlohmann::json{{"error", "Only md files allowed for edit_md route"}}.dump()};
+            return crow::response{nlohmann::json{{"error", "Unknown editor extension"}}.dump()};
         
         if (!extension_loaded_editors.contains(ext))
             extension_loaded_editors.emplace(ext, crow::mustache::load(extension_editors.at(ext)));

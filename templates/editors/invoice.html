@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+    <title>Rechnungs Editor</title>
+    <style>
+        html * {
+            font-family: Arial, Helvetica, sans-serif;
+        }
+
+        body {
+            font-size: 4mm;
+            width: 210mm;
+            margin: 0;
+        }
+
+        a {
+            cursor: pointer;
+        }
+
+        button {
+            border: none;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        textarea {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 15mm;
+            resize: none;
+        }
+        
+        input[type=text] {
+            width: 90%;
+        }
+        
+        address, contact {
+            display: grid;
+            grid-template-columns: auto auto;
+            grid-template-rows: auto auto auto;
+        }
+        address div, contact div {
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        
+        #content {
+            margin: 10mm 20mm 10mm 20mm;
+        }
+        #templates {
+            display: none;
+        }
+        #logo {
+            width: 100%;
+            height: 25mm;
+        }
+        #addr_small {
+            font-size: 70%;
+            padding-top: 11mm;
+            color: rgb(83, 83, 83);
+        }
+        #addresses {
+            width: 100%;
+            display: grid;
+            grid-template-columns: 60% 40%;
+            grid-template-rows: 20mm 20mm;
+            margin-bottom: 20mm;
+        }
+        #invoice_nr_detail {
+            width:100%;
+            display: grid;
+            grid-template-columns: 20% 40% 20% 20%;
+            grid-template-rows: auto;
+        }
+        #items_table {
+            display: grid;   
+            grid-template-columns: min-content min-content min-content auto min-content min-content min-content min-content;
+        }
+        #total {
+            float: right;
+            text-align: right;
+            border-top: solid black 2px;
+        }
+        #total_content {
+            display: grid;
+            grid-template-columns: min-content min-content;
+            text-align: right;
+        }
+        #total_content pre {
+            margin: 0;
+            margin-left: 5mm;
+        }
+        #additional_text {
+            clear: right;
+        }
+        #additional_text_area {
+            width: 100%;
+            font-size: 100%;
+        }
+        #footer {
+            margin-top: 20mm;
+            font-size: 70%;
+            color: rgb(50, 50, 50);
+        }
+        
+        .header {
+            border-top: solid 2px black;
+            border-bottom: solid 2px black;
+            font-weight: bold;
+        }
+        
+        .header_pre {
+            margin: 2mm;
+        }
+        
+        .insert_row {
+            grid-column: 1 / 9;
+            text-align: center;
+        }
+        .insert_row button{
+            background-color: aquamarine;
+            width: 50%;
+            margin: 1mm;
+        }
+        .delete_button {
+            background-color: red;
+        }
+        .text_align_right {
+            text-align: right;
+        }
+        
+        {{#editor}}
+        @media print {
+        {{/editor}}
+            /* Disables all input things */
+            input {
+                font-size: 4mm;
+                border: 0;
+            }
+            input[type=date] {
+                font-size: 4mm;
+            }
+            input[type=date]::-webkit-inner-spin-button,
+            input[type=date]::-webkit-calendar-picker-indicator {
+                display: none;
+                -webkit-appearance: none;
+            }
+            label{
+                display: none;
+            }
+            address {
+                grid-template-columns: 0 auto;
+            }
+            contact {
+                grid-template-columns: 0 auto;
+            }
+            select {
+                display: none;
+            }
+            textarea {
+                border: none;
+            }
+            
+            #footer {
+                display: table-footer-group;
+            }
+            
+            #table_settings {
+                display: none;
+            }
+
+
+            #items_table {
+                display: grid;   
+                grid-template-columns: 0 min-content min-content auto min-content min-content min-content min-content;
+            }
+            
+            #editor_header {
+                display: none;
+            }
+            
+            .insert_row {
+                display:none;
+            }
+        {{#editor}}
+        }
+        {{/editor}}
+    </style>
+</head>
+<body>
+    <div id="content">
+        <div id="editor_header">
+            <p style="font-size:200%; text-align: center;">{{file_name}}</p>
+            <button id="save" onclick="save();">&#128190;</button>
+            <hr>
+        </div>
+        <div id="logo"></div>
+        <div id="addresses">
+            <div id="addr_small">Hier könnte jetzt Ihre Addresse stehen</div>
+            <div id="addr_large"><address></address></div>
+            <div id="addr_deb"><address></address></div>
+            <div id="contact"><contact></contact></div>
+        </div>
+        <div id="invoice_detail">
+            <b>Rechnung</b>
+            <div id="invoice_nr_detail">
+                <div>Rechungs-Nr.:</div>
+                <div id="invoice_nr"></div>
+                <div>Rechnungsdatum:</div>
+                <div><input id="invoice_date" type="date"/></div>
+            </div>
+        </div>
+        <div id="table_settings">
+            <input id="pos_enable" type="checkbox" checked/><label for="pos_enable">Pos</label>
+            <input id="art_nr_enable" type="checkbox" checked/><label for="art_nr_enable">Art-Nr.</label>
+            <input id="description_enable" type="checkbox" checked/><label for="description_enable">Bezeichung</label>
+            <input id="amount_enable" type="checkbox" checked/><label for="amount_enable">Menge</label>
+            <input id="unit_enable" type="checkbox" checked/><label for="unit_enable">Einheit</label>
+            <input id="price_per_unit_enable" type="checkbox" checked/><label for="price_per_unit_enable">Preis/Einh.</label>
+            <input id="total_enable" type="checkbox" checked/><label for="total_enable">Gesamt</label>
+        </div>
+        <div id="items_table">
+            <div></div> <!-- Empty div as we have the delete button on eah row -->
+            <div class="header"><pre class="header_pre">Pos.</pre></div>
+            <div class="header"><pre class="header_pre">Art-Nr.</pre></div>
+            <div class="header"><pre class="header_pre">Bezeichung</pre></div>
+            <div class="header"><pre class="header_pre">Menge</pre></div>
+            <div class="header"><pre class="header_pre">Einheit</pre></div>
+            <div class="header"><pre class="header_pre">Preis/Einh.(€)</pre></div>
+            <div class="header"><pre class="header_pre">Gesamt(€)</pre></div>
+
+            <div class="insert_row"><button onclick="insert_row(0);">+</button></div>
+        </div>
+        <div id="total">
+            <select id="total_type" onchange="input_updated();">
+                <option value="add_vat">Zzgl. 19% MwSt.</option>
+                <option value="incl_vat">Inkl. 19% MwSt.</option>
+                <option value="no_vat" selected>Keine MwSt.</option>
+            </select>
+            <div id="total_content"></div>
+        </div>
+        <div id="additional_text">
+            <textarea id="additional_text_area" oninput="input_updated();"></textarea>
+            <label for="add_footnote">Vordefinierte Texpassagen:</label>
+            <select id="add_footnote" onchange="input_updated();">
+                <option value="select">Auswählen</option>
+                <option value="vat_included">Im Rechnungsbetrag sind bereits 19% MwSt enthalten.</option>
+                <option value="no_vat">Nach §19Abs.1 UStG wird keine Umsatzsteuer berechnet.</option>
+            </select>
+        </div>
+        <div id="footer">Hier könnte jetzt ihr gedöns stehen</div>
+    </div>
+</body>
+
+<div id="templates">
+    <address>
+        <div>Name:</div>            
+        <div><input class="name" type="text"/></div>
+        <div>Straße:</div>
+        <div><input class="street" type="text"/></div>
+        <div>Ort:</div>
+        <div><input class="loc" type="text"/></div>
+    </address>
+    <contact>
+        <div>Tel:</div>            
+        <div><input class="tel" type="text"/></div>
+        <div>E-mail:</div>
+        <div><input class="email" type="text"/></div>
+        <div>Website:</div>
+        <div><input class="website" type="text"/></div>
+    </contact>
+</div>
+<script>
+    const user_credentials = "{{credentials}}";
+    const file_path = "{{&file_path}}";
+    
+    let file_data = {{&file_data}};
+    let prev_data = structuredClone(file_data);
+    /**
+     * Structure of file data:
+     * id: number,
+     * data: string,
+     * address: [name, street, town],
+     * contact: [tel, email, website],
+     * deb_address: [name, street, town],
+     * entries: [6xstrings per row] // without the pos, as that is separate
+     * tax_type: one of [add_vat, incl_vat, no_vat]
+     * extra_text: string,
+     * enabled_cols: {
+     *     pos_enabled: bool
+     *     art_nr_enabled: bool
+     *     description_enable : bool
+     *     amount_enable: bool
+     *     unit_enable: bool
+     *     price_per_unit_enable: bool
+     *     total_enable: bool
+     * }
+     */
+    
+    function setup() {
+        const address_tag = document.getElementById("templates").querySelector("address");
+        let addresses = [...document.body.querySelectorAll("address")];
+        for (let a of addresses) 
+            a.parentNode.replaceChild(address_tag.cloneNode(true), a);
+
+        const contact_tag = document.getElementById("templates").querySelector("contact");
+        let contacts = [...document.body.querySelectorAll("contact")];
+        for (let c of contacts) 
+            c.parentNode.replaceChild(contact_tag.cloneNode(true), c);
+        
+        let inputs = [...document.body.querySelectorAll("input")];
+        for (let i of inputs)
+            i.onchange = input_updated;
+    }
+    setup();
+    
+    function sync_view_to_json() {
+        if ("date" in file_data) {
+            let e = document.getElementById("invoice_date");
+            e.value = file_data.date;
+        }
+
+        if ("address" in file_data) {
+            let e = document.getElementById("addr_large");
+            e.querySelector(".name").value = file_data.address[0];
+            e.querySelector(".street").value = file_data.address[1];
+            e.querySelector(".loc").value = file_data.address[2];
+            document.getElementById("addr_small").innerHTML = file_data.address[0] + ' | ' + file_data.address[1] + ' | ' + file_data.address[2];
+        }
+        
+        if ("contact" in file_data) {
+            let e = document.getElementById("contact");
+            e.querySelector(".tel").value = file_data.contact[0];
+            e.querySelector(".email").value = file_data.contact[1];
+            e.querySelector(".website").value = file_data.contact[2];
+        }
+
+        if ("deb_address" in file_data) {
+            let e = document.getElementById("addr_deb");
+            e.querySelector(".name").value = file_data.deb_address[0];
+            e.querySelector(".street").value = file_data.deb_address[1];
+            e.querySelector(".loc").value = file_data.deb_address[2];
+        }        
+        
+        document.getElementById("invoice_nr").innerHTML = file_data.id.toString().padStart(6, "0");
+        
+        let total = 0; 
+        if ("entries" in file_data) {
+            let e = document.getElementById("items_table");
+            // only keep the header fields
+            while(e.children.length > 8)
+                e.removeChild(e.children[8]);
+
+            const add_button = (row)=>{ return "<div class='insert_row'><button onclick='insert_row(" + row + ");'>+</button></div>"};
+            let list_elements = add_button(0);
+            for (let i = 0; i < file_data.entries.length; i += 7) { 
+                list_elements += "<div><button class='delete_button' onclick='delete_row(" + i / 7 + ");'>X</button></div>";                ;
+                // doing all the calculations
+                file_data.entries[i + 6] = (+file_data.entries[i + 3].replaceAll(',', '.') * file_data.entries[i + 5].replaceAll(',', '.')).toFixed(2).replace('.', ',');
+                total += +file_data.entries[i + 6].replace(',', '.');
+                for (let j = 0; j < 6; ++j)
+                    list_elements += "<div><input id='in_" + (i + j) + "' type='text' value='" + file_data.entries[i + j] + "' onchange='input_updated();'></div>";
+                list_elements += "<div class='text_align_right'>" + file_data.entries[i + 6] + "</div>";
+
+                list_elements += add_button(i + 1);
+            }
+            e.innerHTML += list_elements;
+        }
+        
+        if ("tax_type" in file_data) {
+            let e = document.getElementById("total_type");
+            e.value = file_data.tax_type;
+        }
+        
+        if ("extra_text" in file_data) {
+            let e = document.getElementById("additional_text_area");
+            e.value = file_data.extra_text;
+            auto_grow(e);
+        }
+        
+        let total_content = document.getElementById("total_content");
+        switch(document.getElementById("total_type").value) {
+        case "add_vat":
+            total_content.innerHTML = "<div><pre>Summe Netto:</pre></div>" + 
+                                      "<div><pre>€ " +  total.toFixed(2).replace('.', ',') + "</pre></div>" +
+                                      "<div><pre>19,00% auf " + total.toFixed(2).replace('.', ',')  + " €</pre></div>" + 
+                                      "<div><pre>€ " + (total * .19).toFixed(2).replace('.', ',') + "</pre></div>" +
+                                      "<div><b>Endsumme</b></div>" +
+                                      "<div><b><pre>€ " + (total * 1.19).toFixed(2).replace('.', ',') + "</pre></b></div>"; break;
+        case "incl_vat":
+            total_content.innerHTML = "<div><pre>Inklusive 19% Mwst.</pre></div>" + 
+                                      "<div><pre>€ " + (total / 1.19 * .19).toFixed(2).replace('.', ',') + "</pre></div>" +
+                                      "<div><b>Endsumme</b></div>" +
+                                      "<div><b><pre>€ " + total.toFixed(2).replace('.', ',') + "</pre></b></div>"; break;
+        case "no_vat":
+            total_content.innerHTML = "<div><b>Endsumme</b></div>" +
+                                      "<div><b><pre>€ " + total.toFixed(2).replace('.', ',') + "</pre></b></div>"; break;
+        }
+
+        if ("enabled_cols" in file_data) {
+            // TODO
+        }
+    }
+    sync_view_to_json();
+    
+    function get_json_from_view() {
+        json = {id: file_data.id}; // the id is never updated
+
+        let e = document.getElementById("invoice_date");
+        json.date = e.value;
+
+        e = document.getElementById("addr_large");
+        json.address = [e.querySelector(".name").value,
+                        e.querySelector(".street").value,
+                        e.querySelector(".loc").value];
+        
+        e = document.getElementById("contact");
+        json.contact = [e.querySelector(".tel").value,
+                        e.querySelector(".email").value,
+                        e.querySelector(".website").value];
+
+        e = document.getElementById("addr_deb");
+        json.deb_address = [e.querySelector(".name").value,
+                        e.querySelector(".street").value,
+                        e.querySelector(".loc").value];
+        
+        e = document.getElementById("items_table");
+        json.entries = [];
+        for (let i = 8; i < e.children.length - 1; i += 9) {
+            for (let j = 0; j < 7; ++j) {
+                json.entries.push(e.children[i + 2 + j].firstChild.value);
+            } 
+        }
+        e = document.getElementById("total_type");
+        json.tax_type = e.value;
+        
+        e = document.getElementById("additional_text_area");
+        json.extra_text = e.value;
+        e = document.getElementById("add_footnote");
+        if (e.selectedIndex != 0)
+            json.extra_text += e.options[e.selectedIndex].text;
+        e.selectedIndex = 0;
+        
+        return json;
+    }
+    
+    async function input_updated() {
+        file_data = get_json_from_view();
+        sync_view_to_json();
+    }
+        
+    async function insert_row(row) {
+        if (!("entries" in file_data))
+            file_data.entries = [];
+        file_data.entries.splice(row * 7, 0, "", "", "", "", "", "", "");
+        for (let i = 0; i < file_data.entries.length /  7; ++i)
+            file_data.entries[i  * 7] = i + 1 + "";
+        sync_view_to_json();
+    }
+    
+    async function delete_row(row) {
+        file_data.entries.splice(row * 7, 7);
+        for (let i = 0; i < file_data.entries.length /  7; ++i)
+            file_data.entries[i  * 7] = i + 1 + "";
+        sync_view_to_json();
+    }
+    
+    function auto_grow(element) {
+        element.style.height = "5px";
+        element.style.height = (element.scrollHeight) + "px";
+    }
+
+    async function save() {
+        let res = await fetch(location.origin + "/update_file", {
+            headers: { credentials: user_credentials, path: file_path },
+            method: "POST",
+            body: JSON.stringify(file_data)
+        });
+        res = await res.json();
+        console.log(res);
+    }
+
+
+    function deepEqual(x, y) {
+        return (x && y && typeof x === 'object' && typeof y === 'object') ?
+            (Object.keys(x).length === Object.keys(y).length) &&
+            Object.keys(x).reduce(function (isEqual, key) {
+                return isEqual && deepEqual(x[key], y[key]);
+            }, true) : (x === y);
+    }
+    {{#editor}}
+    window.setInterval(() => {
+        if (!deepEqual(file_data, prev_data)) {
+            save();
+            prev_data = structuredClone(file_data);
+        }
+    }, 5000);
+    {{/editor}}
+</script>
+
+</html>

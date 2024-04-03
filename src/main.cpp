@@ -64,7 +64,7 @@ int main(int argc, const char** argv) {
         show_help = true;
         certificates_folder = "data/certification/";
     }
-    
+ 
     if (show_help)
         print_help();
 
@@ -75,6 +75,8 @@ int main(int argc, const char** argv) {
     database_util::setup_event_table(database);
     database_util::setup_shift_tables(database);
     data_util::setup_data(data_base_folder);
+    
+    std::mutex invoice_file_mutex{};
 
     // ------------------------------------------------------------------------------------------------
     // Login/authentication
@@ -319,6 +321,37 @@ int main(int argc, const char** argv) {
         const auto res = data_util::delete_files(data_base_folder, delete_files);
         return res.dump();
     });
+    
+    CROW_ROUTE(app, "/create_rech")([&credentials, &data_base_folder, &invoice_file_mutex](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (req.headers.find("path") == req.headers.end())
+            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
+        
+        // atomically increment the invoice cache id
+        const std::string invoice_cache_path = std::string(data_base_folder) + "rechnungs_cache.json";
+        nlohmann::json invoice_cache{};
+        nlohmann::json invoice{};
+        {
+            std::scoped_lock lock(invoice_file_mutex);
+            std::ifstream invoice_cache_file(invoice_cache_path);
+            try {
+                invoice_cache = nlohmann::json::parse(invoice_cache_file);
+                if (!invoice_cache.contains("cur_id"))
+                    invoice_cache["cur_id"] = int(1);
+            } catch (...) {
+                invoice_cache= nlohmann::json{{"cur_id", 0}};
+            };
+            invoice_cache["cur_id"] = invoice_cache["cur_id"].get<int>() + 1;
+            invoice["id"] = invoice_cache["cur_id"].get<int>();
+            std::ofstream invoice_cache_out(invoice_cache_path);
+            invoice_cache_out << invoice_cache.dump();
+        }
+        const std::string file_data = invoice.dump();
+
+        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(file_data.data()), file_data.size()});
+        return res.dump();
+    });
 
     // ------------------------------------------------------------------------------------------------
     // File editing
@@ -329,6 +362,11 @@ int main(int argc, const char** argv) {
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
     CROW_ROUTE(app, "/edit_md/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
+        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        
+        return editor_util::get_editor(true, req, path, data_base_folder);
+    });
+    CROW_ROUTE(app, "/edit_rech/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
         EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
         
         return editor_util::get_editor(true, req, path, data_base_folder);
