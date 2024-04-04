@@ -49,7 +49,7 @@
         }
         
         #content {
-            margin: 10mm 20mm 10mm 20mm;
+            margin: 0mm 20mm 0 20mm;
         }
         #templates {
             display: none;
@@ -103,8 +103,10 @@
         }
         #footer {
             margin-top: 20mm;
-            font-size: 70%;
-            color: rgb(50, 50, 50);
+            margin-bottom: 20mm;
+            display: grid;
+            background-color: white;
+            grid-template-columns: min-content auto;
         }
         
         .header {
@@ -132,6 +134,14 @@
         .text_align_right {
             text-align: right;
         }
+        .print_footer_input {
+            display: none;
+        }
+        
+        @page {
+            size: auto;
+            margin: 10mm 0 20mm 0;
+        }
         
         {{#editor}}
         @media print {
@@ -140,6 +150,7 @@
             input {
                 font-size: 4mm;
                 border: 0;
+                pointer-events: none;
             }
             input[type=date] {
                 font-size: 4mm;
@@ -166,7 +177,20 @@
             }
             
             #footer {
-                display: table-footer-group;
+                margin: 0;
+                position: fixed;
+                bottom: 0mm;
+                left: 20mm;
+                width: 100%;
+                display: block;
+                font-size: 70%;
+                color: rgb(50, 50, 50);
+            }
+            #footer div {
+                float: left;
+            }
+            #footer input {
+                display: none;
             }
             
             #table_settings {
@@ -185,6 +209,11 @@
             
             .insert_row {
                 display:none;
+            }
+
+            .print_footer_input {
+                display: block;
+                width: 35mm;
             }
         {{#editor}}
         }
@@ -237,9 +266,9 @@
         </div>
         <div id="total">
             <select id="total_type" onchange="input_updated();">
-                <option value="add_vat">Zzgl. 19% MwSt.</option>
-                <option value="incl_vat">Inkl. 19% MwSt.</option>
-                <option value="no_vat" selected>Keine MwSt.</option>
+                <option value="add_vat">Zzgl. 19% USt.</option>
+                <option value="incl_vat">Inkl. 19% USt.</option>
+                <option value="no_vat" selected>Keine USt.</option>
             </select>
             <div id="total_content"></div>
         </div>
@@ -252,7 +281,16 @@
                 <option value="no_vat">Nach §19Abs.1 UStG wird keine Umsatzsteuer berechnet.</option>
             </select>
         </div>
-        <div id="footer">Hier könnte jetzt ihr gedöns stehen</div>
+        <div id="footer">
+            <div>Kontoinhaber:</div>
+            <div><input id="bank_acc_name" type="text"/><div class="print_footer_input"></div></div>
+            <div>Bank:</div>
+            <div><input id="bank_name" type="text"/><div class="print_footer_input"></div></div>
+            <div>IBAN:</div>
+            <div><input id="iban" type="text"/><div class="print_footer_input"></div></div>
+            <div>BIC:</div>
+            <div><input id="bic" type="text"><div class="print_footer_input"></div></div>
+        </div>
     </div>
 </body>
 
@@ -290,6 +328,7 @@
      * entries: [6xstrings per row] // without the pos, as that is separate
      * tax_type: one of [add_vat, incl_vat, no_vat]
      * extra_text: string,
+     * bank_address: [owner, bank name, iban, bic]
      * enabled_cols: {
      *     pos_enabled: bool
      *     art_nr_enabled: bool
@@ -382,17 +421,25 @@
             auto_grow(e);
         }
         
+        if ("bank_address" in file_data) {
+            let e = document.getElementById("footer");
+            e.children[1].firstChild.value = e.children[1].children[1].innerHTML = file_data.bank_address[0];
+            e.children[3].firstChild.value = e.children[3].children[1].innerHTML = file_data.bank_address[1];
+            e.children[5].firstChild.value = e.children[5].children[1].innerHTML = file_data.bank_address[2];
+            e.children[7].firstChild.value = e.children[7].children[1].innerHTML = file_data.bank_address[3];
+        }
+        
         let total_content = document.getElementById("total_content");
         switch(document.getElementById("total_type").value) {
         case "add_vat":
             total_content.innerHTML = "<div><pre>Summe Netto:</pre></div>" + 
                                       "<div><pre>€ " +  total.toFixed(2).replace('.', ',') + "</pre></div>" +
-                                      "<div><pre>19,00% auf " + total.toFixed(2).replace('.', ',')  + " €</pre></div>" + 
+                                      "<div><pre>19,00% USt. auf " + total.toFixed(2).replace('.', ',')  + " €</pre></div>" + 
                                       "<div><pre>€ " + (total * .19).toFixed(2).replace('.', ',') + "</pre></div>" +
                                       "<div><b>Endsumme</b></div>" +
                                       "<div><b><pre>€ " + (total * 1.19).toFixed(2).replace('.', ',') + "</pre></b></div>"; break;
         case "incl_vat":
-            total_content.innerHTML = "<div><pre>Inklusive 19% Mwst.</pre></div>" + 
+            total_content.innerHTML = "<div><pre>Inklusive 19% USt.</pre></div>" + 
                                       "<div><pre>€ " + (total / 1.19 * .19).toFixed(2).replace('.', ',') + "</pre></div>" +
                                       "<div><b>Endsumme</b></div>" +
                                       "<div><b><pre>€ " + total.toFixed(2).replace('.', ',') + "</pre></b></div>"; break;
@@ -444,6 +491,12 @@
         if (e.selectedIndex != 0)
             json.extra_text += e.options[e.selectedIndex].text;
         e.selectedIndex = 0;
+        
+        e = document.getElementById("footer");
+        json.bank_address = [e.children[1].firstChild.value,
+                             e.children[3].firstChild.value,
+                             e.children[5].firstChild.value,
+                             e.children[7].firstChild.value];
         
         return json;
     }
