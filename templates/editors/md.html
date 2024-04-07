@@ -135,19 +135,21 @@
             border-bottom: 1px solid #aaa;
         }
 
-        ol.decimal {
-            counter-reset: list_counter;
-            padding-left: 32px;
-        }
+        @supports (-moz-appearance:none) {
+            ol.decimal {
+                counter-reset: list_counter;
+                padding-left: 32px;
+            }
 
-        ol li.decimal{
-            counter-increment: list_counter;
-        }
+            ol li.decimal{
+                counter-increment: list_counter;
+            }
 
-        ol li.decimal::marker{
-            content: counters(list_counter, '.') ' ';
-            /* Whatever custom styles you want here */
-            font-weight: bold;
+            ol li.decimal::marker{
+                content: counters(list_counter, '.') ' ';
+                /* Whatever custom styles you want here */
+                font-weight: bold;
+            }
         }
 
         .plain,
@@ -198,7 +200,7 @@
 <body>
     {{#editor}}
     <div id="header">
-        <center id="title">Readme Editor</center>
+        <center id="title">Markdown Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
     </div>
     {{/editor}}
