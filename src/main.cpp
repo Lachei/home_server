@@ -423,7 +423,11 @@ int main(int argc, const char** argv) {
     
     // checking the certificates folder
 #ifdef CROW_ENABLE_SSL
-    if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
+    if (std::filesystem::exists(std::string(certificates_folder) + "/cert.pem") &&
+             std::filesystem::exists(std::string(certificates_folder) + "/privkey.pem"))
+        app.ssl_file(std::string(certificates_folder) + "/cert.pem",
+                     std::string(certificates_folder) + "/privkey.pem");
+    else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
         std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
         app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
                      std::string(certificates_folder) + "/rsa.key");
