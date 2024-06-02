@@ -311,6 +311,11 @@
             <td><input id="new_rech_file_input" type="text" style="width:auto;" /></td>
             <td><button onclick="create_rech_file();" style="width:100%">Rechnung erstellen</button></td>
         </tr>
+        <tr class="no_c">
+            <td><label for="new_gpx_file_input" style="clear:both"> <div class="file-icon" data-type="gpx" > </div> </label></td>
+            <td><input id="new_gpx_file_input" type="text" style="width:auto;" /></td>
+            <td><button onclick="create_gpx_file();" style="width:100%">Gpx erstellen</button></td>
+        </tr>
     </table>
 </div>
 <div id="edit_div">
@@ -514,6 +519,16 @@
         let file_name = document.getElementById("new_rech_file_input").value;
         let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".rech";
         let res = await fetch("/create_rech", { headers: { credentials: user_credentials, path: file_path } });
+        res = await res.json();
+        if (!("success" in res))
+            console.log(res);
+        reload_cur_directory();
+    }
+    
+    async function create_gpx_file() {
+        let file_name = document.getElementById("new_gpx_file_input").value;
+        let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".gpx";
+        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);

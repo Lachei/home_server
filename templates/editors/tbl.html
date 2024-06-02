@@ -8,15 +8,26 @@
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
-            font-size: 115%;
+            font-size: 100%;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0px;
+            overflow: hidden;
         }
 
         body {
-            width: auto;
-            margin: 0px 4px 0px 4px;
-            {{#editor}}
-            height: 100vh;
-            {{/editor}}
+            display: table;
+        }
+        
+        #header, #table_filler {
+            display: table-row;
+        }
+        
+        #header + #table_filler {
+            height: 100%;
         }
 
         a {
@@ -166,8 +177,7 @@
         #table_container {
             display: grid;
             grid-template-columns: auto auto;
-            grid-template-rows: auto auto;
-            overflow:scroll;
+            grid-template-rows: auto 1fr;
         }
 
         #select_end {
@@ -197,55 +207,55 @@
 </head>
 
 <body>
-    <div id="flex_container">
-        <div id="header">
-            <div id="editor_header">
-                <p style="font-size:200%; text-align:center">{{file_name}}</p>
-                <div id="tool_bar" class="tool_bar">
-                    <button id="save" class="tool_item" onclick="save();">&#128190;</button>
-                    <div class="tool_bar_separator"></div>
-                    <div id="font_size" class="tool_item">
-                        <a onclick="font_delta(1);">+</a>
-                        <input id="font_size_input" value="8" onchange="font_size_changed()" />
-                        <a onclick="font_delta(-1);">-</a>
-                    </div>
-                    <div class="tool_bar_separator"></div>
-                    <div class="tool_item">
-                        <button onclick="toggle_font_bold();"><b>B</b></button>
-                    </div>
-                    <div class="tool_item">
-                        <button onclick="toggle_font_italic();"><i>I</i></button>
-                    </div>
-                    <div class="tool_item">
-                        <button onclick="toggle_font_del();"><del>D</del></button>
-                    </div>
-                    <div class="tool_bar_separator"></div>
-                    <input id="text_color_picker" type="color" class="tool_item"
-                        onchange="change_color('color', this)">A</input>
-                    <input id="background_color_picker" type="color" class="tool_item"
-                        onchange="change_color('background-color', this)" value="#ffffff">&#129699;</input>
-                    <div class="tool_bar_separator"></div>
-                    <button id="align_left" onclick="align('left');" class="flip">&#8694;</button>
-                    <button id="align_center" onclick="align('center');">&#9776;</button>
-                    <button id="align_right" onclick="align('end');">&#8694;</button>
-                    <div class="tool_bar_separator"></div>
-                    <button id="add_new_row_below" onclick="" class="tool_item">&#9088;</button>
-                    <div class="tool_bar_separator"></div>
-                    <button id="add_ballot_box" onclick="add_ballot_box();">&#9745;</button>
-                    <div class="tool_bar_separator"></div>
-                    <button id="fit_col_to_text_width" onclick="fit_col_to_text_width();">Textbreite</button>
+    <div id="header">
+        <div id="editor_header">
+            <p style="font-size:200%; text-align:center">{{file_name}}</p>
+            <div id="tool_bar" class="tool_bar">
+                <button id="save" class="tool_item" onclick="save();">&#128190;</button>
+                <div class="tool_bar_separator"></div>
+                <div id="font_size" class="tool_item">
+                    <a onclick="font_delta(1);">+</a>
+                    <input id="font_size_input" value="8" onchange="font_size_changed()" />
+                    <a onclick="font_delta(-1);">-</a>
                 </div>
-            </div>
-
-            <div id="input_bar" class="input_bar">
-                <input id="cell_selection" class="tool_item" type="dropdown" value="A1" onchange="update_selected();" />
-                <button id="select_end" onclick="next_end=true;">&#9974;</button>
-                <div class="tool_item">f(x) = </div>
-                <input id="tool_item_content" class="tool_item" type="text" onchange="update_text(this)" />
-                <button id="insert_cells_toggle" onclick="toggle_insert_cells();">&#9633;</button>
+                <div class="tool_bar_separator"></div>
+                <div class="tool_item">
+                    <button onclick="toggle_font_bold();"><b>B</b></button>
+                </div>
+                <div class="tool_item">
+                    <button onclick="toggle_font_italic();"><i>I</i></button>
+                </div>
+                <div class="tool_item">
+                    <button onclick="toggle_font_del();"><del>D</del></button>
+                </div>
+                <div class="tool_bar_separator"></div>
+                <input id="text_color_picker" type="color" class="tool_item"
+                    onchange="change_color('color', this)">A</input>
+                <input id="background_color_picker" type="color" class="tool_item"
+                    onchange="change_color('background-color', this)" value="#ffffff">&#129699;</input>
+                <div class="tool_bar_separator"></div>
+                <button id="align_left" onclick="align('left');" class="flip">&#8694;</button>
+                <button id="align_center" onclick="align('center');">&#9776;</button>
+                <button id="align_right" onclick="align('end');">&#8694;</button>
+                <div class="tool_bar_separator"></div>
+                <button id="add_new_row_below" onclick="" class="tool_item">&#9088;</button>
+                <div class="tool_bar_separator"></div>
+                <button id="add_ballot_box" onclick="add_ballot_box();">&#9745;</button>
+                <div class="tool_bar_separator"></div>
+                <button id="fit_col_to_text_width" onclick="fit_col_to_text_width();">Textbreite</button>
             </div>
         </div>
 
+        <div id="input_bar" class="input_bar">
+            <input id="cell_selection" class="tool_item" type="dropdown" value="A1" onchange="update_selected();" />
+            <button id="select_end" onclick="next_end=true;">&#9974;</button>
+            <div class="tool_item">f(x) = </div>
+            <input id="tool_item_content" class="tool_item" type="text" onchange="update_text(this)" />
+            <button id="insert_cells_toggle" onclick="toggle_insert_cells();">&#9633;</button>
+        </div>
+    </div>
+
+    <div id="table_filler">
         <div id="table_container">
             <div id="empty_cell"></div>
             <div id="column_labels" onscroll="sync_scroll(this)"></div>
@@ -836,6 +846,13 @@
             saved_table_data = structuredClone(table_data);
         }
     }, 5000);
+    
+    window.onresize = () => {
+        let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
+        console.log("setting the height " + height);
+        document.getElementById("table_container").style.height = height;
+    };
+    window.onload = () => {window.onresize();};
     {{/editor}}
 </script>
 

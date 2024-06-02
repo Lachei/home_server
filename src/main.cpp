@@ -260,6 +260,11 @@ int main(int argc, const char** argv) {
     });
     CROW_ROUTE(app, "/daten/<path>")([&credentials, &data_base_folder](const crow::request &req, const std::string& path) {
         EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        
+        // sanity check which avoids any .. in the path. This hinders users to get folders
+        // outside of the data subfolder which would be a security violation
+        if (path.find("..") != std::string::npos)
+            return crow::response{"{error: \".. is not allowed in the path.\"}"};
 
         crow::response res;
         std::filesystem::path file_path = data_base_folder.data() + path;
@@ -352,6 +357,28 @@ int main(int argc, const char** argv) {
         const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(file_data.data()), file_data.size()});
         return res.dump();
     });
+    
+    // ------------------------------------------------------------------------------------------------
+    // Map loading (read only and currently does not need authentication)
+    // ------------------------------------------------------------------------------------------------
+    CROW_ROUTE(app, "/heightmap/meta")([](const crow::request& req) {
+        std::string filepath = "data/heightmaps/meta.json";
+        if (!std::filesystem::exists(filepath))
+            return crow::response{"{error: \"The hieghtmap meta file could not be found\"}"};
+
+        crow::response res;
+        res.set_static_file_info(filepath);
+        return res;
+    });
+    CROW_ROUTE(app, "/heightmap/<string>")([](const crow::request& req, const std::string& tile) {
+        std::string filepath = "data/heightmaps/" + tile + ".jpg";
+        if (!std::filesystem::exists(filepath))
+            return crow::response{"{error: \"The hieghtmap could not be found\"}"};
+
+        crow::response res;
+        res.set_static_file_info(filepath);
+        return res;
+    });
 
     // ------------------------------------------------------------------------------------------------
     // File editing
@@ -371,7 +398,11 @@ int main(int argc, const char** argv) {
         
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
-
+    CROW_ROUTE(app, "/edit_gpx/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
+        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        
+        return editor_util::get_editor(true, req, path, data_base_folder);
+    });
     
     // ------------------------------------------------------------------------------------------------
     // General page loading
@@ -407,6 +438,7 @@ int main(int argc, const char** argv) {
     const std::string sha_js = crow::mustache::load_text("sha256.js");
     const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
     const std::string math_jax_js = crow::mustache::load_text("math_jax.js");
+    const std::string ling_alg_js = crow::mustache::load_text("lin_alg.js");
     const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
     const std::string tab_data = crow::mustache::load_text("tabs/data.html");
@@ -416,6 +448,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/math_jax.js")([&math_jax_js](){crow::response r(math_jax_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    CROW_ROUTE(app, "/lin_alg.js")([&ling_alg_js](){crow::response r(ling_alg_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
@@ -424,11 +457,11 @@ int main(int argc, const char** argv) {
     // checking the certificates folder
 #ifdef CROW_ENABLE_SSL
     if (std::filesystem::exists(std::string(certificates_folder) + "/cert.pem") &&
-             std::filesystem::exists(std::string(certificates_folder) + "/privkey.pem"))
+        std::filesystem::exists(std::string(certificates_folder) + "/privkey.pem"))
         app.ssl_file(std::string(certificates_folder) + "/cert.pem",
                      std::string(certificates_folder) + "/privkey.pem");
     else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
-        std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
+             std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
         app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
                      std::string(certificates_folder) + "/rsa.key");
     else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
