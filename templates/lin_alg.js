@@ -45,7 +45,7 @@ const MatBaseObject = (rows = 4, cols = 4) => {
         // matrix matrix multiplication with return of a copied matrix
         multiply: function (o) {
             if (typeof o === "number") {
-                let ret = MatBaseObject(this.rows, o.cols);
+                let ret = MatBaseObject(this.rows, this.cols);
                 for (let i = 0; i < ret.entries.length; ++i)
                     ret.entries[i] = this.entries[i] * o;
                 return ret;
@@ -63,7 +63,7 @@ const MatBaseObject = (rows = 4, cols = 4) => {
         // matrix matrix multiplication in place
         mul: function (o) {
             if (typeof o === "number") {
-                for (let i = 0; i < ret.entries.length; ++i)
+                for (let i = 0; i < this.entries.length; ++i)
                     this.entries[i] *= o;
                 return this;
             }

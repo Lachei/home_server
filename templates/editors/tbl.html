@@ -849,7 +849,6 @@
     
     window.onresize = () => {
         let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
-        console.log("setting the height " + height);
         document.getElementById("table_container").style.height = height;
     };
     window.onload = () => {window.onresize();};

@@ -52,6 +52,10 @@
         #header + #content{
             height: 100%;
         }
+        
+        #canvas3d {
+            height: 100%;
+        }
     </style>
 </head>
 
@@ -80,7 +84,7 @@
     let render_3d_program = null;
     let camera_center = null;
     const cam_rot_speed = .001;
-    const cam_dir_speed = .001;
+    const cam_dir_speed = .1;
     const up_dir = Vec4(0, 0, 1, 0);
     let camera_dir = 0;     // given in radians, 0 means dead north
     let camera_pitch = 0;   // given in radians, 0 means straight ahead, pi straight up -pi straight down
@@ -93,7 +97,7 @@
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - event.clientX;
             let yDel = canvas_drag_start.y - event.clientY;
-            camera_dir += xDel * cam_rot_speed;
+            camera_dir -= xDel * cam_rot_speed;
             if (camera_dir > 2 * Math.PI ) camera_dir -= 2 * Math.PI;
             if (camera_dir < 0)            camera_dir += 2 * Math.PI;
             camera_pitch += yDel * cam_rot_speed;
@@ -108,33 +112,37 @@
     canvas3d.addEventListener("wheel", (e) => {
         draw_scene();
     });
-    canvas3d.addEventListener("keydown", (e) => {
-        switch(e.code) {
+    window.addEventListener("keydown", (e) => {
+        if (document.querySelector(".preview:hover") == null)
+            return;
+        switch(e.key) {
         case "W":
         case "w": 
-            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(cam_dir_speed));
+            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-cam_dir_speed));
             break;
         case "A":
         case "a": 
-            camera_center.add(get_right_dir(camera_dir).mul(-cam_dir_speed));
+            camera_center.add(get_right_dir(-camera_dir).mul(-cam_dir_speed));
             break;
         case "S":
         case "s": 
-            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-cam_dir_speed));
+            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(cam_dir_speed));
             break;
         case "D":
         case "d": 
-            camera_center.add(get_right_dir(camera_dir).mul(cam_dir_speed));
+            camera_center.add(get_right_dir(-camera_dir).mul(cam_dir_speed));
             break;
         case "Q":
         case "q": 
-            camera_center.add(up_dir.multiply(cam_dir_speed));
+            camera_center.add(up_dir.multiply(-cam_dir_speed));
             break;
         case "E":
-        case "e": break;
-            camera_center.add(up_dir.multiply(-cam_dir_speed));
+        case "e":
+            camera_center.add(up_dir.multiply(cam_dir_speed));
+            break;
         default: return;
         }
+        e.preventDefault();
         draw_scene();
     });
 
@@ -142,7 +150,7 @@
     async function draw_scene() {
         if (!gl_context)
             return;
-        resizeCanvasToDisplaySize(canvas3d);
+
         gl_context.viewport(0, 0, canvas3d.width, canvas3d.height);
         gl_context.clearColor(0, 0, 0, 1.0);
         gl_context.clearDepth(1.0);
@@ -151,12 +159,16 @@
 
         // creating the view matrix -------------------------------------------
         console.log("Cam dir: " + String(camera_dir) + ", pitch: " + String(camera_pitch));
+        let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
+        at.entries[2] += camera_center.z();
         const view = LookAt(Vec4(0, 0, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
-                            get_forward_dir(camera_dir, camera_pitch).to_absolute_vec(), 
+                            at, 
                             up_dir);
         let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
         gl_context.useProgram(render_3d_program.program);
+        console.log(camera_center.to_string());
+        console.log(view.to_string());
         gl_context.uniformMatrix4fv(render_3d_program.uniform_locations.view_proj, false, view_projection.entries);
 
         // drawing the tiles --------------------------------------------------
@@ -184,9 +196,7 @@
             gl_context.uniform2f(render_3d_program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
             gl_context.drawArrays(gl_context.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
         };
-        for (let i = 0; i < radius; ++i, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d, cur_d *= 3) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
-            // console.log(cur_d);
-            // console.log(cur_base_pos.to_string());
+        for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
             draw_patch(camera_center, cur_base_pos, cur_d);
             draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon), cur_d);
             draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon), cur_d);
@@ -235,7 +245,7 @@
             pos_cam_rel.xy += grid_offset_pos_rel;
 
             gl_Position = view_proj * pos_cam_rel;
-            vs_tid = float(triangle_idx);
+            vs_tid = float(gl_VertexID / 3);
         }
         `
         const fs = `#version 300 es
@@ -244,7 +254,7 @@
 
         out vec4 out_col; 
         void main(void) {
-            out_col = vec4(1);// vec4(sin(vs_tid * .01), sin(vs_tid * .01 + .3), sin(vs_tid * 0.1 + .67), 1.);
+            out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
         }
         `
         const render_pipeline_3d = initShaderProgram(gl_context, vs, fs);
@@ -262,7 +272,7 @@
         let meta = await fetch(location.origin + "/heightmap/meta");
         heightmap_meta_data = await meta.json();
         
-        camera_center = Vec4(5304500, 5305500, 1);
+        camera_center = Vec4(5304500, 5305500, 300);
 
         linalg_tests();
     }
@@ -341,11 +351,18 @@
             canvas.height = displayHeight;
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(90,  displayWidth / displayHeight, .1, 1000);
+        camera_perspective = PerspectiveFov(90,  displayWidth / displayHeight, .1, 10000);
         const screen_size_factor = .01;
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .1, 1000);
+        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .1, 10000);
         return needResize;
     }
+    window.addEventListener("resize", () => {
+        let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
+        canvas3d.style.height = height;
+        resizeCanvasToDisplaySize(canvas3d);
+        draw_scene();
+    });
+    resizeCanvasToDisplaySize(canvas3d);
 
 </script>
 
