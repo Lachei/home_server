@@ -12,8 +12,9 @@
             font-family: Arial, Helvetica, sans-serif;
             font-size: min(2vw, .5cm);
         }
-        
-        html, body {
+
+        html,
+        body {
             width: 100%;
             height: 100%;
             margin: 0px;
@@ -44,15 +45,16 @@
             width: 100%;
             height: 100%;
         }
-        
-        #header, #content{
+
+        #header,
+        #content {
             display: table-row;
         }
 
-        #header + #content{
+        #header+#content {
             height: 100%;
         }
-        
+
         #canvas3d {
             height: 100%;
         }
@@ -98,8 +100,8 @@
             let xDel = canvas_drag_start.x - event.clientX;
             let yDel = canvas_drag_start.y - event.clientY;
             camera_dir -= xDel * cam_rot_speed;
-            if (camera_dir > 2 * Math.PI ) camera_dir -= 2 * Math.PI;
-            if (camera_dir < 0)            camera_dir += 2 * Math.PI;
+            if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
+            if (camera_dir < 0) camera_dir += 2 * Math.PI;
             camera_pitch += yDel * cam_rot_speed;
             if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
             if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
@@ -115,36 +117,99 @@
     window.addEventListener("keydown", (e) => {
         if (document.querySelector(".preview:hover") == null)
             return;
-        switch(e.key) {
-        case "W":
-        case "w": 
-            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-cam_dir_speed));
-            break;
-        case "A":
-        case "a": 
-            camera_center.add(get_right_dir(-camera_dir).mul(-cam_dir_speed));
-            break;
-        case "S":
-        case "s": 
-            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(cam_dir_speed));
-            break;
-        case "D":
-        case "d": 
-            camera_center.add(get_right_dir(-camera_dir).mul(cam_dir_speed));
-            break;
-        case "Q":
-        case "q": 
-            camera_center.add(up_dir.multiply(-cam_dir_speed));
-            break;
-        case "E":
-        case "e":
-            camera_center.add(up_dir.multiply(cam_dir_speed));
-            break;
-        default: return;
+
+        console.log(e.key);
+
+        let speed = cam_dir_speed;
+        let key = e.key;
+        if (key === key.toUpperCase()) {
+            key = key.toLowerCase();
+            speed *= 100;
         }
+        if (key === "w")
+            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-speed));
+        if (key === "a")
+            camera_center.add(get_right_dir(camera_dir).mul(-speed));
+        if (key === "s")
+            camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed));
+        if (key === "d")
+            camera_center.add(get_right_dir(camera_dir).mul(speed));
+        if (key === "q")
+            camera_center.add(up_dir.multiply(-speed));
+        if (key === "e")
+            camera_center.add(up_dir.multiply(speed));
         e.preventDefault();
         draw_scene();
     });
+
+    function filter_object(obj, callback) {
+        return Object.fromEntries(Object.entries(obj).filter(([key, val]) => callback(key, val)));
+    };
+    // main function to load the images and update the image information buffer
+    let image_cache = {};
+    async function update_cached_images() {
+        // checking detail image tiles which are available on the self hosted server
+        // the detail heights for the 4 closest tiles will always be tried to be kept in memory
+        let tiles_to_load = [];
+        for (let tile in heightmap_meta_data) {
+            // lat are the y coordinates
+            let lat_diff_2 = heightmap_meta_data[tile].center_lat - camera_center.y();
+            lat_diff_2 *= lat_diff_2;
+            // lon are the x coordinates
+            let lon_diff_2 = heightmap_meta_data[tile].center_lon - camera_center.x();
+            lon_diff_2 *= lon_diff_2;
+            if (lat_diff_2 + lon_diff_2 <= 1.42e6)
+                tiles_to_load.push(tile);
+            if (tiles_to_load.length >= 4)
+                break;
+        }
+        let all_tiles_to_load = tiles_to_load;
+        tiles_to_load = tiles_to_load.filter(v => v in image_cache === false)           // only load images that are not yet cached
+        if (tiles_to_load.length === 0)
+            return;
+        console.log("Loading the following tiles");
+        console.log(tiles_to_load);
+        tiles_to_load.forEach(v => {
+            let image = new Image();
+            image.onload = () => {
+                let texture = gl_context.createTexture();
+                gl_context.bindTexture(gl_context.TEXTURE_2D, texture);
+                gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA, gl_context.RGBA, gl_context.UNSIGNED_BYTE, image);
+                gl_context.generateMipmap(gl_context.TEXTURE_2D);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
+                image_cache[v].texture = texture;
+                update_gpu_images();
+            }
+            image.src = location.origin + "/heightmap/" + v + "_h";
+            image_cache[v] = {image : image};
+        });
+        image_cache = filter_object(image_cache, (key, val) => all_tiles_to_load.find(v => key === v) != undefined); // remove unused cached stuff
+    }
+    
+    // is called by the update_cached images when a new image was loaded
+    // the gpu textures are already uploaded, the main thing being updated here is the gpu array information
+    // which is then bound for expansion information
+    let image_gpu_infos = {textures: [], texture_infos: []};
+    function update_gpu_images() {
+        image_gpu_infos.textures = [];
+        image_gpu_infos.texture_infos = [];
+        let i = 0;
+        for (let image in image_cache) {
+            image_gpu_infos.texture_infos.push(i);                                  // texture index
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min_lat); // lat min
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max_lat); // lat max
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min_lon); // lon min
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max_lon); // lon max
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min);     // height min
+            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max);     // height max
+            image_gpu_infos.textures.push(image_cache[image].texture);
+            i += 1;
+        }
+
+        draw_scene();
+    }
 
     // draws the scene with all loaded data
     async function draw_scene() {
@@ -156,20 +221,29 @@
         gl_context.clearDepth(1.0);
 
         gl_context.clear(gl_context.COLOR_BUFFER_BIT | gl_context.DEPTH_BUFFER_BIT);
+        
+        gl_context.enable(gl_context.DEPTH_TEST);
 
         // creating the view matrix -------------------------------------------
-        console.log("Cam dir: " + String(camera_dir) + ", pitch: " + String(camera_pitch));
+        //console.log("Cam dir: " + String(camera_dir) + ", pitch: " + String(camera_pitch));
         let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
         at.entries[2] += camera_center.z();
         const view = LookAt(Vec4(0, 0, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
-                            at, 
-                            up_dir);
+            at,
+            up_dir);
+        // console.log(view.to_string());
         let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
         gl_context.useProgram(render_3d_program.program);
-        console.log(camera_center.to_string());
-        console.log(view.to_string());
+        // console.log(camera_center.to_string());
+        // console.log(view.to_string());
         gl_context.uniformMatrix4fv(render_3d_program.uniform_locations.view_proj, false, view_projection.entries);
+        gl_context.uniform1iv(render_3d_program.uniform_locations.textures, [...Array(image_gpu_infos.textures.length).keys()]);
+        image_gpu_infos.textures.forEach((texture, i) => {
+            gl_context.activeTexture(gl_context.TEXTURE0 + i);
+            gl_context.bindTexture(gl_context.TEXTURE_2D, texture);
+        });
+        gl_context.uniform1fv(render_3d_program.uniform_locations.texture_infos, new Float32Array(image_gpu_infos.texture_infos));
 
         // drawing the tiles --------------------------------------------------
         // grid jump for triangles is done all 10 meters
@@ -228,9 +302,12 @@
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
         uniform mat4 view_proj;
+        uniform sampler2D textures[4];      // all textures are stored in a single sampler2D array
+        uniform float texture_infos[50];    // has the layout n x {tex_idx, lat_min, lat_max, lon_min, lon_max, height_min, height_max}
 
         // out variables
         out float vs_tid; // triangle index for coloring
+        out vec3 w_pos;
         
         void main(void) {
             int quad_idx = gl_VertexID % 6 / 3;
@@ -243,18 +320,52 @@
             float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m;
             vec4 pos_cam_rel = vec4(x, y, 0., 1.);
             pos_cam_rel.xy += grid_offset_pos_rel;
+            
+            // getting the height from the height images
+            vec2 world_pos = vec2(x, y);
+            world_pos += grid_offset_pos;
+            int tile = -1;
+            float lat_min, lat_max, lon_min, lon_max;
+            for (int i = 0; i < 4 && tile < 0; ++i) {
+                lat_min = texture_infos[i * 7 + 1];
+                lat_max = texture_infos[i * 7 + 2];
+                lon_min = texture_infos[i * 7 + 3];
+                lon_max = texture_infos[i * 7 + 4];
+                if (world_pos.x >= lon_min &&
+                    world_pos.x <= lon_max &&
+                    world_pos.y >= lat_min &&
+                    world_pos.y <= lat_max) {
+                    tile = int(texture_infos[i * 7]);
+                }
+            }
+            if (tile >= 0) {
+                vec2 uv = vec2((world_pos.x - lon_min) / (lon_max - lon_min),
+                               (world_pos.y - lat_min) / (lat_max - lat_min));
+                uv.y = 1. - uv.y;
+                float min_height = texture_infos[tile * 7 + 5];
+                float max_height = texture_infos[tile * 7 + 6];
+                switch(tile){
+                case 0: pos_cam_rel.z = texture(textures[0], uv).x * (max_height - min_height) + min_height; break;
+                case 1: pos_cam_rel.z = texture(textures[1], uv).x * (max_height - min_height) + min_height; break;
+                case 2: pos_cam_rel.z = texture(textures[2], uv).x * (max_height - min_height) + min_height; break;
+                case 3: pos_cam_rel.z = texture(textures[3], uv).x * (max_height - min_height) + min_height; break;
+                }
+            }
 
             gl_Position = view_proj * pos_cam_rel;
             vs_tid = float(gl_VertexID / 3);
+            w_pos = pos_cam_rel.xyz;
         }
         `
         const fs = `#version 300 es
         precision highp float;
         in float vs_tid;
+        in vec3 w_pos;
 
         out vec4 out_col; 
         void main(void) {
-            out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+            //out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+            out_col = vec4((w_pos.z - 400.) / 300.);
         }
         `
         const render_pipeline_3d = initShaderProgram(gl_context, vs, fs);
@@ -266,15 +377,26 @@
                 grid_offset_pos: gl_context.getUniformLocation(render_pipeline_3d, 'grid_offset_pos'),
                 grid_offset_pos_rel: gl_context.getUniformLocation(render_pipeline_3d, 'grid_offset_pos_rel'),
                 view_proj: gl_context.getUniformLocation(render_pipeline_3d, 'view_proj'),
+                textures: gl_context.getUniformLocation(render_pipeline_3d, 'textures'),
+                texture_infos: gl_context.getUniformLocation(render_pipeline_3d, 'texture_infos'),
             }
         };
-        
+
         let meta = await fetch(location.origin + "/heightmap/meta");
         heightmap_meta_data = await meta.json();
-        
-        camera_center = Vec4(5304500, 5305500, 300);
+        // adding center info
+        for (let key in heightmap_meta_data) {
+            let cur = heightmap_meta_data[key];
+            cur.center_lat = cur.min_lat + 500;
+            cur.center_lon = cur.min_lon + 500;
+        }
+
+        camera_center = Vec4(791500, 5301500, 700);
 
         linalg_tests();
+
+        // starting the endless loop for updating the image cache
+        setInterval(update_cached_images);
     }
     init();
 
@@ -287,16 +409,17 @@
     };
 
     const get_detail_base_pos = (pos) => {
-        // as the tiles are always increasing by 1000, and we want a transfer of triangles
+        // as the tiles are always increasing by 100, and we want a transfer of triangles
         // in 1/10th of the difference, we round the pos to multiple of 100 in each direction
-        const divider = 100;
-        return Pos(Math.floor(pos.lat / divider) * divider, Math.floor(pos.lon / divider) * divider);
+        const divider = 10;
+        const offset = divider * 5;
+        return Pos(Math.floor(pos.lat / divider) * divider - offset, Math.floor(pos.lon / divider) * divider - offset);
     };
 
     // constructs the forward vector which also takes pitch into account (if looking down, the front vector should also go down
     const get_forward_dir = (dir, pitch) => { return Vec4(Math.sin(dir) * Math.cos(pitch), Math.cos(dir) * Math.cos(pitch), Math.sin(pitch), 0); };
     // constructs the right vector which is independent of the viewing pitch
-    const get_right_dir = (dir) => { return Vec4(Math.cos(dir), Math.sin(dir), 0, 0); };
+    const get_right_dir = (dir) => { return Vec4(Math.cos(-dir), Math.sin(-dir), 0, 0); }; // the - sign is added as the we interpret the direction to go clock-wise
 
     // ----------------------------------------------------------------------------------------
     // The following two functions are from https://mdn.github.io/webgl-examples/tutorial/sample5/index.html
@@ -351,13 +474,13 @@
             canvas.height = displayHeight;
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(90,  displayWidth / displayHeight, .1, 10000);
+        camera_perspective = PerspectiveFov(90, displayWidth / displayHeight, .1, 10000);
         const screen_size_factor = .01;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .1, 10000);
         return needResize;
     }
     window.addEventListener("resize", () => {
-        let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
+        let height = String(document.documentElement.clientHeight - document.getElementById("header").clientHeight) + "px";
         canvas3d.style.height = height;
         resizeCanvasToDisplaySize(canvas3d);
         draw_scene();
