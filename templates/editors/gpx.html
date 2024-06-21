@@ -94,6 +94,7 @@
     let camera_orthographic = null;
     let camera_interpolation = 0; // interpolation value between orthographic and projection mapping (0 means full projection, 1 means full orthographic)
     let heightmap_meta_data = null;
+    let bayernatlas_data = null;
     canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.clientX, y: e.clientY }; });
     canvas3d.addEventListener("mousemove", (event) => {
         if (canvas_drag_start) {
@@ -146,19 +147,17 @@
         return Object.fromEntries(Object.entries(obj).filter(([key, val]) => callback(key, val)));
     };
     // main function to load the images and update the image information buffer
-    let image_cache = {};
+    let image_cache = {};   // image cache for detail height
     async function update_cached_images() {
         // checking detail image tiles which are available on the self hosted server
         // the detail heights for the 4 closest tiles will always be tried to be kept in memory
         let tiles_to_load = [];
         for (let tile in heightmap_meta_data) {
             // lat are the y coordinates
-            let lat_diff_2 = heightmap_meta_data[tile].center_lat - camera_center.y();
-            lat_diff_2 *= lat_diff_2;
+            let lat_diff = Math.abs(heightmap_meta_data[tile].center_lat - camera_center.y());
             // lon are the x coordinates
-            let lon_diff_2 = heightmap_meta_data[tile].center_lon - camera_center.x();
-            lon_diff_2 *= lon_diff_2;
-            if (lat_diff_2 + lon_diff_2 <= 1.42e6)
+            let lon_diff = Math.abs(heightmap_meta_data[tile].center_lon - camera_center.x());
+            if (lat_diff + lon_diff <= 1e3)
                 tiles_to_load.push(tile);
             if (tiles_to_load.length >= 4)
                 break;
@@ -178,20 +177,20 @@
                 gl_context.generateMipmap(gl_context.TEXTURE_2D);
                 gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
                 gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR);
+                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR_MIPMAP_LINEAR);
                 image_cache[v].texture = texture;
                 update_gpu_images();
             }
             image.src = location.origin + "/heightmap/" + v + "_h";
-            image_cache[v] = {image : image};
+            image_cache[v] = { image: image };
         });
         image_cache = filter_object(image_cache, (key, val) => all_tiles_to_load.find(v => key === v) != undefined); // remove unused cached stuff
     }
-    
+
     // is called by the update_cached images when a new image was loaded
     // the gpu textures are already uploaded, the main thing being updated here is the gpu array information
     // which is then bound for expansion information
-    let image_gpu_infos = {textures: [], texture_infos: []};
+    let image_gpu_infos = { textures: [], texture_infos: [] };
     function update_gpu_images() {
         image_gpu_infos.textures = [];
         image_gpu_infos.texture_infos = [];
@@ -221,7 +220,7 @@
         gl_context.clearDepth(1.0);
 
         gl_context.clear(gl_context.COLOR_BUFFER_BIT | gl_context.DEPTH_BUFFER_BIT);
-        
+
         gl_context.enable(gl_context.DEPTH_TEST);
 
         // creating the view matrix -------------------------------------------
@@ -345,10 +344,10 @@
                 float min_height = texture_infos[tile * 7 + 5];
                 float max_height = texture_infos[tile * 7 + 6];
                 switch(tile){
-                case 0: pos_cam_rel.z = texture(textures[0], uv).x * (max_height - min_height) + min_height; break;
-                case 1: pos_cam_rel.z = texture(textures[1], uv).x * (max_height - min_height) + min_height; break;
-                case 2: pos_cam_rel.z = texture(textures[2], uv).x * (max_height - min_height) + min_height; break;
-                case 3: pos_cam_rel.z = texture(textures[3], uv).x * (max_height - min_height) + min_height; break;
+                case 0: pos_cam_rel.z = textureLod(textures[0], uv, .0).x * (max_height - min_height) + min_height; break;
+                case 1: pos_cam_rel.z = textureLod(textures[1], uv, .0).x * (max_height - min_height) + min_height; break;
+                case 2: pos_cam_rel.z = textureLod(textures[2], uv, .0).x * (max_height - min_height) + min_height; break;
+                case 3: pos_cam_rel.z = textureLod(textures[3], uv, .0).x * (max_height - min_height) + min_height; break;
                 }
             }
 
@@ -392,8 +391,20 @@
         }
 
         camera_center = Vec4(791500, 5301500, 700);
+        bayernatlas_data = { 
+            meta: { 
+                origin: [3925712, 5924288],
+                resolutions: [4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 0.5, 0.25],
+                tile_size: 256,     // factor that the resolution has to be multiplied by to get the per tile size
+                server_urls: ["intergeo31.bayernwolke.de/betty/", "intergeo32.bayernwolke.de/betty/", "intergeo33.bayernwolke.de/betty/", "intergeo34.bayernwolke.de/betty/", "intergeo35.bayernwolke.de/betty/", "intergeo36.bayernwolke.de/betty/", "intergeo37.bayernwolke.de/betty/", "intergeo38.bayernwolke.de/betty/", "intergeo39.bayernwolke.de/betty/", "intergeo40.bayernwolke.de/betty/"],
+                map_folder: "atkis/",
+                satellite_folder: "satdop40_komplett"
+            },
+            load_cache: [],         // is being filled with images that should be downloaded
+            loaded_images: [],      
+        }
 
-        linalg_tests();
+        // linalg_tests();
 
         // starting the endless loop for updating the image cache
         setInterval(update_cached_images);
@@ -475,8 +486,8 @@
         }
         // create camera projection matrices
         camera_perspective = PerspectiveFov(90, displayWidth / displayHeight, .1, 10000);
-        const screen_size_factor = .01;
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .1, 10000);
+        const screen_size_factor = 1;
+        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
     }
     window.addEventListener("resize", () => {

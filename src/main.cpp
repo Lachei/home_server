@@ -60,7 +60,7 @@ int main(int argc, const char** argv) {
 
     std::string_view certificates_folder = get_parameter(args, "--cert");
     if (certificates_folder.empty()) {
-        std::cout << "[warning] Missing --data argument, defaulting to data/certificates/\n";
+        std::cout << "[warning] Missing --cert argument, defaulting to data/certificates/\n";
         show_help = true;
         certificates_folder = "data/certification/";
     }
