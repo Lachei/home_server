@@ -75,18 +75,23 @@
     </div>
 </body>
 <script type="text/javascript" src="{{&site_url}}/lin_alg.js"></script>
+<script type="text/javascript" src="{{&site_url}}/virtual_texture.js"></script>
+<script type="text/javascript" src="{{&site_url}}/pro4.js"></script>
 <script>
     const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
 
     let canvas3d = document.getElementById("canvas3d");
+    let canvas_tile_ids = null;
+    let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
-    let render_3d_program = null;
+    let gl_context_tile_ids = null;
+    let render_pipelines = null;
     let camera_center = null;
     const cam_rot_speed = .001;
-    const cam_dir_speed = .1;
+    const cam_dir_speed = Util.m_to_wgs_84_deg(1); // go forward 1 meter
     const up_dir = Vec4(0, 0, 1, 0);
     let camera_dir = 0;     // given in radians, 0 means dead north
     let camera_pitch = 0;   // given in radians, 0 means straight ahead, pi straight up -pi straight down
@@ -95,6 +100,7 @@
     let camera_interpolation = 0; // interpolation value between orthographic and projection mapping (0 means full projection, 1 means full orthographic)
     let heightmap_meta_data = null;
     let bayernatlas_data = null;
+    let virtual_height_map = null;
     canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.clientX, y: e.clientY }; });
     canvas3d.addEventListener("mousemove", (event) => {
         if (canvas_drag_start) {
@@ -215,14 +221,6 @@
         if (!gl_context)
             return;
 
-        gl_context.viewport(0, 0, canvas3d.width, canvas3d.height);
-        gl_context.clearColor(0, 0, 0, 1.0);
-        gl_context.clearDepth(1.0);
-
-        gl_context.clear(gl_context.COLOR_BUFFER_BIT | gl_context.DEPTH_BUFFER_BIT);
-
-        gl_context.enable(gl_context.DEPTH_TEST);
-
         // creating the view matrix -------------------------------------------
         //console.log("Cam dir: " + String(camera_dir) + ", pitch: " + String(camera_pitch));
         let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
@@ -230,57 +228,94 @@
         const view = LookAt(Vec4(0, 0, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
             at,
             up_dir);
-        // console.log(view.to_string());
         let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
-        gl_context.useProgram(render_3d_program.program);
-        // console.log(camera_center.to_string());
-        // console.log(view.to_string());
-        gl_context.uniformMatrix4fv(render_3d_program.uniform_locations.view_proj, false, view_projection.entries);
-        gl_context.uniform1iv(render_3d_program.uniform_locations.textures, [...Array(image_gpu_infos.textures.length).keys()]);
-        image_gpu_infos.textures.forEach((texture, i) => {
-            gl_context.activeTexture(gl_context.TEXTURE0 + i);
-            gl_context.bindTexture(gl_context.TEXTURE_2D, texture);
-        });
-        gl_context.uniform1fv(render_3d_program.uniform_locations.texture_infos, new Float32Array(image_gpu_infos.texture_infos));
 
         // drawing the tiles --------------------------------------------------
-        // grid jump for triangles is done all 10 meters
-        let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()));
-        let grid_offset_pos_rel = Pos(grid_offset_pos.lat - camera_center.x(), grid_offset_pos.lon - camera_center.y());
-        // drawing the hq center triangles
-        const base_width = 100; // base width of a detail tile given in meters
-        gl_context.uniform1i(render_3d_program.uniform_locations.tile_width, base_width);
-        gl_context.uniform1f(render_3d_program.uniform_locations.tile_width_m, base_width);
-        gl_context.uniform2f(render_3d_program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
-        gl_context.uniform2f(render_3d_program.uniform_locations.grid_offset_pos_rel, grid_offset_pos_rel.lat, grid_offset_pos_rel.lon);
-        gl_context.drawArrays(gl_context.TRIANGLES, 0, 6 * base_width * base_width);
+        const draw_tiles = (gl, canvas, program) => {
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(1., 1., 1., 1.0);
+            gl.clearDepth(1.0);
 
-        // drawing the surrounding lower quality triangles
-        const radius = 7;
-        const triangle_resolution = 25;
-        gl_context.uniform1i(render_3d_program.uniform_locations.tile_width, triangle_resolution);
-        let cur_d = base_width;
-        let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
-        const draw_patch = (cam, cur_base_pos, tile_width_m) => {
-            const cur_base_pos_rel = Pos(cur_base_pos.lat - cam.x(), cur_base_pos.lon - cam.y());
-            gl_context.uniform1f(render_3d_program.uniform_locations.tile_width_m, tile_width_m);
-            gl_context.uniform2f(render_3d_program.uniform_locations.grid_offset_pos, cur_base_pos.lat, cur_base_pos.lon);
-            gl_context.uniform2f(render_3d_program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
-            gl_context.drawArrays(gl_context.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
-        };
-        for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
-            draw_patch(camera_center, cur_base_pos, cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + cur_d), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + cur_d), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + 2 * cur_d), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
-            draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            gl.enable(gl.DEPTH_TEST);
+
+            gl.useProgram(program.program);
+            // gl.uniform3fv(program.uniform_locations.cam_pos, [camera_center.x(), camera_center.y(), camera_center.z()]);
+            gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
+            gl.uniform1iv(program.uniform_locations.textures, [...Array(image_gpu_infos.textures.length).keys()]);
+            image_gpu_infos.textures.forEach((texture, i) => {
+                gl.activeTexture(gl.TEXTURE0 + i);
+                gl.bindTexture(gl.TEXTURE_2D, texture);
+            });
+            gl.uniform1fv(program.uniform_locations.texture_infos, new Float32Array(image_gpu_infos.texture_infos));
+
+            // grid jump for triangles is done all 10 meters
+            let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()));
+            let grid_offset_pos_rel = Pos(grid_offset_pos.lat - camera_center.x(), grid_offset_pos.lon - camera_center.y());
+            // drawing the hq center triangles
+            const base_width = Util.m_to_wgs_84_deg(100); // base width of a detail tile given in meters
+            gl.uniform1i(program.uniform_locations.tile_width, 100);
+            gl.uniform1f(program.uniform_locations.tile_width_m, base_width);
+            gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
+            gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, grid_offset_pos_rel.lat, grid_offset_pos_rel.lon);
+            gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
+
+            // drawing the surrounding lower quality triangles
+            const radius = 7;
+            const triangle_resolution = 25;
+            gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
+            let cur_d = base_width;
+            let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
+            const draw_patch = (cam, cur_base_pos, tile_width_m) => {
+                const cur_base_pos_rel = Pos(cur_base_pos.lat - cam.x(), cur_base_pos.lon - cam.y());
+                gl.uniform1f(program.uniform_locations.tile_width_m, tile_width_m);
+                gl.uniform2f(program.uniform_locations.grid_offset_pos, cur_base_pos.lat, cur_base_pos.lon);
+                gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
+                gl.drawArrays(gl.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
+            };
+            for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
+                draw_patch(camera_center, cur_base_pos, cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + cur_d), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + cur_d), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + 2 * cur_d), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
+                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
+            }
         }
-    }
+        let start = performance.now();
+        // draw tile ids ---------------------------------------
+        draw_tiles(gl_context_tile_ids, canvas_tile_ids, render_pipelines.idx);
 
+        // draw normal frame -----------------------------------
+        draw_tiles(gl_context, canvas3d, render_pipelines.terrain);
+        console.log(`drawing took ${performance.now() - start} milli`);
+        start = performance.now();
+        
+        // get needed tile indices
+        const width = canvas_tile_ids.width;
+        const height = canvas_tile_ids.height;
+        let data = new Uint8Array(width * height * 4);   // reinterpret cast the uint8_t as uint16_t
+        gl_context_tile_ids.readPixels(0, 0, width, height, gl_context_tile_ids.RGBA, gl_context_tile_ids.UNSIGNED_BYTE, data);
+        console.log(`only reading the pixels took ${performance.now() - start} milli`);
+        let indices = new Uint16Array(data.buffer);
+        let needed_tiles = new Set();
+        for (let i = 0; i < indices.length; i += 2) {
+            if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
+                continue;
+            let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
+            let x = indices[i] & 0x3fff;
+            let y = indices[i + 1] & 0x3fff;
+            let coords = `${level}/${x}/${y}`;
+            if (!needed_tiles.has(coords))
+                needed_tiles.add(coords);
+        }
+        // console.log(needed_tiles);
+        console.log(`checking tiles took ${performance.now() - start} milli`);
+    }
     // ----------------------------------------------------------------------------------------
     // init section (contains also the shader code)
     // ----------------------------------------------------------------------------------------
@@ -290,6 +325,13 @@
         gl_context = canvas3d.getContext('webgl2') || canvas3d.getContext('experimental-webgl2');
         if (!gl_context) {
             alert('Unable to initialize WebGL. Your browser or machine ma not support it');
+            return;
+        }
+
+        canvas_tile_ids = document.createElement('canvas');
+        gl_context_tile_ids = canvas_tile_ids.getContext('webgl2') || canvas_tile_ids.getContext('experimental-webgl2');
+        if (!gl_context_tile_ids) {
+            alert('Unable to initialize WebGL. Your browser or machine might not support it');
             return;
         }
 
@@ -307,6 +349,7 @@
         // out variables
         out float vs_tid; // triangle index for coloring
         out vec3 w_pos;
+        out vec2 world_pos;
         
         void main(void) {
             int quad_idx = gl_VertexID % 6 / 3;
@@ -321,7 +364,7 @@
             pos_cam_rel.xy += grid_offset_pos_rel;
             
             // getting the height from the height images
-            vec2 world_pos = vec2(x, y);
+            world_pos = vec2(x, y);
             world_pos += grid_offset_pos;
             int tile = -1;
             float lat_min, lat_max, lon_min, lon_max;
@@ -355,30 +398,71 @@
             vs_tid = float(gl_VertexID / 3);
             w_pos = pos_cam_rel.xyz;
         }
-        `
+        `;
         const fs = `#version 300 es
         precision highp float;
+
         in float vs_tid;
         in vec3 w_pos;
+        in vec2 world_pos;
+
+        out vec4 out_col; 
+        void main(void) {
+            if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
+                out_col = vec4(1., 0., 0., 1.);
+            else
+                out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+            //out_col = vec4((w_pos.z - 400.) / 300.);
+        }
+        `;
+
+        const fs_id = `#version 300 es
+        #define PI 3.1415926535897932384626433832795
+        precision highp float;
+
+        in float vs_tid;
+        in vec3 w_pos;
+        in vec2 world_pos;
+
+        ${Util.glsl_wgs_84_to_tile_idx()}
+        ${Util.glsl_wgs_84_ddeg_to_m()}
 
         out vec4 out_col; 
         void main(void) {
             //out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
-            out_col = vec4((w_pos.z - 400.) / 300.);
+            //out_col = vec4((w_pos.z - 400.) / 300.);
+            float fac = 1e5;
+            vec2 dx = dFdx(world_pos).xy * fac;
+            vec2 dy = dFdy(world_pos).xy * fac;
+            float max_del = max(dot(dx, dx), dot(dy, dy));
+            int level = 15 - clamp(int(.5 * log2(max_del)), 0, 15);
+            ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
+            float div = float((1 << 8) - 1);
+            out_col = vec4(float(tile_id.x & 0xff) / div,
+                           float((tile_id.x >> 8) | ((level >> 2) << 6)) / div,
+                           float(tile_id.y & 0xff) / div, 
+                           float((tile_id.y >> 8) | ((level & 0x3) << 6)) / div);
         }
-        `
-        const render_pipeline_3d = initShaderProgram(gl_context, vs, fs);
-        render_3d_program = {
-            program: render_pipeline_3d,
-            uniform_locations: {
-                tile_width: gl_context.getUniformLocation(render_pipeline_3d, 'tile_width'),
-                tile_width_m: gl_context.getUniformLocation(render_pipeline_3d, 'tile_width_m'),
-                grid_offset_pos: gl_context.getUniformLocation(render_pipeline_3d, 'grid_offset_pos'),
-                grid_offset_pos_rel: gl_context.getUniformLocation(render_pipeline_3d, 'grid_offset_pos_rel'),
-                view_proj: gl_context.getUniformLocation(render_pipeline_3d, 'view_proj'),
-                textures: gl_context.getUniformLocation(render_pipeline_3d, 'textures'),
-                texture_infos: gl_context.getUniformLocation(render_pipeline_3d, 'texture_infos'),
-            }
+        `;
+
+        const create_pipeline = (gl_context, vs, fs) => {
+            const pipeline = initShaderProgram(gl_context, vs, fs);
+            return {
+                program: pipeline,
+                uniform_locations: {
+                    tile_width: gl_context.getUniformLocation(pipeline, 'tile_width'),
+                    tile_width_m: gl_context.getUniformLocation(pipeline, 'tile_width_m'),
+                    grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
+                    grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
+                    view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
+                    textures: gl_context.getUniformLocation(pipeline, 'textures'),
+                    texture_infos: gl_context.getUniformLocation(pipeline, 'texture_infos'),
+                }
+            };
+        };
+        render_pipelines = {
+            terrain: create_pipeline(gl_context, vs, fs),
+            idx: create_pipeline(gl_context_tile_ids, vs, fs_id),
         };
 
         let meta = await fetch(location.origin + "/heightmap/meta");
@@ -390,10 +474,10 @@
             cur.center_lon = cur.min_lon + 500;
         }
 
-        camera_center = Vec4(791500, 5301500, 700);
-        bayernatlas_data = { 
-            meta: { 
-                origin: [3925712, 5924288],
+        camera_center = Vec4(47.80177, 12.89798, .1);
+        bayernatlas_data = {
+            meta: {
+                origin: [3927040, 5923328],
                 resolutions: [4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 0.5, 0.25],
                 tile_size: 256,     // factor that the resolution has to be multiplied by to get the per tile size
                 server_urls: ["intergeo31.bayernwolke.de/betty/", "intergeo32.bayernwolke.de/betty/", "intergeo33.bayernwolke.de/betty/", "intergeo34.bayernwolke.de/betty/", "intergeo35.bayernwolke.de/betty/", "intergeo36.bayernwolke.de/betty/", "intergeo37.bayernwolke.de/betty/", "intergeo38.bayernwolke.de/betty/", "intergeo39.bayernwolke.de/betty/", "intergeo40.bayernwolke.de/betty/"],
@@ -401,10 +485,13 @@
                 satellite_folder: "satdop40_komplett"
             },
             load_cache: [],         // is being filled with images that should be downloaded
-            loaded_images: [],      
+            loaded_images: [],
         }
 
         // linalg_tests();
+        const max_depth = 14;
+        const v_width = 1 << max_depth;
+        virtual_height_map = VirtualHeightMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, gl_context);
 
         // starting the endless loop for updating the image cache
         setInterval(update_cached_images);
@@ -422,7 +509,7 @@
     const get_detail_base_pos = (pos) => {
         // as the tiles are always increasing by 100, and we want a transfer of triangles
         // in 1/10th of the difference, we round the pos to multiple of 100 in each direction
-        const divider = 10;
+        const divider = Util.m_to_wgs_84_deg(10);
         const offset = divider * 5;
         return Pos(Math.floor(pos.lat / divider) * divider - offset, Math.floor(pos.lon / divider) * divider - offset);
     };
@@ -472,7 +559,7 @@
         return shader;
     }
 
-    function resizeCanvasToDisplaySize(canvas) {
+    function resizeCanvasToDisplaySize(canvas, canvas_small) {
         // Lookup the size the browser is displaying the canvas in CSS pixels.
         const displayWidth = canvas.clientWidth;
         const displayHeight = canvas.clientHeight;
@@ -483,9 +570,13 @@
             // Make the canvas the same size
             canvas.width = displayWidth;
             canvas.height = displayHeight;
+            if (canvas_small) {
+                canvas_small.width = displayWidth / 2;
+                canvas_small.height = displayHeight / 2;
+            }
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(90, displayWidth / displayHeight, .1, 10000);
+        camera_perspective = PerspectiveFov(90, displayWidth / displayHeight, .0001, 100);
         const screen_size_factor = 1;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
@@ -493,10 +584,10 @@
     window.addEventListener("resize", () => {
         let height = String(document.documentElement.clientHeight - document.getElementById("header").clientHeight) + "px";
         canvas3d.style.height = height;
-        resizeCanvasToDisplaySize(canvas3d);
+        resizeCanvasToDisplaySize(canvas3d, canvas_tile_ids);
         draw_scene();
     });
-    resizeCanvasToDisplaySize(canvas3d);
+    resizeCanvasToDisplaySize(canvas3d, canvas_tile_ids);
 
 </script>
 

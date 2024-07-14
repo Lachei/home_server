@@ -434,24 +434,28 @@ int main(int argc, const char** argv) {
     });
     
     const std::string admin_css = crow::mustache::load_text("admin.css");
-    const std::string user_css = crow::mustache::load_text("user.css");
-    const std::string sha_js = crow::mustache::load_text("sha256.js");
-    const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
-    const std::string math_jax_js = crow::mustache::load_text("math_jax.js");
-    const std::string ling_alg_js = crow::mustache::load_text("lin_alg.js");
-    const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
-    const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
-    const std::string tab_data = crow::mustache::load_text("tabs/data.html");
-    const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
+    const std::string user_css = crow::mustache::load_text("user.css");
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
+    const std::string sha_js = crow::mustache::load_text("sha256.js");
     CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
     CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string math_jax_js = crow::mustache::load_text("math_jax.js");
     CROW_ROUTE(app, "/math_jax.js")([&math_jax_js](){crow::response r(math_jax_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string ling_alg_js = crow::mustache::load_text("lin_alg.js");
     CROW_ROUTE(app, "/lin_alg.js")([&ling_alg_js](){crow::response r(ling_alg_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string virtual_texture_js = crow::mustache::load_text("virtual_texture.js");
+    CROW_ROUTE(app, "/virtual_texture.js")([&virtual_texture_js](){crow::response r(virtual_texture_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string proj4_js = crow::mustache::load_text("proj4.js");
+    CROW_ROUTE(app, "/pro4.js")([&proj4_js](){crow::response r(proj4_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
+    const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
     CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
+    const std::string tab_data = crow::mustache::load_text("tabs/data.html");
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
+    const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
     
     // checking the certificates folder
