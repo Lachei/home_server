@@ -301,20 +301,24 @@
         let data = new Uint8Array(width * height * 4);   // reinterpret cast the uint8_t as uint16_t
         gl_context_tile_ids.readPixels(0, 0, width, height, gl_context_tile_ids.RGBA, gl_context_tile_ids.UNSIGNED_BYTE, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
-        let indices = new Uint16Array(data.buffer);
+        let indices = new Uint32Array(data.buffer);
         let needed_tiles = new Set();
         for (let i = 0; i < indices.length; i += 2) {
-            if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
+            // if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
+            //     continue;
+            // let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
+            // let x = indices[i] & 0x3fff;
+            // let y = indices[i + 1] & 0x3fff;
+            // let coords = `${level}/${x}/${y}`;
+            let val = indices[i];
+            if (val == 0xffffffff)
                 continue;
-            let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
-            let x = indices[i] & 0x3fff;
-            let y = indices[i + 1] & 0x3fff;
-            let coords = `${level}/${x}/${y}`;
-            if (!needed_tiles.has(coords))
-                needed_tiles.add(coords);
+            // let coords = indices[i].toString(16);
+            if (!needed_tiles.has(val))
+                needed_tiles.add(val);
         }
-        // console.log(needed_tiles);
         console.log(`checking tiles took ${performance.now() - start} milli`);
+        console.log(needed_tiles);
     }
     // ----------------------------------------------------------------------------------------
     // init section (contains also the shader code)
@@ -431,11 +435,11 @@
         void main(void) {
             //out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
             //out_col = vec4((w_pos.z - 400.) / 300.);
-            float fac = 1e5;
-            vec2 dx = dFdx(world_pos).xy * fac;
-            vec2 dy = dFdy(world_pos).xy * fac;
+            int mip_offset = 10;
+            vec2 dx = dFdx(world_pos).xy;
+            vec2 dy = dFdy(world_pos).xy;
             float max_del = max(dot(dx, dx), dot(dy, dy));
-            int level = 15 - clamp(int(.5 * log2(max_del)), 0, 15);
+            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset, 0, 15);
             ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
             float div = float((1 << 8) - 1);
             out_col = vec4(float(tile_id.x & 0xff) / div,
