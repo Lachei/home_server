@@ -294,7 +294,7 @@
         draw_tiles(gl_context, canvas3d, render_pipelines.terrain);
         console.log(`drawing took ${performance.now() - start} milli`);
         start = performance.now();
-        
+
         // get needed tile indices
         const width = canvas_tile_ids.width;
         const height = canvas_tile_ids.height;
@@ -302,23 +302,27 @@
         gl_context_tile_ids.readPixels(0, 0, width, height, gl_context_tile_ids.RGBA, gl_context_tile_ids.UNSIGNED_BYTE, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         let indices = new Uint32Array(data.buffer);
-        let needed_tiles = new Set();
-        for (let i = 0; i < indices.length; i += 2) {
-            // if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
-            //     continue;
-            // let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
-            // let x = indices[i] & 0x3fff;
-            // let y = indices[i + 1] & 0x3fff;
-            // let coords = `${level}/${x}/${y}`;
-            let val = indices[i];
-            if (val == 0xffffffff)
-                continue;
-            // let coords = indices[i].toString(16);
-            if (!needed_tiles.has(val))
-                needed_tiles.add(val);
-        }
+        let needed_tiles = new Set(indices);
+        // for (let i = 0; i < indices.length; i += 2) {
+        //     // if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
+        //     //     continue;
+        //     // let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
+        //     // let x = indices[i] & 0x3fff;
+        //     // let y = indices[i + 1] & 0x3fff;
+        //     // let coords = `${level}/${x}/${y}`;
+        //     let val = indices[i];
+        //     if (val == 0xffffffff)
+        //         continue;
+        //     // let coords = indices[i].toString(16);
+        //     if (!needed_tiles.has(val))
+        //         needed_tiles.add(val);
+        // }
         console.log(`checking tiles took ${performance.now() - start} milli`);
-        console.log(needed_tiles);
+        let decoded_tiles = Util.int32_to_tile_id(new_tiles);
+        let requested_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, 1 << tile.level,
+            `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
+        ));
+        console.log(decoded_tiles);
     }
     // ----------------------------------------------------------------------------------------
     // init section (contains also the shader code)
@@ -404,11 +408,15 @@
         }
         `;
         const fs = `#version 300 es
+        #define PI 3.1415926535897932384626433832795
         precision highp float;
 
         in float vs_tid;
         in vec3 w_pos;
         in vec2 world_pos;
+
+        ${Util.glsl_wgs_84_to_tile_idx()}
+        ${Util.glsl_wgs_84_ddeg_to_m()}
 
         out vec4 out_col; 
         void main(void) {
@@ -416,7 +424,19 @@
                 out_col = vec4(1., 0., 0., 1.);
             else
                 out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
-            //out_col = vec4((w_pos.z - 400.) / 300.);
+            // out_col = vec4((w_pos.z - 400.) / 300.);
+            return;
+            int mip_offset = 20;
+            vec2 dx = dFdx(world_pos).xy;
+            vec2 dy = dFdy(world_pos).xy;
+            float max_del = max(dot(dx, dx), dot(dy, dy));
+            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset, 0, 15);
+            ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
+            float div = float((1 << 8) - 1);
+            out_col = vec4(float(tile_id.x & 0xff) / div,
+                           float(((tile_id.y & 3) << 6) | ((tile_id.x >> 8) & 0x3f)) / div,
+                           float((tile_id.y >> 2) & 0xff) / div, 
+                           float((level << 4) | ((tile_id.y >> 10)) & 0xf) / div);
         }
         `;
 
@@ -435,7 +455,7 @@
         void main(void) {
             //out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
             //out_col = vec4((w_pos.z - 400.) / 300.);
-            int mip_offset = 10;
+            int mip_offset = 20;
             vec2 dx = dFdx(world_pos).xy;
             vec2 dy = dFdy(world_pos).xy;
             float max_del = max(dot(dx, dx), dot(dy, dy));
@@ -443,9 +463,9 @@
             ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
             float div = float((1 << 8) - 1);
             out_col = vec4(float(tile_id.x & 0xff) / div,
-                           float((tile_id.x >> 8) | ((level >> 2) << 6)) / div,
-                           float(tile_id.y & 0xff) / div, 
-                           float((tile_id.y >> 8) | ((level & 0x3) << 6)) / div);
+                           float(((tile_id.y & 3) << 6) | ((tile_id.x >> 8) & 0x3f)) / div,
+                           float((tile_id.y >> 2) & 0xff) / div, 
+                           float((level << 4) | ((tile_id.y >> 10)) & 0xf) / div);
         }
         `;
 

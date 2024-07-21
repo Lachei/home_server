@@ -721,4 +721,9 @@ const Util = {
         }
         `;
     },
+    
+    int32_to_tile_id: function(tiles) {
+        const to_obj = (x) => {return {level: (x >>> 28), x: ((x >>> 14) & 0x3ff), y: (x & 0x3ff)};};
+        return Array.from(tiles, x => to_obj(x));
+    },
 };
