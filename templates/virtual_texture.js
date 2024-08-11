@@ -132,9 +132,9 @@ const VirtualHeightMap = () => {
                 }
 
                 let shift = tile_width_bits - tile_req.level;
-                let final_x = tile_req.x << shift;
-                let final_y = tile_req.y << shift;
-                let width = (1 << shift) << 4;
+                let width = (1 << shift);
+                let final_x = tile_req.x * width;
+                let final_y = tile_req.y * width;
                 let lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
                 let already_loaded = lookup_table_string in this.tiles_lookup_table;
                 // make space for a new tile if tile cache full
@@ -201,11 +201,12 @@ const VirtualHeightMap = () => {
         },
         bind_to_shader: function (gl_texture_slot_index, gl_texture_slot_texture, gl_infos_uniform) {
             // filling tiles_info_buffer_gpu with the tiles info
-            let tiles_info_cpu = new Int32Array(this.tiles_storage_cpu.length);
+            let tiles_info_cpu = new Int32Array(256 * 3);
             for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
-                tiles_info_cpu[i * 3] = this.tiles_storage_cpu[i].tile_x;
-                tiles_info_cpu[i * 3 + 1] = this.tiles_storage_cpu[i].tile_y;
-                tiles_info_cpu[i * 3 + 2] = this.tiles_storage_cpu[i].width;
+                let tile = this.tiles_storage_cpu[i];
+                tiles_info_cpu[i * 3] = tile.tile_x;
+                tiles_info_cpu[i * 3 + 1] = tile.tile_y;
+                tiles_info_cpu[i * 3 + 2] = tile.width;
             }
 
             const gl = this.gl_context;
@@ -403,7 +404,7 @@ const TilesGpu = () => {
             }
             let pos = i * bytes_per_image;
             let bpe = this.texture_type.bytes_per_element;
-            const data_view = new Uint8Array(data);
+            const data_view = new Uint8Array(data.buffer);
             const internal_view = new Uint8Array(this.texture_cpu.buffer);
             for (let i = 0; i < this.tile_width * this.tile_height; ++i)
                 for (let b = 0; b < bpe; ++b)
@@ -432,8 +433,8 @@ const TilesGpu = () => {
             gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture_gpu);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
-            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         },
     };
 };
@@ -810,7 +811,7 @@ const Util = {
             int offset_x = virtual_${v_map_name}_infos[3u * index];
             int offset_y = virtual_${v_map_name}_infos[3u * index + 1u];
             int width = virtual_${v_map_name}_infos[3u * index + 2u];
-            uv_glob *= vec2(textureSize(virtual_${v_map_name}, 0));
+            uv_glob *= vec2(textureSize(virtual_${v_map_name}_index, 0));
             uv_glob -= vec2(offset_x, offset_y);
             uv_glob /= float(width);
             return texture(virtual_${v_map_name}, vec3(uv_glob, float(index)));

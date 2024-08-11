@@ -247,7 +247,7 @@
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
             
             // binding the virtual textures
-            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1), program.uniform_locations.virtual_heightmap_infos;
+            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, program.uniform_locations.virtual_heightmap_infos);
             gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
             gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
 
@@ -400,7 +400,7 @@
             vec2 uv_glob;
             vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
             
-            // uint t = texture(virtual_heightmap_index, uv_glob).x;
+            /// uint t = texture(virtual_heightmap_index, uv_glob).x;
             // out_col = texture(virtual_heightmap, vec3(uv_glob, float(t - 1u)));
             // return;
             // if (t == 0u)
