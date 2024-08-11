@@ -82,12 +82,11 @@
     const file_path = "{{&file_path}}";
 
     let canvas3d = document.getElementById("canvas3d");
-    let canvas_tile_ids = null;
     let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
-    let gl_context_tile_ids = null;
+    let indices_render_objs = {}; // object containing render objects needed for index rendering
     let render_pipelines = null;
     let camera_center = null;
     const cam_rot_speed = .001;
@@ -100,9 +99,10 @@
     let camera_interpolation = 0; // interpolation value between orthographic and projection mapping (0 means full projection, 1 means full orthographic)
     let heightmap_meta_data = null;
     let bayernatlas_data = null;
+    /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
     canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.clientX, y: e.clientY }; });
-    canvas3d.addEventListener("mousemove", (event) => {
+    canvas3d.addEventListener("mousemove", async (event) => {
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - event.clientX;
             let yDel = canvas_drag_start.y - event.clientY;
@@ -112,16 +112,16 @@
             camera_pitch += yDel * cam_rot_speed;
             if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
             if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
-            draw_scene();
+            await draw_scene();
             canvas_drag_start = { x: event.clientX, y: event.clientY };
         }
     });
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("mouseleave", (e) => { canvas_drag_start = null; });
-    canvas3d.addEventListener("wheel", (e) => {
-        draw_scene();
+    canvas3d.addEventListener("wheel", async (e) => {
+        await draw_scene();
     });
-    window.addEventListener("keydown", (e) => {
+    window.addEventListener("keydown", async (e) => {
         if (document.querySelector(".preview:hover") == null)
             return;
 
@@ -146,7 +146,7 @@
         if (key === "e")
             camera_center.add(up_dir.multiply(speed));
         e.preventDefault();
-        draw_scene();
+        await draw_scene();
     });
 
     function filter_object(obj, callback) {
@@ -197,7 +197,7 @@
     // the gpu textures are already uploaded, the main thing being updated here is the gpu array information
     // which is then bound for expansion information
     let image_gpu_infos = { textures: [], texture_infos: [] };
-    function update_gpu_images() {
+    async function update_gpu_images() {
         image_gpu_infos.textures = [];
         image_gpu_infos.texture_infos = [];
         let i = 0;
@@ -213,7 +213,7 @@
             i += 1;
         }
 
-        draw_scene();
+        await draw_scene();
     }
 
     // draws the scene with all loaded data
@@ -232,8 +232,9 @@
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
 
         // drawing the tiles --------------------------------------------------
-        const draw_tiles = (gl, canvas, program) => {
-            gl.viewport(0, 0, canvas.width, canvas.height);
+        const draw_tiles = (gl, fb_size, program, framebuffer) => {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+            gl.viewport(0, 0, fb_size.width, fb_size.height);
             gl.clearColor(1., 1., 1., 1.0);
             gl.clearDepth(1.0);
 
@@ -244,12 +245,11 @@
             gl.useProgram(program.program);
             // gl.uniform3fv(program.uniform_locations.cam_pos, [camera_center.x(), camera_center.y(), camera_center.z()]);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
-            gl.uniform1iv(program.uniform_locations.textures, [...Array(image_gpu_infos.textures.length).keys()]);
-            image_gpu_infos.textures.forEach((texture, i) => {
-                gl.activeTexture(gl.TEXTURE0 + i);
-                gl.bindTexture(gl.TEXTURE_2D, texture);
-            });
-            gl.uniform1fv(program.uniform_locations.texture_infos, new Float32Array(image_gpu_infos.texture_infos));
+            
+            // binding the virtual textures
+            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1), program.uniform_locations.virtual_heightmap_infos;
+            gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
+            gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
 
             // grid jump for triangles is done all 10 meters
             let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()));
@@ -288,40 +288,33 @@
         }
         let start = performance.now();
         // draw tile ids ---------------------------------------
-        draw_tiles(gl_context_tile_ids, canvas_tile_ids, render_pipelines.idx);
+        draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
 
         // draw normal frame -----------------------------------
-        draw_tiles(gl_context, canvas3d, render_pipelines.terrain);
+        draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
         console.log(`drawing took ${performance.now() - start} milli`);
         start = performance.now();
 
         // get needed tile indices
-        const width = canvas_tile_ids.width;
-        const height = canvas_tile_ids.height;
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.fb);
+        const width = indices_render_objs.width;
+        const height = indices_render_objs.height;
         let data = new Uint8Array(width * height * 4);   // reinterpret cast the uint8_t as uint16_t
-        gl_context_tile_ids.readPixels(0, 0, width, height, gl_context_tile_ids.RGBA, gl_context_tile_ids.UNSIGNED_BYTE, data);
+        const sync = gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl_context.flush();
+        gl_context.clientWaitSync(sync, 0, 100e6);
+        gl_context.deleteSync(sync);
+        gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         let indices = new Uint32Array(data.buffer);
         let needed_tiles = new Set(indices);
-        // for (let i = 0; i < indices.length; i += 2) {
-        //     // if (indices[i] == 0xffff && indices[i + 1] == 0xffff)   // empty pixel
-        //     //     continue;
-        //     // let level = ((indices[i] >> 14) << 2) | (indices[i + 1] >> 14);
-        //     // let x = indices[i] & 0x3fff;
-        //     // let y = indices[i + 1] & 0x3fff;
-        //     // let coords = `${level}/${x}/${y}`;
-        //     let val = indices[i];
-        //     if (val == 0xffffffff)
-        //         continue;
-        //     // let coords = indices[i].toString(16);
-        //     if (!needed_tiles.has(val))
-        //         needed_tiles.add(val);
-        // }
+        needed_tiles.delete(0xffffffff);
         console.log(`checking tiles took ${performance.now() - start} milli`);
-        let decoded_tiles = Util.int32_to_tile_id(new_tiles);
-        let requested_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, 1 << tile.level,
+        let decoded_tiles = Util.int32_to_tile_id(needed_tiles);
+        let requested_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
             `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
         ));
+        virtual_height_map.update_needed_tiles(requested_tiles);
         console.log(decoded_tiles);
     }
     // ----------------------------------------------------------------------------------------
@@ -329,30 +322,24 @@
     // ----------------------------------------------------------------------------------------
 
     async function init() {
-        // wegl init
+        // webgl init
         gl_context = canvas3d.getContext('webgl2') || canvas3d.getContext('experimental-webgl2');
         if (!gl_context) {
-            alert('Unable to initialize WebGL. Your browser or machine ma not support it');
-            return;
-        }
-
-        canvas_tile_ids = document.createElement('canvas');
-        gl_context_tile_ids = canvas_tile_ids.getContext('webgl2') || canvas_tile_ids.getContext('experimental-webgl2');
-        if (!gl_context_tile_ids) {
-            alert('Unable to initialize WebGL. Your browser or machine might not support it');
+            alert('Unable to initialize WebGL. Your browser or machine may not support it');
             return;
         }
 
         const vs = `#version 300 es
         precision highp float;
+        precision highp sampler2DArray;
+        precision highp usampler2D;
 
         uniform int tile_width;             // tile width in vertex count, always equals the tile height
         uniform float tile_width_m;         // tile width in meters, always equals the tile height
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
         uniform mat4 view_proj;
-        uniform sampler2D textures[4];      // all textures are stored in a single sampler2D array
-        uniform float texture_infos[50];    // has the layout n x {tex_idx, lat_min, lat_max, lon_min, lon_max, height_min, height_max}
+        ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         // out variables
         out float vs_tid; // triangle index for coloring
@@ -374,33 +361,6 @@
             // getting the height from the height images
             world_pos = vec2(x, y);
             world_pos += grid_offset_pos;
-            int tile = -1;
-            float lat_min, lat_max, lon_min, lon_max;
-            for (int i = 0; i < 4 && tile < 0; ++i) {
-                lat_min = texture_infos[i * 7 + 1];
-                lat_max = texture_infos[i * 7 + 2];
-                lon_min = texture_infos[i * 7 + 3];
-                lon_max = texture_infos[i * 7 + 4];
-                if (world_pos.x >= lon_min &&
-                    world_pos.x <= lon_max &&
-                    world_pos.y >= lat_min &&
-                    world_pos.y <= lat_max) {
-                    tile = int(texture_infos[i * 7]);
-                }
-            }
-            if (tile >= 0) {
-                vec2 uv = vec2((world_pos.x - lon_min) / (lon_max - lon_min),
-                               (world_pos.y - lat_min) / (lat_max - lat_min));
-                uv.y = 1. - uv.y;
-                float min_height = texture_infos[tile * 7 + 5];
-                float max_height = texture_infos[tile * 7 + 6];
-                switch(tile){
-                case 0: pos_cam_rel.z = textureLod(textures[0], uv, .0).x * (max_height - min_height) + min_height; break;
-                case 1: pos_cam_rel.z = textureLod(textures[1], uv, .0).x * (max_height - min_height) + min_height; break;
-                case 2: pos_cam_rel.z = textureLod(textures[2], uv, .0).x * (max_height - min_height) + min_height; break;
-                case 3: pos_cam_rel.z = textureLod(textures[3], uv, .0).x * (max_height - min_height) + min_height; break;
-                }
-            }
 
             gl_Position = view_proj * pos_cam_rel;
             vs_tid = float(gl_VertexID / 3);
@@ -410,13 +370,20 @@
         const fs = `#version 300 es
         #define PI 3.1415926535897932384626433832795
         precision highp float;
+        precision highp sampler2DArray;
+        precision highp usampler2D;
 
         in float vs_tid;
         in vec3 w_pos;
         in vec2 world_pos;
+        ${Util.glsl_virtual_texture_uniforms("heightmap")}
+        uniform int virtual_heightmap_infos[256 * 3];
 
         ${Util.glsl_wgs_84_to_tile_idx()}
+        ${Util.glsl_wgs_84_to_tile_idx_uv()}
         ${Util.glsl_wgs_84_ddeg_to_m()}
+        ${Util.glsl_get_tile_index_uv()}
+        ${Util.glsl_virtual_texture_load("heightmap")}
 
         out vec4 out_col; 
         void main(void) {
@@ -424,48 +391,79 @@
                 out_col = vec4(1., 0., 0., 1.);
             else
                 out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+
             // out_col = vec4((w_pos.z - 400.) / 300.);
+            // return;
+            // out_col = vec4(world_pos / 1000., 0., 1.);
+            // return;
+
+            vec2 uv_glob;
+            vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
+            
+            // uint t = texture(virtual_heightmap_index, uv_glob).x;
+            // out_col = texture(virtual_heightmap, vec3(uv_glob, float(t - 1u)));
+            // return;
+            // if (t == 0u)
+            //     out_col = vec4(1., 0, 0, 1);
+            // else
+            //     out_col = vec4(float(t % 10u) * .1);
+            // return;
+
+            // ivec2 pixel_pos = ivec2(gl_FragCoord.xy);
+            // ivec2 xy = pixel_pos % 256;
+            // ivec2 tile = pixel_pos / 256;
+            // int lev = tile.x + tile.y * 16;
+            // out_col = texelFetch(virtual_heightmap, ivec3(xy, lev), 0);
+            // return;
+
+            // uint t = texelFetch(virtual_heightmap_index, pixel_pos, 0).r;
+            // if (min(pixel_pos, textureSize(virtual_heightmap_index, 0)) != pixel_pos) {
+            //     out_col = vec4(1., 0, 0, 1.);
+            //     return;
+            // }
+            // if (t != 0u)
+            //     out_col = vec4(1.);
+            // else
+            //     out_col = vec4(0.);
+            // return;
+
+            vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
+            out_col = vec4(encoded_height.xyz / 256., 1);
             return;
-            int mip_offset = 20;
-            vec2 dx = dFdx(world_pos).xy;
-            vec2 dy = dFdy(world_pos).xy;
-            float max_del = max(dot(dx, dx), dot(dy, dy));
-            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset, 0, 15);
-            ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
-            float div = float((1 << 8) - 1);
-            out_col = vec4(float(tile_id.x & 0xff) / div,
-                           float(((tile_id.y & 3) << 6) | ((tile_id.x >> 8) & 0x3f)) / div,
-                           float((tile_id.y >> 2) & 0xff) / div, 
-                           float((level << 4) | ((tile_id.y >> 10)) & 0xf) / div);
+            if (false && encoded_height.b == 0.)
+                out_col = vec4(1., 0, 0, 0);
+            else {
+                out_col = vec4(encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
+                out_col = (out_col - 500.) / 500.;
+            }
+            return;
+            out_col = vec4(uv_glob, tile_id.z / 15., 1.);
         }
         `;
 
         const fs_id = `#version 300 es
         #define PI 3.1415926535897932384626433832795
         precision highp float;
+        precision highp sampler2DArray;
+        precision highp usampler2D;
 
         in float vs_tid;
         in vec3 w_pos;
         in vec2 world_pos;
+        ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         ${Util.glsl_wgs_84_to_tile_idx()}
         ${Util.glsl_wgs_84_ddeg_to_m()}
+        ${Util.glsl_get_tile_index()}
 
         out vec4 out_col; 
         void main(void) {
-            //out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
-            //out_col = vec4((w_pos.z - 400.) / 300.);
-            int mip_offset = 20;
-            vec2 dx = dFdx(world_pos).xy;
-            vec2 dy = dFdy(world_pos).xy;
-            float max_del = max(dot(dx, dx), dot(dy, dy));
-            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset, 0, 15);
-            ivec2 tile_id = wgs_84_to_tile_idx(world_pos, level);
+            ivec3 tile_id = get_tile_index();
             float div = float((1 << 8) - 1);
-            out_col = vec4(float(tile_id.x & 0xff) / div,
-                           float(((tile_id.y & 3) << 6) | ((tile_id.x >> 8) & 0x3f)) / div,
-                           float((tile_id.y >> 2) & 0xff) / div, 
-                           float((level << 4) | ((tile_id.y >> 10)) & 0xf) / div);
+            out_col = vec4(float(tile_id.y & 0xff) / div,
+                           float(((tile_id.x & 3) << 6) | ((tile_id.y >> 8) & 0x3f)) / div,
+                           float((tile_id.x >> 2) & 0xff) / div, 
+                           float((tile_id.z << 4) | ((tile_id.x >> 10)) & 0xf) / div);
         }
         `;
 
@@ -479,14 +477,15 @@
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
-                    textures: gl_context.getUniformLocation(pipeline, 'textures'),
-                    texture_infos: gl_context.getUniformLocation(pipeline, 'texture_infos'),
+                    virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
+                    virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
+                    virtual_heightmap_infos: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_infos'),
                 }
             };
         };
         render_pipelines = {
             terrain: create_pipeline(gl_context, vs, fs),
-            idx: create_pipeline(gl_context_tile_ids, vs, fs_id),
+            idx: create_pipeline(gl_context, vs, fs_id),
         };
 
         let meta = await fetch(location.origin + "/heightmap/meta");
@@ -515,7 +514,7 @@
         // linalg_tests();
         const max_depth = 14;
         const v_width = 1 << max_depth;
-        virtual_height_map = VirtualHeightMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, gl_context);
+        virtual_height_map = VirtualHeightMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
 
         // starting the endless loop for updating the image cache
         setInterval(update_cached_images);
@@ -583,7 +582,7 @@
         return shader;
     }
 
-    function resizeCanvasToDisplaySize(canvas, canvas_small) {
+    function resizeCanvasToDisplaySize(canvas, fb, gl) {
         // Lookup the size the browser is displaying the canvas in CSS pixels.
         const displayWidth = canvas.clientWidth;
         const displayHeight = canvas.clientHeight;
@@ -594,9 +593,25 @@
             // Make the canvas the same size
             canvas.width = displayWidth;
             canvas.height = displayHeight;
-            if (canvas_small) {
-                canvas_small.width = displayWidth / 2;
-                canvas_small.height = displayHeight / 2;
+
+
+            if (fb && gl) {
+                fb.width = Math.floor(displayWidth / 2);
+                fb.height = Math.floor(displayHeight / 2);
+
+                if (fb.texture)
+                    gl.deleteTexture(fb.texture);
+                if (fb.fb)
+                    gl.deleteFramebuffer(fb.fb);
+                fb.texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, fb.texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fb.width, fb.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                fb.fb = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);
             }
         }
         // create camera projection matrices
@@ -605,13 +620,13 @@
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
     }
-    window.addEventListener("resize", () => {
+    window.addEventListener("resize", async () => {
         let height = String(document.documentElement.clientHeight - document.getElementById("header").clientHeight) + "px";
         canvas3d.style.height = height;
-        resizeCanvasToDisplaySize(canvas3d, canvas_tile_ids);
-        draw_scene();
+        resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
+        await draw_scene();
     });
-    resizeCanvasToDisplaySize(canvas3d, canvas_tile_ids);
+    resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
 
 </script>
 

@@ -55,10 +55,11 @@ const VirtualHeightMap = () => {
         tiles_storage_cpu: [],
         virtual_texture_byte_size: 0, // is determined according to the max_tiles parameter
         virtual_texture_rebuilt: false, // used to determine whether view has to be rerendered due to an updated virtual texture cache
-        /** @type {ArrayBuffer} */
-        virtual_texture_cpu: null,
         /** @type {Texture} */
         virtual_texture_gpu: null,
+        /** @type {WebGLFramebuffer} */
+        virtual_texture_fb: null,
+        virtual_texture_render_pipeline: null,
         /** @type {WebGL2RenderingContext} */
         gl_context: null,
 
@@ -72,17 +73,49 @@ const VirtualHeightMap = () => {
          * @param {int} max_tiles The maximum amount of tiles stored in virtual texture cache (it is advised to use 255, or 511)
          * @param {WebGL2RenderingContext} gl_context 
          */
-        init: function (v_tex_width, v_tex_height, v_tex_extent, tile_width, tile_height, max_tiles, gl_context) {
+        init: function (v_tex_width, v_tex_height, v_tex_extent, tile_width, tile_height, max_tiles, texture_type, gl_context) {
             this.tile_width = tile_width;
             this.tile_height = tile_height;
             this.max_tiles = max_tiles;
             this.v_tex_width = v_tex_width;
             this.v_tex_height = v_tex_height;
             this.v_tex_extent = v_tex_extent;
-            this.tiles_storage_gpu = TilesGpu().init(tile_width, tile_height, max_tiles, gl_context, TextureTypes(gl_context).u8r);
-            this.virtual_texture_byte_size = Math.ceil(Math.ceil(Math.log(max_tiles)) / 8); // get the bits required (log2) and then convert them to required bytes
-            this.virtual_texture_cpu = new ArrayBuffer(v_tex_width * v_tex_height * self.virtual_texture_byte_size);
+            this.tiles_storage_gpu = TilesGpu().init(tile_width, tile_height, max_tiles, gl_context, texture_type);
+            this.virtual_texture_byte_size = Math.ceil(Math.ceil(Math.log2(max_tiles)) / 8); // get the bits required (log2) and then convert them to required bytes
             this.virtual_texture_gpu = gl_context.createTexture();
+            gl_context.bindTexture(gl_context.TEXTURE_2D, this.virtual_texture_gpu);
+            const format = this.virtual_texture_byte_size == 1 ? TextureTypes(gl_context).ui8r : TextureTypes(gl_context).ui8rg;
+            gl_context.texImage2D(gl_context.TEXTURE_2D, 0, format.format, v_tex_width, v_tex_height, 0, format.format_cpu || format.format, format.element_type, null);
+            gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.NEAREST);
+            gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.REPEAT);
+            gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.REPEAT);
+            this.virtual_texture_fb = gl_context.createFramebuffer();
+            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, this.virtual_texture_fb);
+            gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, this.virtual_texture_gpu, 0);
+            const pipeline = initShaderProgram(gl_context,
+                    `#version 300 es
+                    uniform ivec4 bounds; // contains in xy the min and max x, and in zw min and max y
+                    uniform ivec2 image_size;
+                    void main() {
+                      int x = gl_VertexID & 1;
+                      int y = int(gl_VertexID == 2 || gl_VertexID == 4 || gl_VertexID == 5);
+                      gl_Position = vec4(float(bounds.xy[x]) / float(image_size.x) * 2. - 1.,
+                                         float(bounds.zw[y]) / float(image_size.y) * 2. - 1.,
+                                         .5, 1.);
+                    }
+                    `,
+                    `#version 300 es
+                    uniform uint index;
+                    out uint buf_ind;
+                    void main() {buf_ind = index;}`)
+            this.virtual_texture_render_pipeline = {
+                program: pipeline,
+                uniforms: {
+                    bounds: gl_context.getUniformLocation(pipeline, "bounds"),
+                    image_size: gl_context.getUniformLocation(pipeline, "image_size"),
+                    index: gl_context.getUniformLocation(pipeline, "index"),
+                }
+            };
             this.gl_context = gl_context;
             return this;
         },
@@ -91,16 +124,21 @@ const VirtualHeightMap = () => {
             // sorting the tile requests to have the highest detailed images last to guarantee that
             // detail images will have a later time stamp (important for correctly loading the lods)
             tile_requests.sort((a, b) => a.width > b.width);
+            let tile_width_bits = Math.log2(this.v_tex_width);;
             for (tile_req of tile_requests) {
                 if (tile_req.type != tile_request_type) {// ignore wrong type tiles
                     console.error("Wrong type for tile request, got type: " + String(tile_req.type));
                     continue;
                 }
 
-                let lookup_table_string = CoordinateMappings.coords_to_lookup_string(tile_req.lat, tile_req.lon, tile_req.width);
+                let shift = tile_width_bits - tile_req.level;
+                let final_x = tile_req.x << shift;
+                let final_y = tile_req.y << shift;
+                let width = (1 << shift) << 4;
+                let lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
                 let already_loaded = lookup_table_string in this.tiles_lookup_table;
                 // make space for a new tile if tile cache full
-                if (!already_loaded && this.tiles_cpu.length >= tiles_count)
+                if (!already_loaded && this.tiles_storage_cpu.length >= tiles_count)
                     this.drop_least_important_tiles(1);
                 // add new tile to the storage
                 if (!already_loaded) {
@@ -108,15 +146,15 @@ const VirtualHeightMap = () => {
                     let i_cpu = this.tiles_storage_cpu.length;
                     if (i_gpu != i_cpu)
                         console.error("Added index mismatch for tiles");
-                    let map_provider = CoordinateMappings.global_coordinate_to_provider(tile_req.lat, tile_req.lon, MapType.height);
                     let new_tile = Tile().init(
-                        map_provider.coords_to_path(tile_req.lat, tile_req.lon, tile_req.width),
-                        tile_req.lat,
-                        tile_req.lon,
-                        tile_req.width,
-                        map_provider.virtual_texture_tile_span(tile_req.width),
+                        tile_req.url,
+                        final_x,
+                        final_y,
+                        width,
                         this.image_i_loaded_callback(i_cpu)
                     )
+                    if (new_tile.tile_x >= this.v_tex_width || new_tile.tile_y >= this.v_tex_height)
+                        console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
                     this.tiles_storage_cpu.push(new_tile);
                     this.tiles_lookup_table[lookup_table_string] = i_cpu;
                 }
@@ -127,60 +165,57 @@ const VirtualHeightMap = () => {
             }
         },
         /** @brief updates the virtual texture to contain the correct textures stored in the virtual texture cache */
-        rebuild_virtual_texture: function () {
+        rebuild_virtual_texture: async function () {
             // filling is done by ordering all tiles according to their last use time stamp and then writing them into the cpu buffer first the latest needed textures
             // and then filling the rest of the holes with texels out of the lower quality textures
+            let t = performance.now();
 
-            if (self.virtual_texture_byte_size != 1 || self.virtual_texture_byte_size != 2) {
-                console.error("Only tile_size allowed which can be indexed by at most 2 bytes, currently need " + self.virtual_texture_byte_size + " bytes");
+            if (this.virtual_texture_byte_size != 1 && this.virtual_texture_byte_size != 2) {
+                console.error("Only tile_size allowed which can be indexed by at most 2 bytes, currently need " + this.virtual_texture_byte_size + " bytes");
                 return;
             }
-            const max_index = (1 << (self.virtual_texture_byte_size * 8)) - 1;
-            let v_tex_view = self.virtual_texture_byte_size == 1 ? new Uint8Array(self.virtual_texture_cpu) :
-                self.virtual_texture_byte_size == 2 ? new Uint16Array(self.virtual_texture_cpu) :
-                    new Uint32Array(self.virtual_texture_cpu);
 
             // filling virtual_texture_cpu -------------------------------------------
-            v_tex_view.fill(max_index);
-            let ordered_tiles = this.tiles_storage_cpu.map((x, i) => [x.last_use, i]).sort((a, b) => a[0] > b[0]);
+            // let ordered_tiles = this.tiles_storage_cpu.map((x, i) => [x.last_use, i]).sort((a, b) => a[0] > b[0]);
+            let ordered_tiles = this.tiles_storage_cpu.map((x, i) => [x.width, i]).sort((a, b) => a[0] < b[0]);
+            this.gl_context.bindFramebuffer(this.gl_context.FRAMEBUFFER, this.virtual_texture_fb);
+            this.gl_context.viewport(0, 0, this.v_tex_width, this.v_tex_height);
+            this.gl_context.clearColor(1, 1, 1, 1);
+            this.gl_context.disable(this.gl_context.DEPTH_TEST);
+            this.gl_context.disable(this.gl_context.CULL_FACE);
+            this.gl_context.useProgram(this.virtual_texture_render_pipeline.program);
+            this.gl_context.uniform2i(this.virtual_texture_render_pipeline.uniforms.image_size, this.v_tex_width, this.v_tex_height);
             for ([last_use, idx] of ordered_tiles) {
-                let tile = this.tiles_cpu[idx];
+                let tile = this.tiles_storage_cpu[idx];
                 if (!tile.data_uploaded_to_gpu) // ignore not uploaded tiles (will be updated later due to callback which calls this function in its final steps)
                     continue;
-                let x = tile.tile_x;
-                let y = tile.tile_y;
-                for (let yy = y; yy < y + t.tile_span; ++y) {
-                    for (let xx = x; xx < x + t.tile_span; ++x) {
-                        v_tex_view[yy * this.v_tex_width + xx] = idx;
-                    }
-                }
+                this.gl_context.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, tile.tile_x, tile.tile_x + tile.width, tile.tile_y, tile.tile_y + tile.width);
+                this.gl_context.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, idx + 1);
+                
+                this.gl_context.drawArrays(this.gl_context.TRIANGLES, 0, 6);
             }
-
-            // upload virtual texture to gpu -----------------------------------------
-            let texture_type = self.virtual_texture_byte_size == 1 ? TextureTypes.u8r :
-                TextureTypes.u8rg;
-            this.gl_context.bindTexture(this.virtual_texture_gpu);
-            this.gl_context.texImage2D(
-                this.gl_context.TEXTURE_2D,
-                0,
-                texture_type.format,
-                this.v_tex_width,
-                this.v_tex_height,
-                0,
-                texture_type.format,
-                texture_type.element_type,
-                self.virtual_texture_cpu
-            );
 
             // signal updated virtual texture
             this.virtual_texture_rebuilt = true;
+            console.log(`VirtualTexture::rebuild_virtual_texture() took ${performance.now() - t} milli s`);
         },
-        bind_virtual_texture_to_shader: function (gl_texture_slot) {
+        bind_to_shader: function (gl_texture_slot_index, gl_texture_slot_texture, gl_infos_uniform) {
+            // filling tiles_info_buffer_gpu with the tiles info
+            let tiles_info_cpu = new Int32Array(this.tiles_storage_cpu.length);
+            for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
+                tiles_info_cpu[i * 3] = this.tiles_storage_cpu[i].tile_x;
+                tiles_info_cpu[i * 3 + 1] = this.tiles_storage_cpu[i].tile_y;
+                tiles_info_cpu[i * 3 + 2] = this.tiles_storage_cpu[i].width;
+            }
+
             const gl = this.gl_context;
-            gl.activeTexture(gl_texture_slot);
+            gl.activeTexture(gl_texture_slot_index);
             gl.bindTexture(gl.TEXTURE_2D, this.virtual_texture_gpu);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            this.tiles_storage_gpu.bind_to_shader(gl_texture_slot_texture);
+            if (tiles_info_cpu.length)
+                gl.uniform1iv(gl_infos_uniform, tiles_info_cpu);
         },
         /** @param {int} i Index of the element to drop, only removes from tiles_xxx member variables*/
         drop_tile_at_index: function (i) {
@@ -196,7 +231,7 @@ const VirtualHeightMap = () => {
         /** @param {int} n Number of tiles to drop from the tiles_xxx cache */
         drop_least_important_tiles: function (n) {
             // gets for each tile in the cpu cache the priority and sorts it in ascending order
-            let sorted_prios = this.tiles_cpu.map((x, i) => [x.get_priority(), i]).sort((a, b) => a[0] < b[0]);
+            let sorted_prios = this.tiles_storage_cpu.map((x, i) => [x.get_priority(), i]).sort((a, b) => a[0] < b[0]);
             for (let i = 0; i < n && i < sorted_prios.length; ++i)
                 this.drop_tile_at_index(sorted_prios[i][1]);    // get the i-th least important tile and retrieve the index from it
         },
@@ -210,38 +245,25 @@ const VirtualHeightMap = () => {
         image_i_loaded_callback: function (i) {
             let tiles_storage_cpu = this.tiles_storage_cpu;
             let tiles_storage_gpu = this.tiles_storage_gpu;
-            let rebuild_virtual_texture = this.rebuild_virtual_texture;
-            return function () {
+            let t = this;
+            let tile_width = this.tile_width;
+            let tile_height = this.tile_height;
+            return async function () {
                 // convert the image to a ArrayBuffer for further processing (data are always provided as uint8)
                 let image = tiles_storage_cpu[i];
-                let context = Util.create_canvas_context(image.width, image.height);
-                context.drawImage(image, 0, 0);
-                let data = new ArrayBuffer(context.getImageData(0, 0, image.width, image.height).data.buffer);
+                if (image.image.width != tile_width || image.image.height != tile_height)
+                    console.error("Image dimension mismatch, loaded image is not of same dimension needed for this virtual texture");
+                let context = Util.create_canvas_context(image.image.width, image.image.height);
+                context.drawImage(image.image, 0, 0);
+                let data = new Uint8Array(context.getImageData(0, 0, image.image.width, image.image.height).data);
                 tiles_storage_gpu.set_image_data(i, data);
-                tiles_storage_gpu.upload_data_to_gpu();
+                await Util.execution_break();
+                tiles_storage_gpu.upload_data_to_gpu(i);
+                await Util.execution_break();
                 image.data_uploaded_to_gpu = true;
-                rebuild_virtual_texture();
+                t.rebuild_virtual_texture();
             }
         }
-    };
-};
-
-const VirtualSatelliteMap = () => {
-    return {
-        type: satellite_map_type,
-        // member variables
-
-        // member functions
-    };
-};
-
-const VirtualStreetviewMap = () => {
-    return {
-        type: streetview_map_type,
-
-        // member variables
-
-        // member functions
     };
 };
 
@@ -252,26 +274,27 @@ const VirtualStreetviewMap = () => {
  */
 const TextureTypes = (gl) => {
     return {
-        u8r: {
+        ui8r: {
             type: texture_type_type,
             bytes_per_element: 1,
-            format: gl.R8,
+            format: gl.R8UI,
+            format_cpu: gl.RED_INTEGER,
             element_type: gl.UNSIGNED_BYTE,
-            create_new_cpu_buffer: function (n) { return new Int8Array(n); },
+            create_new_cpu_buffer: function (n) { return new Uint8Array(n); },
         },
-        u8rg: {
+        ui8rg: {
             type: texture_type_type,
             bytes_per_element: 2,
             format: gl.RG8,
             element_type: gl.UNSIGNED_BYTE,
-            create_new_cpu_buffer: function (n) { return new Int8Array(n); },
+            create_new_cpu_buffer: function (n) { return new Uint8Array(2 * n); },
         },
-        u8rgba: {
+        un8rgba: {
             type: texture_type_type,
             bytes_per_element: 4,
-            format: gl.RGBA8,
+            format: gl.RGBA,
             element_type: gl.UNSIGNED_BYTE,
-            create_new_cpu_buffer: function (n) { return new Int8Array(4 * n); },
+            create_new_cpu_buffer: function (n) { return new Uint8Array(4 * n); },
         },
     };
 };
@@ -313,6 +336,19 @@ const TilesGpu = () => {
             this.texture_type = texture_type;
             this.gl_context = gl_context;
             this.texture_gpu = gl_context.createTexture();
+            gl_context.bindTexture(gl_context.TEXTURE_2D_ARRAY, this.texture_gpu);
+            gl_context.texImage3D(
+                gl_context.TEXTURE_2D_ARRAY,
+                0,
+                this.texture_type.format,
+                this.tile_width,
+                this.tile_height,
+                this.max_size,
+                0,
+                this.texture_type.format,
+                this.texture_type.element_type,
+                null,
+            );
             this.texture_cpu = texture_type.create_new_cpu_buffer(tile_width * tile_height * max_size);
             return this;
         },
@@ -359,7 +395,7 @@ const TilesGpu = () => {
             }
             let bytes_per_image = this.texture_type.bytes_per_element * this.tile_width * this.tile_height;
             if (data.byteLength != bytes_per_image)
-                console.warning("set_image_data(): Image byte size mismatch, will stride through the given data");
+                console.debug("set_image_data(): Image byte size mismatch, will stride through the given data");
             let stride = data.byteLength / bytes_per_image;
             if (Math.floor(stride) != stride) {
                 console.error("Stride could not be deduces -> stride is not a whole number " + String(stride));
@@ -368,33 +404,36 @@ const TilesGpu = () => {
             let pos = i * bytes_per_image;
             let bpe = this.texture_type.bytes_per_element;
             const data_view = new Uint8Array(data);
-            const internal_view = new Uint8Array(this.tiles_cpu);
+            const internal_view = new Uint8Array(this.texture_cpu.buffer);
             for (let i = 0; i < this.tile_width * this.tile_height; ++i)
                 for (let b = 0; b < bpe; ++b)
                     internal_view[pos + i * bpe + b] = data_view[i * stride * bpe + b];
         },
         /** @brief syncs the cpu data with the gpu data */
-        upload_data_to_gpu: function () {
-            this.gl_context.bindTexture(this.texture_gpu);
-            this.gl_context.texImage3D(
+        upload_data_to_gpu: function (i) {
+            let t = performance.now();
+            this.gl_context.bindTexture(this.gl_context.TEXTURE_2D_ARRAY, this.texture_gpu);
+            this.gl_context.texSubImage3D(
                 this.gl_context.TEXTURE_2D_ARRAY,
-                0,
-                this.texture_type.format,
+                0, 0, 0, i,
                 this.tile_width,
                 this.tile_height,
-                this.max_size,
-                0,
+                1,
                 this.texture_type.format,
                 this.texture_type.element_type,
-                this.texture_cpu
+                this.texture_cpu,
+                this.texture_type.bytes_per_element * this.tile_width * this.tile_height * i
             );
+            console.log(`TilesGpu::upload_data_to_gpu() took ${performance.now() - t} milli s`);
         },
-        bind_texture_to_shader: function (gl_texture_slot) {
+        bind_to_shader: function (gl_texture_slot) {
             const gl = this.gl_context;
             gl.activeTexture(gl_texture_slot);
             gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture_gpu);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
         },
     };
 };
@@ -407,12 +446,9 @@ const Tile = () => {
     return {
         type: tile_type,
         // member variables
-        lat: 0,
-        lon: 0,
         width: 0,
         tile_x: 0,
         tile_y: 0,
-        tile_span: 0,           /** @brief describes how many tiles the virtual texture this tile spans */
         lookup_table_string: "",
         last_use: 0,
         /** @type{Image} */
@@ -422,26 +458,21 @@ const Tile = () => {
         // member functions
         /**
          * @param {string}   tile_url Url from where the data has to be loaded
-         * @param {int}      min_lat min latitude of the tile
-         * @param {int}      max_lat max latitude of the tile
-         * @param {int}      width Width of the tile in meters
+         * @param {int}      width Width of the tile in amount of tiles
          * @param {int}      tile_x Starting coordinate x in the tile texture (so start of the tile in the most precise level)
          * @param {int}      tile_y Starting coordinate y in the tile texture (so start of the tile in the most precise level)
-         * @param {int}      tile_span Width of the
          * @param {function():void} image_callback Callback that is executed after the tile is loaded
          */
-        init: function (tile_url, min_lat, min_lon, width, tile_x, tile_y, tile_span, image_callback) {
-            this.lat = min_lat;
-            this.lon = min_lon;
+        init: function (tile_url, tile_x, tile_y, width, image_callback) {
             this.width = width;
             this.tile_x = tile_x;
             this.tile_y = tile_y;
-            this.tile_span = tile_span;
-            this.lookup_table_string = CoordinateMappings.coords_to_lookup_string(min_lat, min_lon, width);
+            this.lookup_table_string = CoordinateMappings.coords_to_lookup_string(tile_x, tile_y, width);
             this.last_use = Date.now();
             this.image = new Image();
-            this.image.src = tile_url;
+            this.image.crossOrigin = 'anonymous';
             this.image.onload = image_callback;
+            this.image.src = tile_url;
             return this;
         },
         /**
@@ -464,13 +495,13 @@ const TileRequest = () => {
     return {
         type: tile_request_type,
         // member variables
-        lat: 0,
-        lon: 0,
-        width: 0,
+        x: 0,
+        y: 0,
+        level: 0,
         url: "",
 
         // member functions
-        init: function (lat, lon, width, url) { this.lat = lat; this.lon = lon; this.width = width; this.url = url; return this; },
+        init: function (x, y, level, url) { this.x = x; this.y = y; this.level = level; this.url = url; return this; },
     };
 };
 
@@ -596,13 +627,13 @@ const CoordinateMappings = {
         return tile;
     },
     /**
-     * @param {int} lat 
-     * @param {int} lon 
+     * @param {int} x 
+     * @param {int} y 
      * @param {int} width 
      * @returns {String} containing the input parameters concatenated via /
      */
-    coords_to_lookup_string: function (lat, lon, width) {
-        return String(lat) + "/" + String(lon) + "/" + String(width);
+    coords_to_lookup_string: function (x, y, width) {
+        return `${width}/${x}/${y}`;
     },
     /**
      * @param {String} str String containing "lat/lon/width" in exactly this order
@@ -676,7 +707,7 @@ const Util = {
         canvas.height = height;
         return canvas.getContext(context_type);
     },
-    
+
     /**
      * @brief transforms coordinates from wgs_86 to tile index
      * @param {double} lat latitude in degrees nord/south 
@@ -695,35 +726,104 @@ const Util = {
      */
     glsl_wgs_84_to_tile_idx: function () {
         return `
-        ivec2 wgs_84_to_tile_idx(vec2 wold_pos, int level) {
-            float x = world_pos.y * PI / 180.;
-            float y = asinh(tan(world_pos.x * PI / 180.));
+        ivec2 wgs_84_to_tile_idx(vec2 pos, int level) {
+            float x = pos.y * PI / 180.;
+            float y = asinh(tan(pos.x * PI / 180.));
             float l = float(1 << level);
             return ivec2(int((1.0 + (x / PI)) / 2. * l),
                         int((1.0 - (y / PI)) / 2. * l));
         }
         `;
     },
-    
+    glsl_wgs_84_to_tile_idx_uv: function () {
+        return `
+        ivec2 wgs_84_to_tile_idx_uv(vec2 pos, int level, out vec2 uv_glob) {
+            float x = pos.y * PI / 180.;
+            float y = asinh(tan(pos.x * PI / 180.));
+            float l = float(1 << level);
+            uv_glob = vec2((1.0 + (x / PI)) / 2., (1.0 - (y / PI)) / 2.); // global tile uv
+            vec2 scaled_uv = uv_glob * l;
+            ivec2 r = ivec2(scaled_uv);               // extracting tile indicse
+            return r;
+        }
+        `;
+    },
+
     m_to_wgs_84_deg: function (m) {
         // using a default value to convert (is not accurate in the longitudinal direction due to ignoring the shortening on the glob sphere)
         return m / this.meter_per_degree;
     },
-    
+
     wgs_84_ddeg_to_m: function (ddeg) {
         return ddeg * this.meter_per_degree;
     },
-    
-    glsl_wgs_84_ddeg_to_m: function() {
+
+    glsl_wgs_84_ddeg_to_m: function () {
         return `
         float wgs_84_ddeg_to_m(float ddeg) {
             return ddeg * ${this.meter_per_degree}.;
         }
         `;
     },
-    
-    int32_to_tile_id: function(tiles) {
-        const to_obj = (x) => {return {level: (x >>> 28), x: ((x >>> 14) & 0x3ff), y: (x & 0x3ff)};};
+
+    glsl_get_tile_index: function () {
+        return `
+        ivec3 get_tile_index() {
+            int mip_offset = 25;
+            vec2 dx = dFdx(world_pos).xy * float(1 << 10);
+            vec2 dy = dFdy(world_pos).xy * float(1 << 10);
+            float max_del = max(dot(dx, dx), dot(dy, dy));
+            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset - 20, 0, 15);
+            return ivec3(wgs_84_to_tile_idx(world_pos, level), level);
+        }
+        `;
+    },
+    glsl_get_tile_index_uv: function () {
+        return `
+        ivec3 get_tile_index_uv(out vec2 uv_glob) {
+            int mip_offset = 25;
+            vec2 dx = dFdx(world_pos).xy * float(1 << 10);
+            vec2 dy = dFdy(world_pos).xy * float(1 << 10);
+            float max_del = max(dot(dx, dx), dot(dy, dy));
+            int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset - 20, 0, 15);
+            return ivec3(wgs_84_to_tile_idx_uv(world_pos, level, uv_glob), level);
+        }
+        `;
+    },
+
+    glsl_virtual_texture_uniforms: function (v_map_name) {
+        return `
+        uniform usampler2D virtual_${v_map_name}_index;
+        uniform sampler2DArray virtual_${v_map_name};
+        // uniform int virtual_${v_map_name}_infos[256 * 3];
+        `;
+    },
+
+    glsl_virtual_texture_load: function (v_map_name) {
+        return `
+        vec4 virtual_${v_map_name}_load(vec2 uv_glob) {
+            uint index = texture(virtual_${v_map_name}_index, uv_glob).x;
+            if (index == 0u)
+                return vec4(0);
+            // getting offset info etc.
+            index -= 1u;
+            int offset_x = virtual_${v_map_name}_infos[3u * index];
+            int offset_y = virtual_${v_map_name}_infos[3u * index + 1u];
+            int width = virtual_${v_map_name}_infos[3u * index + 2u];
+            uv_glob *= vec2(textureSize(virtual_${v_map_name}, 0));
+            uv_glob -= vec2(offset_x, offset_y);
+            uv_glob /= float(width);
+            return texture(virtual_${v_map_name}, vec3(uv_glob, float(index)));
+        }
+        `;
+    },
+
+    int32_to_tile_id: function (tiles) {
+        const to_obj = (x) => { return { level: (x >>> 28), x: ((x >>> 14) & 0xfff), y: (x & 0xfff) }; };
         return Array.from(tiles, x => to_obj(x));
+    },
+
+    execution_break: async function () {
+        await new Promise(resolve => setTimeout(resolve, 0));
     },
 };

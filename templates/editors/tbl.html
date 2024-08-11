@@ -215,7 +215,7 @@
                 <div class="tool_bar_separator"></div>
                 <div id="font_size" class="tool_item">
                     <a onclick="font_delta(1);">+</a>
-                    <input id="font_size_input" value="8" onchange="font_size_changed()" />
+                    <input id="font_size_input" value="" onchange="font_size_changed()" />
                     <a onclick="font_delta(-1);">-</a>
                 </div>
                 <div class="tool_bar_separator"></div>
@@ -325,11 +325,15 @@
     function font_size_changed() {
         let font_size = (document.getElementById("font_size_input").value);
         for (let id of iterate_selected_cells_id()) {
-            if (id in table_data) {
-                table_data[id].style["font-size"] = font_size + "mm";
+            if (font_size == "")
+                delete table_data[id].style["font-size"];
+            else {
+                if (id in table_data) {
+                    table_data[id].style["font-size"] = font_size + "mm";
+                }
+                else
+                    table_data[id] = create_cell(id, { style: { "font-size": font_size } });
             }
-            else
-                table_data[id] = create_cell(id, { style: { "font-size": font_size } });
 
             update_cell_div(table_data[id]);
         }
@@ -543,7 +547,7 @@
             if (cell.id in table_data && "font-size" in table_data[cell.id].style)
                 document.getElementById("font_size_input").value = table_data[cell.id].style["font-size"].slice(0, -2);
             else
-                document.getElementById("font_size_input").value = 8;
+                document.getElementById("font_size_input").value = "";
         }
         else
             select_cell_function_input();
