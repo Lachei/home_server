@@ -796,7 +796,7 @@ const Util = {
         return `
         uniform usampler2D virtual_${v_map_name}_index;
         uniform sampler2DArray virtual_${v_map_name};
-        // uniform int virtual_${v_map_name}_infos[256 * 3];
+        uniform int virtual_${v_map_name}_infos[256 * 3];
         `;
     },
 

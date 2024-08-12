@@ -300,10 +300,10 @@
         const width = indices_render_objs.width;
         const height = indices_render_objs.height;
         let data = new Uint8Array(width * height * 4);   // reinterpret cast the uint8_t as uint16_t
-        const sync = gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0);
-        gl_context.flush();
-        gl_context.clientWaitSync(sync, 0, 100e6);
-        gl_context.deleteSync(sync);
+        // const sync = gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        // gl_context.flush();
+        // gl_context.clientWaitSync(sync, 0, 100e6);
+        // gl_context.deleteSync(sync);
         gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         let indices = new Uint32Array(data.buffer);
@@ -316,6 +316,12 @@
         ));
         virtual_height_map.update_needed_tiles(requested_tiles);
         console.log(decoded_tiles);
+    }
+    async function check_virtual_textures_update() {
+        if (virtual_height_map.virtual_texture_rebuilt) {
+            virtual_height_map.virtual_texture_rebuilt = false;
+            draw_scene();
+        }
     }
     // ----------------------------------------------------------------------------------------
     // init section (contains also the shader code)
@@ -330,6 +336,7 @@
         }
 
         const vs = `#version 300 es
+        precision highp int;
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
@@ -369,6 +376,7 @@
         `;
         const fs = `#version 300 es
         #define PI 3.1415926535897932384626433832795
+        precision highp int;
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
@@ -377,7 +385,7 @@
         in vec3 w_pos;
         in vec2 world_pos;
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
-        uniform int virtual_heightmap_infos[256 * 3];
+        // uniform int virtual_heightmap_infos[256 * 3];
 
         ${Util.glsl_wgs_84_to_tile_idx()}
         ${Util.glsl_wgs_84_to_tile_idx_uv()}
@@ -443,6 +451,7 @@
 
         const fs_id = `#version 300 es
         #define PI 3.1415926535897932384626433832795
+        precision highp int;
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
@@ -517,7 +526,10 @@
         virtual_height_map = VirtualHeightMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
 
         // starting the endless loop for updating the image cache
-        setInterval(update_cached_images);
+        // setInterval(update_cached_images);
+        setInterval(check_virtual_textures_update);
+        resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
+        draw_scene();
     }
     init();
 
@@ -626,8 +638,6 @@
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         await draw_scene();
     });
-    resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
-
 </script>
 
 </html>
