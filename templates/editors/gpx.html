@@ -66,6 +66,7 @@
         {{#editor}}
         <center id="title">GPX Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
+        <button id="rerender" onclick="draw_scene();">render</button>
         {{/editor}}
     </div>
     <div id="content">
@@ -101,6 +102,7 @@
     let bayernatlas_data = null;
     /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
+    let virtual_street_map = null;
     canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.clientX, y: e.clientY }; });
     canvas3d.addEventListener("mousemove", async (event) => {
         if (canvas_drag_start) {
@@ -121,6 +123,7 @@
     canvas3d.addEventListener("wheel", async (e) => {
         await draw_scene();
     });
+    let pressed_keys = {};
     window.addEventListener("keydown", async (e) => {
         if (document.querySelector(".preview:hover") == null)
             return;
@@ -250,12 +253,17 @@
             virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, program.uniform_locations.virtual_heightmap_infos);
             gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
             gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
+            if (program.uniform_locations.virtual_streetmap_infos < 10) {
+                virtual_street_map.bind_to_shader(gl.TEXTURE2, gl.TEXTURE3, program.uniform_locations.virtual_streetmap_infos);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 2);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap, 3);
+            }
 
-            // grid jump for triangles is done all 10 meters
-            let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()));
+            const base_width = Util.m_to_wgs_84_deg(100 * Math.max(1, Math.exp(.0001 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1700)))); // base width of a detail tile given in meters
+            // grid jump for triangles is done all x meters
+            let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
             let grid_offset_pos_rel = Pos(grid_offset_pos.lat - camera_center.x(), grid_offset_pos.lon - camera_center.y());
             // drawing the hq center triangles
-            const base_width = Util.m_to_wgs_84_deg(100); // base width of a detail tile given in meters
             gl.uniform1i(program.uniform_locations.tile_width, 100);
             gl.uniform1f(program.uniform_locations.tile_width_m, base_width);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
@@ -264,7 +272,7 @@
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = 25;
+            const triangle_resolution = 50;
             gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
             let cur_d = base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
@@ -315,11 +323,16 @@
             `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
         ));
         virtual_height_map.update_needed_tiles(requested_tiles);
+        let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+            `https://tile.openstreetmap.org/${tile.level}/${tile.x}/${tile.y}.png`
+        ));
+        virtual_street_map.update_needed_tiles(requested_streetmap_tiles);
         console.log(decoded_tiles);
     }
     async function check_virtual_textures_update() {
-        if (virtual_height_map.virtual_texture_rebuilt) {
+        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt) {
             virtual_height_map.virtual_texture_rebuilt = false;
+            virtual_street_map.virtual_texture_rebuilt = false;
             draw_scene();
         }
     }
@@ -336,6 +349,7 @@
         }
 
         const vs = `#version 300 es
+        #define PI 3.1415926535897932384626433832795
         precision highp int;
         precision highp float;
         precision highp sampler2DArray;
@@ -352,6 +366,10 @@
         out float vs_tid; // triangle index for coloring
         out vec3 w_pos;
         out vec2 world_pos;
+
+        ${Util.glsl_wgs_84_m_to_ddeg()}
+        ${Util.glsl_wgs_84_to_uv()}
+        ${Util.glsl_virtual_texture_load("heightmap")}
         
         void main(void) {
             int quad_idx = gl_VertexID % 6 / 3;
@@ -362,12 +380,17 @@
             int y_offset = int(triangle_idx == 2) ^ quad_idx;
             float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_m;
             float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m;
-            vec4 pos_cam_rel = vec4(x, y, 0., 1.);
-            pos_cam_rel.xy += grid_offset_pos_rel;
             
-            // getting the height from the height images
             world_pos = vec2(x, y);
             world_pos += grid_offset_pos;
+
+            // get height vertex height
+            vec2 uv_glob = wgs_84_to_uv(vec2(world_pos));
+            vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
+            float height = wgs_84_m_to_ddeg((encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.);
+
+            vec4 pos_cam_rel = vec4(x, y, height, 1.);
+            pos_cam_rel.xy += grid_offset_pos_rel;
 
             gl_Position = view_proj * pos_cam_rel;
             vs_tid = float(gl_VertexID / 3);
@@ -384,14 +407,11 @@
         in float vs_tid;
         in vec3 w_pos;
         in vec2 world_pos;
-        ${Util.glsl_virtual_texture_uniforms("heightmap")}
-        // uniform int virtual_heightmap_infos[256 * 3];
+        ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
-        ${Util.glsl_wgs_84_to_tile_idx()}
-        ${Util.glsl_wgs_84_to_tile_idx_uv()}
-        ${Util.glsl_wgs_84_ddeg_to_m()}
-        ${Util.glsl_get_tile_index_uv()}
-        ${Util.glsl_virtual_texture_load("heightmap")}
+        ${Util.glsl_wgs_84_m_to_ddeg()}
+        ${Util.glsl_wgs_84_to_uv()}
+        ${Util.glsl_virtual_texture_load("streetmap")}
 
         out vec4 out_col; 
         void main(void) {
@@ -405,8 +425,8 @@
             // out_col = vec4(world_pos / 1000., 0., 1.);
             // return;
 
-            vec2 uv_glob;
-            vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
+            // vec2 uv_glob;
+            // vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
             
             /// uint t = texture(virtual_heightmap_index, uv_glob).x;
             // out_col = texture(virtual_heightmap, vec3(uv_glob, float(t - 1u)));
@@ -435,8 +455,9 @@
             //     out_col = vec4(0.);
             // return;
 
-            vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
-            out_col = vec4(encoded_height.xyz / 256., 1);
+            vec2 uv_glob = wgs_84_to_uv(vec2(world_pos));
+            vec4 encoded_height = virtual_streetmap_load(uv_glob);
+            out_col = vec4(encoded_height.xyz, 1);
             return;
             if (false && encoded_height.b == 0.)
                 out_col = vec4(1., 0, 0, 0);
@@ -445,7 +466,7 @@
                 out_col = (out_col - 500.) / 500.;
             }
             return;
-            out_col = vec4(uv_glob, tile_id.z / 15., 1.);
+            //out_col = vec4(uv_glob, tile_id.z / 15., 1.);
         }
         `;
 
@@ -459,7 +480,6 @@
         in float vs_tid;
         in vec3 w_pos;
         in vec2 world_pos;
-        ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         ${Util.glsl_wgs_84_to_tile_idx()}
         ${Util.glsl_wgs_84_ddeg_to_m()}
@@ -488,7 +508,10 @@
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
-                    virtual_heightmap_infos: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_infos'),
+                    virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
+                    virtual_streetmap_index: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index'),
+                    virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
+                    virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
                 }
             };
         };
@@ -506,7 +529,7 @@
             cur.center_lon = cur.min_lon + 500;
         }
 
-        camera_center = Vec4(47.80177, 12.89798, .1);
+        camera_center = Vec4(47.80177, 12.89798, Util.m_to_wgs_84_deg(1100));
         bayernatlas_data = {
             meta: {
                 origin: [3927040, 5923328],
@@ -523,15 +546,15 @@
         // linalg_tests();
         const max_depth = 14;
         const v_width = 1 << max_depth;
-        virtual_height_map = VirtualHeightMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
-
+        virtual_height_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        virtual_street_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         draw_scene();
     }
-    init();
+    window.onload = init;
 
     const Pos = (lat, lon) => {
         return {
@@ -541,10 +564,9 @@
         }
     };
 
-    const get_detail_base_pos = (pos) => {
+    const get_detail_base_pos = (pos, divider) => {
         // as the tiles are always increasing by 100, and we want a transfer of triangles
         // in 1/10th of the difference, we round the pos to multiple of 100 in each direction
-        const divider = Util.m_to_wgs_84_deg(10);
         const offset = divider * 5;
         return Pos(Math.floor(pos.lat / divider) * divider - offset, Math.floor(pos.lon / divider) * divider - offset);
     };
