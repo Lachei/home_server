@@ -89,7 +89,7 @@ const VirtualMap = () => {
             this.virtual_texture_byte_size = Math.ceil(Math.ceil(Math.log2(max_tiles)) / 8); // get the bits required (log2) and then convert them to required bytes
             this.virtual_texture_gpu = gl_context.createTexture();
             gl_context.bindTexture(gl_context.TEXTURE_2D, this.virtual_texture_gpu);
-            const format = this.virtual_texture_byte_size == 1 ? TextureTypes(gl_context).ui8r : TextureTypes(gl_context).ui8rg;
+            const format = TextureTypes(gl_context).un8rgba; // this.virtual_texture_byte_size == 1 ? TextureTypes(gl_context).ui8r : TextureTypes(gl_context).ui8rg;
             gl_context.texImage2D(gl_context.TEXTURE_2D, 0, format.format, v_tex_width, v_tex_height, 0, format.format_cpu || format.format, format.element_type, null);
             gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.NEAREST);
             gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.REPEAT);
@@ -110,9 +110,11 @@ const VirtualMap = () => {
                     }
                     `,
                     `#version 300 es
+                    #define TO_BYTE(ind, bits) float(index >> bits) / 255.
+                    precision lowp float;
                     uniform uint index;
-                    out uint buf_ind;
-                    void main() {buf_ind = index;}`)
+                    out vec4 buf_ind;
+                    void main() {buf_ind = vec4(TO_BYTE(index, 24), TO_BYTE(index, 16), TO_BYTE(index, 8), TO_BYTE(index, 0));}`)
             this.virtual_texture_render_pipeline = {
                 program: pipeline,
                 uniforms: {
@@ -843,7 +845,7 @@ const Util = {
 
     glsl_virtual_texture_uniforms: function (v_map_name) {
         return `
-        uniform usampler2D virtual_${v_map_name}_index;
+        uniform sampler2D virtual_${v_map_name}_index;
         uniform sampler2DArray virtual_${v_map_name};
         uniform Infos_${v_map_name}{ivec4 virtual_${v_map_name}_infos[255];};
         `;
@@ -851,8 +853,11 @@ const Util = {
 
     glsl_virtual_texture_load: function (v_map_name) {
         return `
+        uint packUnorm4x8(vec4 c) {
+            return (uint(c.x * 255.) << 24) | (uint(c.y * 255.) << 16) | (uint(c.z * 255.) << 8) | uint(c.w * 255.);
+        }
         vec4 virtual_${v_map_name}_load(vec2 uv_glob) {
-            uint index = texture(virtual_${v_map_name}_index, uv_glob).x;
+            uint index = packUnorm4x8(texture(virtual_${v_map_name}_index, uv_glob));
             if (index == 0u)
                 return vec4(0);
             // getting offset info etc.

@@ -470,6 +470,21 @@
             //     out_col = vec4(0.);
             // return;
 
+            
+            // uint index = packUnorm4x8(texture(virtual_streetmap_index, uv_glob));
+            // if (index == 0u)
+            //     return;
+            // // getting offset info etc.
+            // index -= 1u;
+            // int offset_x = virtual_streetmap_infos[index].x;
+            // int offset_y = virtual_streetmap_infos[index].y;
+            // int width = virtual_streetmap_infos[index].z;
+            // vec2 local_uv = uv_glob * vec2(textureSize(virtual_streetmap_index, 0));
+            // local_uv -= vec2(offset_x, offset_y);
+            // local_uv /= float(width);
+            // out_col = vec4(local_uv, 0, 1);
+            // return;
+
             vec4 encoded_height = virtual_streetmap_load(uv_glob);
             out_col = vec4(encoded_height.xyz, 1);
             return;
@@ -557,7 +572,7 @@
         }
 
         // linalg_tests();
-        const max_depth = 14;
+        const max_depth = 12;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         virtual_street_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
