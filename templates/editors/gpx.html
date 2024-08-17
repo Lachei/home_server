@@ -553,14 +553,14 @@
             idx: create_pipeline(gl_context, vs, fs_id),
         };
 
-        let meta = await fetch(location.origin + "/heightmap/meta");
-        heightmap_meta_data = await meta.json();
-        // adding center info
-        for (let key in heightmap_meta_data) {
-            let cur = heightmap_meta_data[key];
-            cur.center_lat = cur.min_lat + 500;
-            cur.center_lon = cur.min_lon + 500;
-        }
+        // let meta = await fetch(location.origin + "/heightmap/meta");
+        // heightmap_meta_data = await meta.json();
+        // // adding center info
+        // for (let key in heightmap_meta_data) {
+        //     let cur = heightmap_meta_data[key];
+        //     cur.center_lat = cur.min_lat + 500;
+        //     cur.center_lon = cur.min_lon + 500;
+        // }
 
         camera_center = Vec4(47.80177, 12.89798, Util.m_to_wgs_84_deg(1100));
         bayernatlas_data = {
