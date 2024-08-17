@@ -69,7 +69,7 @@
         <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles();">
             <option base_url="tile.openstreetmap.org/" ending=".png">OSM</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png">CyclOSM</option>
-            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" ending="">Satellite</option>
+            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw">Satellite</option>
         </select>
         {{/editor}}
     </div>
@@ -113,7 +113,7 @@
     let virtual_height_map = null;
     let virtual_street_map = null;
     canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.screenX, y: e.screenY }; });
-    canvas3d.addEventListener("touchstart", (e) => {canvas_drag_start = { x: e.touches[0].screenX, y: e.touches[0].screenY}; });
+    canvas3d.addEventListener("touchstart", (e) => {canvas_drag_start = { x: e.touches[0].screenX, y: e.touches[0].screenY, scale: e.scale}; });
     canvas3d.addEventListener("mousemove", async (event) => {
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - event.screenX;
@@ -132,14 +132,20 @@
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - event.touches[0].screenX;
             let yDel = canvas_drag_start.y - event.touches[0].screenY;
+            let sDel = canvas_drag_start.scale - event.scale;
             camera_dir -= xDel * cam_rot_speed * 2;
             if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
             if (camera_dir < 0) camera_dir += 2 * Math.PI;
             camera_pitch += yDel * cam_rot_speed * 2;
             if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
             if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
+            if (canvas_drag_start.scale) {
+                let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100));
+                camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * sDel));
+            }
             await draw_scene();
-            canvas_drag_start = { x: event.touches[0].screenX, y: event.touches[0].screenY };
+            canvas_drag_start = { x: event.touches[0].screenX, y: event.touches[0].screenY, scale: event.scale };
+            e.preventDefault();
         }
     });
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
@@ -147,8 +153,8 @@
     canvas3d.addEventListener("touchend", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", async (e) => {
-        let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100))
-        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY))
+        let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100));
+        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         await draw_scene();
     });
     let pressed_keys = {};
@@ -445,6 +451,7 @@
         ${Util.glsl_wgs_84_m_to_ddeg()}
         ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("streetmap")}
+        ${Util.glsl_get_tile_index()}
 
         out vec4 out_col; 
         void main(void) {
@@ -570,7 +577,9 @@
         }
 
         // linalg_tests();
-        const max_depth = 14;
+        const is_mobile = navigator.userAgentData ? navigator.userAgentData.mobile: false;
+        const is_chrome = navigator.userAgent.toLowerCase().indexOf("chrome") > -1;
+        const max_depth = is_mobile && is_chrome ? 12: 14;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         virtual_street_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
