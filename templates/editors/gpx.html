@@ -66,7 +66,11 @@
         {{#editor}}
         <center id="title">GPX Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
-        <button id="rerender" onclick="draw_scene();">render</button>
+        <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles();">
+            <option base_url="tile.openstreetmap.org/" ending=".png">OSM</option>
+            <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png">CyclOSM</option>
+            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" ending="">Satellite</option>
+        </select>
         {{/editor}}
     </div>
     <div id="content">
@@ -78,7 +82,12 @@
 <script type="text/javascript" src="{{&site_url}}/lin_alg.js"></script>
 <script type="text/javascript" src="{{&site_url}}/virtual_texture.js"></script>
 <script type="text/javascript" src="{{&site_url}}/pro4.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>
 <script>
+    var spector = new SPECTOR.Spector();
+    spector.displayUI();
+    spector.spyCanvases();
+
     const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
 
@@ -121,14 +130,14 @@
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("mouseleave", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", async (e) => {
+        let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100))
+        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY))
         await draw_scene();
     });
     let pressed_keys = {};
     window.addEventListener("keydown", async (e) => {
         if (document.querySelector(".preview:hover") == null)
             return;
-
-        console.log(e.key);
 
         let speed = cam_dir_speed;
         let key = e.key;
@@ -253,32 +262,35 @@
             virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, program.uniform_locations.virtual_heightmap_infos);
             gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
             gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
+            gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_heightmap_infos, program.uniform_locations.virtual_heightmap_infos);
             if (program.uniform_locations.virtual_streetmap_infos < 10) {
                 virtual_street_map.bind_to_shader(gl.TEXTURE2, gl.TEXTURE3, program.uniform_locations.virtual_streetmap_infos);
                 gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 2);
                 gl.uniform1i(program.uniform_locations.virtual_streetmap, 3);
+                gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
             }
 
-            const base_width = Util.m_to_wgs_84_deg(100 * Math.max(1, Math.exp(.0001 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1700)))); // base width of a detail tile given in meters
+            const base_width = Util.m_to_wgs_84_deg(100 * Math.max(1, .005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
+            const width_multiplier = Math.cos(camera_center.x() / 180 * Math.PI); // x is latitude
             // grid jump for triangles is done all x meters
             let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
             let grid_offset_pos_rel = Pos(grid_offset_pos.lat - camera_center.x(), grid_offset_pos.lon - camera_center.y());
             // drawing the hq center triangles
             gl.uniform1i(program.uniform_locations.tile_width, 100);
-            gl.uniform1f(program.uniform_locations.tile_width_m, base_width);
+            gl.uniform2f(program.uniform_locations.tile_width_m, base_width, width_multiplier);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, grid_offset_pos_rel.lat, grid_offset_pos_rel.lon);
             gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = 50;
+            const triangle_resolution = 100;
             gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
             let cur_d = base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
             const draw_patch = (cam, cur_base_pos, tile_width_m) => {
                 const cur_base_pos_rel = Pos(cur_base_pos.lat - cam.x(), cur_base_pos.lon - cam.y());
-                gl.uniform1f(program.uniform_locations.tile_width_m, tile_width_m);
+                gl.uniform2f(program.uniform_locations.tile_width_m, tile_width_m, width_multiplier);
                 gl.uniform2f(program.uniform_locations.grid_offset_pos, cur_base_pos.lat, cur_base_pos.lon);
                 gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
                 gl.drawArrays(gl.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
@@ -323,8 +335,10 @@
             `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
         ));
         virtual_height_map.update_needed_tiles(requested_tiles);
+        let s = document.getElementById("layer_select");
+        let layer = s.options[s.selectedIndex];
         let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
-            `https://tile.openstreetmap.org/${tile.level}/${tile.x}/${tile.y}.png`
+            `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
         ));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles);
         console.log(decoded_tiles);
@@ -333,7 +347,7 @@
         if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
-            draw_scene();
+            await draw_scene();
         }
     }
     // ----------------------------------------------------------------------------------------
@@ -356,16 +370,15 @@
         precision highp usampler2D;
 
         uniform int tile_width;             // tile width in vertex count, always equals the tile height
-        uniform float tile_width_m;         // tile width in meters, always equals the tile height
+        uniform vec2 tile_width_m;         // tile width in meters, always equals the tile height
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
         uniform mat4 view_proj;
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         // out variables
-        out float vs_tid; // triangle index for coloring
-        out vec3 w_pos;
         out vec2 world_pos;
+        out vec2 uv_glob;
 
         ${Util.glsl_wgs_84_m_to_ddeg()}
         ${Util.glsl_wgs_84_to_uv()}
@@ -378,23 +391,26 @@
             int pos_off_y = gl_VertexID / 6 / tile_width;
             int x_offset = int(triangle_idx == 1) ^ quad_idx;
             int y_offset = int(triangle_idx == 2) ^ quad_idx;
-            float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_m;
-            float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m;
+            float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_m.x;
+            float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m.x;
             
             world_pos = vec2(x, y);
             world_pos += grid_offset_pos;
 
             // get height vertex height
-            vec2 uv_glob = wgs_84_to_uv(vec2(world_pos));
+            uv_glob = wgs_84_to_uv(vec2(world_pos));
             vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
             float height = wgs_84_m_to_ddeg((encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.);
+            if (encoded_height == vec4(0))
+                height = 0.;
 
             vec4 pos_cam_rel = vec4(x, y, height, 1.);
             pos_cam_rel.xy += grid_offset_pos_rel;
+            pos_cam_rel.y *= tile_width_m.y; // accommodate for circumference reduction of earth depending on the latitude
 
             gl_Position = view_proj * pos_cam_rel;
-            vs_tid = float(gl_VertexID / 3);
-            w_pos = pos_cam_rel.xyz;
+            // vs_tid = float(gl_VertexID / 3);
+            // w_pos = pos_cam_rel.xyz;
         }
         `;
         const fs = `#version 300 es
@@ -404,8 +420,7 @@
         precision highp sampler2DArray;
         precision highp usampler2D;
 
-        in float vs_tid;
-        in vec3 w_pos;
+        in vec2 uv_glob;
         in vec2 world_pos;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
@@ -417,8 +432,8 @@
         void main(void) {
             if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
                 out_col = vec4(1., 0., 0., 1.);
-            else
-                out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+            // else
+            //     out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
 
             // out_col = vec4((w_pos.z - 400.) / 300.);
             // return;
@@ -455,7 +470,6 @@
             //     out_col = vec4(0.);
             // return;
 
-            vec2 uv_glob = wgs_84_to_uv(vec2(world_pos));
             vec4 encoded_height = virtual_streetmap_load(uv_glob);
             out_col = vec4(encoded_height.xyz, 1);
             return;
@@ -477,8 +491,7 @@
         precision highp sampler2DArray;
         precision highp usampler2D;
 
-        in float vs_tid;
-        in vec3 w_pos;
+        in vec2 uv_glob;
         in vec2 world_pos;
 
         ${Util.glsl_wgs_84_to_tile_idx()}
