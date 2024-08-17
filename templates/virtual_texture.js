@@ -102,10 +102,10 @@ const VirtualMap = () => {
                     uniform ivec4 bounds; // contains in xy the min and max x, and in zw min and max y
                     uniform ivec2 image_size;
                     void main() {
-                      int x = gl_VertexID & 1;
-                      int y = int(gl_VertexID == 2 || gl_VertexID == 4 || gl_VertexID == 5);
-                      gl_Position = vec4(float(bounds.xy[x]) / float(image_size.x) * 2. - 1.,
-                                         float(bounds.zw[y]) / float(image_size.y) * 2. - 1.,
+                      int x = bool(gl_VertexID & 1) ? bounds.y: bounds.x;
+                      int y = gl_VertexID == 2 || gl_VertexID == 4 || gl_VertexID == 5 ? bounds.w : bounds.z;
+                      gl_Position = vec4(float(x) / float(image_size.x) * 2. - 1.,
+                                         float(y) / float(image_size.y) * 2. - 1.,
                                          .5, 1.);
                     }
                     `,
@@ -194,6 +194,7 @@ const VirtualMap = () => {
                 gl.bufferData(gl.UNIFORM_BUFFER, tiles_info_cpu, gl.DYNAMIC_DRAW);
                 gl.bindBuffer(gl.UNIFORM_BUFFER, null);
             }
+            console.log(this.tiles_lookup_table);
         },
         /** @brief updates the virtual texture to contain the correct textures stored in the virtual texture cache */
         rebuild_virtual_texture: async function () {
@@ -225,6 +226,7 @@ const VirtualMap = () => {
                 let tile = this.tiles_storage_cpu[idx];
                 if (!tile.data_uploaded_to_gpu) // ignore not uploaded tiles (will be updated later due to callback which calls this function in its final steps)
                     continue;
+
                 this.gl_context.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, tile.tile_x, tile.tile_x + tile.width, tile.tile_y, tile.tile_y + tile.width);
                 this.gl_context.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, idx + 1);
                 
@@ -293,10 +295,10 @@ const VirtualMap = () => {
                 // convert the image to a ArrayBuffer for further processing (data are always provided as uint8)
                 let image = tiles_storage_cpu[i];
                 if (image.image.width != tile_width || image.image.height != tile_height)
-                    console.error("Image dimension mismatch, loaded image is not of same dimension needed for this virtual texture");
+                    console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
                 let context = Util.create_canvas_context(image.image.width, image.image.height);
                 context.drawImage(image.image, 0, 0);
-                let data = new Uint8Array(context.getImageData(0, 0, image.image.width, image.image.height).data.buffer);
+                let data = new Uint8Array(context.getImageData(0, 0, tile_width, tile_height).data.buffer);
                 tiles_storage_gpu.set_image_data(i, data);
                 tiles_storage_gpu.upload_data_to_gpu(i);
                 image.data_uploaded_to_gpu = true;
@@ -869,7 +871,7 @@ const Util = {
     },
 
     int32_to_tile_id: function (tiles) {
-        const to_obj = (x) => { return { level: (x >>> 28), x: ((x >>> 14) & 0xfff), y: (x & 0xfff) }; };
+        const to_obj = (x) => { return { level: (x >>> 28), x: ((x >>> 14) & 0x3fff), y: (x & 0x3fff) }; };
         return Array.from(tiles, x => to_obj(x));
     },
 
