@@ -668,8 +668,8 @@
 
 
             if (fb && gl) {
-                fb.width = Math.floor(displayWidth / 2);
-                fb.height = Math.floor(displayHeight / 2);
+                fb.width = Math.floor(displayWidth / 4);
+                fb.height = Math.floor(displayHeight / 4);
 
                 if (fb.texture)
                     gl.deleteTexture(fb.texture);
@@ -687,7 +687,7 @@
             }
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(90, displayWidth / displayHeight, .0001, 100);
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, .0001, 100);
         const screen_size_factor = 1;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;

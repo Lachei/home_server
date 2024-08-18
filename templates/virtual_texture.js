@@ -804,7 +804,7 @@ const Util = {
     glsl_get_tile_index: function () {
         return `
         ivec3 get_tile_index() {
-            int mip_offset = 14;
+            int mip_offset = 13;
             vec2 dx = dFdx(loc_pos); // .xy * float(1 << 10);
             vec2 dy = dFdy(loc_pos); // .xy * float(1 << 10);
             float max_del = max(dot(dx, dx), dot(dy, dy));
