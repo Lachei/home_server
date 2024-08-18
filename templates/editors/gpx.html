@@ -400,9 +400,8 @@
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         // out variables
-        out vec2 world_pos;
-        out vec2 uv_glob;
-        out vec2 uv_loc;
+        out vec2 loc_pos;
+        flat out vec2 pos_off;
 
         ${Util.glsl_wgs_84_m_to_ddeg()}
         ${Util.glsl_wgs_84_to_uv()}
@@ -418,11 +417,13 @@
             float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_m.x;
             float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m.x;
             
-            world_pos = vec2(x, y);
+            loc_pos = vec2(x, y);
+            vec2 world_pos = vec2(x, y);
             world_pos += grid_offset_pos;
+            pos_off = grid_offset_pos;
 
             // get height vertex height
-            uv_glob = wgs_84_to_uv(vec2(world_pos));
+            vec2 uv_glob = wgs_84_to_uv(world_pos);
             vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
             float height = wgs_84_m_to_ddeg((encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.);
             if (encoded_height == vec4(0))
@@ -444,8 +445,8 @@
         precision highp sampler2DArray;
         precision highp usampler2D;
 
-        in vec2 uv_glob;
-        in vec2 world_pos;
+        in vec2 loc_pos;
+        flat in vec2 pos_off;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
         ${Util.glsl_wgs_84_m_to_ddeg()}
@@ -455,8 +456,8 @@
 
         out vec4 out_col; 
         void main(void) {
-            if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
-                out_col = vec4(1., 0., 0., 1.);
+            // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
+            //     out_col = vec4(1., 0., 0., 1.);
             // else
             //     out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
 
@@ -495,12 +496,14 @@
             //     out_col = vec4(0.);
             // return;
 
+            vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
             vec4 surface_col = virtual_streetmap_load(uv_glob);
             if (surface_col == vec4(0))
-                surface_col = vec4(.7);
+                surface_col = vec4(.85);
             out_col = vec4(surface_col.xyz, 1);
-            return;
-            //out_col = vec4(uv_glob, tile_id.z / 15., 1.);
+            // float mist = pow((gl_FragCoord.z / gl_FragCoord.w), .3);
+            // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33)));
+            // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
         }
         `;
 
@@ -511,10 +514,10 @@
         precision highp sampler2DArray;
         precision highp usampler2D;
 
-        in vec2 uv_glob;
-        in vec2 world_pos;
+        in vec2 loc_pos;
+        flat in vec2 pos_off;
 
-        ${Util.glsl_wgs_84_to_tile_idx()}
+        ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_wgs_84_ddeg_to_m()}
         ${Util.glsl_get_tile_index()}
 

@@ -767,40 +767,12 @@ const Util = {
         let y_ind = Math.floor((1 - (y / Math.PI)) / 2 * (1 << level));
         return [x_ind, y_ind];
     },
-    /**
-     * @brief Create the glsl function in string form to be included in the glsl source
-     * @return {string} With the conversion function containing
-     */
-    glsl_wgs_84_to_tile_idx: function () {
-        return `
-        ivec2 wgs_84_to_tile_idx(vec2 pos, int level) {
-            float x = pos.y * PI / 180.;
-            float y = asinh(tan(pos.x * PI / 180.));
-            float l = float(1 << level);
-            return ivec2(int((1.0 + (x / PI)) / 2. * l),
-                        int((1.0 - (y / PI)) / 2. * l));
-        }
-        `;
-    },
     glsl_wgs_84_to_uv: function () {
         return `
         vec2 wgs_84_to_uv(vec2 pos) {
             float x = pos.y * PI / 180.;
             float y = asinh(tan(pos.x * PI / 180.));
             return vec2((1.0 + (x / PI)) / 2., (1.0 - (y / PI)) / 2.); // global tile uv
-        }
-        `;
-    },
-    glsl_wgs_84_to_tile_idx_uv: function () {
-        return `
-        ivec2 wgs_84_to_tile_idx_uv(vec2 pos, int level, out vec2 uv_glob) {
-            float x = pos.y * PI / 180.;
-            float y = asinh(tan(pos.x * PI / 180.));
-            float l = float(1 << level);
-            uv_glob = vec2((1.0 + (x / PI)) / 2., (1.0 - (y / PI)) / 2.); // global tile uv
-            vec2 scaled_uv = uv_glob * l;
-            ivec2 r = ivec2(scaled_uv);               // extracting tile indicse
-            return r;
         }
         `;
     },
@@ -832,12 +804,13 @@ const Util = {
     glsl_get_tile_index: function () {
         return `
         ivec3 get_tile_index() {
-            int mip_offset = 22;
-            vec2 dx = dFdx(uv_glob); // .xy * float(1 << 10);
-            vec2 dy = dFdy(uv_glob); // .xy * float(1 << 10);
+            int mip_offset = 14;
+            vec2 dx = dFdx(loc_pos); // .xy * float(1 << 10);
+            vec2 dy = dFdy(loc_pos); // .xy * float(1 << 10);
             float max_del = max(dot(dx, dx), dot(dy, dy));
             int level = 15 - clamp(int(.5 * log2(max_del)) + mip_offset, 0, 15);
             // return ivec3(wgs_84_to_tile_idx(world_pos, level), level);
+            vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
             return ivec3(ivec2(uv_glob * float(1 << level)), level);
         }
         `;
