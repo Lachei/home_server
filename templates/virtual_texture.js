@@ -63,6 +63,7 @@ const VirtualMap = () => {
         virtual_texture_render_pipeline: null,
         /** @type {WebGL2RenderingContext} */
         gl_context: null,
+        image_canvas_context: null,
 
         // functions
         /**
@@ -122,6 +123,7 @@ const VirtualMap = () => {
                 }
             };
             this.gl_context = gl_context;
+            this.image_canvas_context = Util.create_canvas_context(tile_width, tile_height);
             return this;
         },
         /** @param {Array.<TileRequest>} tile_requests Tiles which are needed next frame */
@@ -131,7 +133,6 @@ const VirtualMap = () => {
             tile_requests.sort((a, b) => a.width > b.width);
             let tile_width_bits = Math.log2(this.v_tex_width);
             let c = 0;
-            let change = false;
             for (tile_req of tile_requests) {
                 if (c++ >= this.max_tiles)
                     continue;
@@ -153,46 +154,32 @@ const VirtualMap = () => {
                 let final_y = tile_req.y * width;
                 let lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
                 let already_loaded = lookup_table_string in this.tiles_lookup_table;
-                change |= !already_loaded;
                 // make space for a new tile if tile cache full
                 if (!already_loaded && this.tiles_storage_cpu.length >= this.max_tiles)
-                    this.drop_least_important_tiles(1);
+                    this.drop_least_important_tiles(10);
                 // add new tile to the storage
                 if (!already_loaded) {
                     let i_gpu = this.tiles_storage_gpu.reserve_image_tile();
                     let i_cpu = this.tiles_storage_cpu.length;
                     if (i_gpu != i_cpu)
                         console.error("Added index mismatch for tiles");
-                    let new_tile = Tile().init(
+                    this.tiles_storage_cpu.push(Tile());
+                    let t = this.tiles_storage_cpu[i_cpu];
+                    t.init(
                         tile_req.url,
                         final_x,
                         final_y,
                         width,
-                        this.image_i_loaded_callback(i_cpu)
+                        () => { t.loaded = true; }
                     )
-                    if (new_tile.tile_x >= this.v_tex_width || new_tile.tile_y >= this.v_tex_height)
+                    if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height)
                         console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
-                    this.tiles_storage_cpu.push(new_tile);
                     this.tiles_lookup_table[lookup_table_string] = i_cpu;
                 }
                 // finally update the last use time
                 let i = this.tiles_lookup_table[lookup_table_string];
                 this.tiles_storage_cpu[i].last_use = Date.now();
                 // the virtual texture is updated when a new image had to be loaded/was loaded (see image_i_loaded_callback)
-            }
-            if (change) {
-                const gl = this.gl_context;
-                // filling tiles_info_buffer_gpu with the tiles info
-                let tiles_info_cpu = new Int32Array(this.max_tiles * 4);
-                for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
-                    let tile = this.tiles_storage_cpu[i];
-                    tiles_info_cpu[i * 4] = tile.tile_x;
-                    tiles_info_cpu[i * 4 + 1] = tile.tile_y;
-                    tiles_info_cpu[i * 4 + 2] = tile.width;
-                }
-                gl.bindBuffer(gl.UNIFORM_BUFFER, this.tiles_infos_buffer);
-                gl.bufferData(gl.UNIFORM_BUFFER, tiles_info_cpu, gl.DYNAMIC_DRAW);
-                gl.bindBuffer(gl.UNIFORM_BUFFER, null);
             }
             console.log(this.tiles_lookup_table);
         },
@@ -233,6 +220,19 @@ const VirtualMap = () => {
                 this.gl_context.drawArrays(this.gl_context.TRIANGLES, 0, 6);
             }
 
+            const gl = this.gl_context;
+            // filling tiles_info_buffer_gpu with the tiles info
+            let tiles_info_cpu = new Int32Array(this.max_tiles * 4);
+            for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
+                let tile = this.tiles_storage_cpu[i];
+                tiles_info_cpu[i * 4] = tile.tile_x;
+                tiles_info_cpu[i * 4 + 1] = tile.tile_y;
+                tiles_info_cpu[i * 4 + 2] = tile.width;
+            }
+            gl.bindBuffer(gl.UNIFORM_BUFFER, this.tiles_infos_buffer);
+            gl.bufferData(gl.UNIFORM_BUFFER, tiles_info_cpu, gl.DYNAMIC_DRAW);
+            gl.bindBuffer(gl.UNIFORM_BUFFER, null);
+
             // signal updated virtual texture
             this.virtual_texture_rebuilt = true;
         },
@@ -247,14 +247,18 @@ const VirtualMap = () => {
         },
         /** @param {int} i Index of the element to drop, only removes from tiles_xxx member variables*/
         drop_tile_at_index: function (i) {
-            console.log(`Dropping tile ${this.tiles_storage_cpu[i].image.src}`);
-            if (i >= this.tiles_storage_cpu.length) {
+            console.log(`Dropping tile ${this.tiles_storage_cpu[i].image.src} index ${i}`);
+            console.log(`State before:`);
+            console.log(this.tiles_lookup_table);
+            if (i >= this.tiles_storage_cpu.lengh) {
                 log.error("tile to drop is not existing");
                 return;
             }
             let lookup_table_string = this.tiles_storage_cpu[i].lookup_table_string;
+            if (this.tiles_lookup_table[lookup_table_string] != i)
+                console.error(`Index mismatch for delete: Found index ${this.ti8les_lookup_table[lookup_table_string]}`);
             // remove from tiles_images
-            // this.tiles_storage_cpu[i].image.onload = () => { };    // resetting the callback function to avoid loading errors when the image was already removed from cache but not yet fully loaded
+            this.tiles_storage_cpu[i].deleted = true;
             delete this.tiles_storage_cpu[i].image;
             this.tiles_storage_cpu[i] = this.tiles_storage_cpu[this.tiles_storage_cpu.length - 1];
             this.tiles_lookup_table[this.tiles_storage_cpu[i].lookup_table_string] = i;
@@ -263,6 +267,8 @@ const VirtualMap = () => {
             this.tiles_storage_gpu.drop_tile_at_index(i);
             // remove from lookup_table
             delete this.tiles_lookup_table[lookup_table_string];
+            console.log(`State after:`);
+            console.log(this.tiles_lookup_table);
             // console.info(`CPU: Dropped tile ${i} leaving ${this.tiles_storage_cpu.length} tiles`);
         },
         /** @param {int} n Number of tiles to drop from the tiles_xxx cache */
@@ -285,25 +291,54 @@ const VirtualMap = () => {
          * @param {int} i Index of the tile in the tile cache (is needed to then access the right image)
          * @returns {function():void} The callback function for the image.onload function 
          */
-        image_i_loaded_callback: function (i) {
-            let tiles_storage_cpu = this.tiles_storage_cpu;
+        image_i_loaded_callback: function (i, org_src) {
+            let tile = this.tiles_storage_cpu[i];
             let tiles_storage_gpu = this.tiles_storage_gpu;
             let t = this;
             let tile_width = this.tile_width;
             let tile_height = this.tile_height;
+            let image_context = this.image_canvas_context;
             return async function () {
                 // convert the image to a ArrayBuffer for further processing (data are always provided as uint8)
-                let image = tiles_storage_cpu[i];
-                if (image.image.width != tile_width || image.image.height != tile_height)
+                if (tile.deleted || org_src != tile.image.src) {
+                    console.error('tile was already deleted');
+                    return;
+                }
+                if (tile.image.width != tile_width || tile.image.height != tile_height)
                     console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
-                let context = Util.create_canvas_context(image.image.width, image.image.height);
-                context.drawImage(image.image, 0, 0);
-                let data = new Uint8Array(context.getImageData(0, 0, tile_width, tile_height).data.buffer);
+                image_context.drawImage(tile.image, 0, 0);
+                let data = new Uint8Array(image_context.getImageData(0, 0, tile_width, tile_height).data);
+                if (tile.deleted) {
+                    console.error('tile was already deleted');
+                    return;
+                }
                 tiles_storage_gpu.set_image_data(i, data);
-                tiles_storage_gpu.upload_data_to_gpu(i);
-                image.data_uploaded_to_gpu = true;
+                tile.data_uploaded_to_gpu = true;
                 t.rebuild_virtual_texture();
+                let r = await Util.check_virtual_texture(t);
+                if (!r)
+                    console.error(`Oh deary me ${tile.image.src}, ${i}`);
             }
+        },
+        upload_loaded_images: function () {
+            let change = false;
+            for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
+                let tile = this.tiles_storage_cpu[i];
+                if (!tile.loaded || tile.data_uploaded_to_gpu)
+                    continue;
+                if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
+                    console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
+                this.image_canvas_context.drawImage(tile.image, 0, 0);
+                let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
+                this.tiles_storage_gpu.set_image_data(i, data);
+                tile.data_uploaded_to_gpu = true;
+                change = true;
+                // let r = await Util.check_virtual_texture(t);
+                // if (!r)
+                //     console.error(`Oh deary me ${tile.image.src}, ${i}`);
+            }
+            if (change)
+                this.rebuild_virtual_texture();
         }
     };
 };
@@ -400,13 +435,10 @@ const TilesGpu = () => {
         drop_tile_at_index: function (n) {
             // swap last image to drop index and the pop (only do if the image is not the last one)
             if (n < this.length - 1) {
-                let data_view = new Uint8Array(this.texture_cpu.buffer);
                 let bytes_per_image = this.texture_type.bytes_per_element * this.tile_width * this.tile_height;
-                let to_pos = n * bytes_per_image;
-                let from_pos = (length - 1) * bytes_per_image;
-                for (let i = 0; i < bytes_per_image; ++i)
-                    data_view[to_pos + i] = data_view[from_pos + i];
-                this.upload_data_to_gpu(n);
+                let from_pos = (this.length - 1) * bytes_per_image;
+                let data_from = new Uint8Array(this.texture_cpu.buffer, from_pos, bytes_per_image);
+                this.set_image_data(n, data_from);
             }
             this.length -= 1;
             // console.info(`GPU: Dropped tile ${n} leaving ${this.length} tiles`);
@@ -429,6 +461,7 @@ const TilesGpu = () => {
          * @param {ArrayBuffer} data Image data, needs to have the same byte size as the internal tile 
          */
         set_image_data: function (i, data) {
+            console.log(`set_image_data(...) Setting data for image ${i}`);
             if (i >= this.length) {
                 console.error("set_image_data(): Image index to set is out of bounds");
                 return;
@@ -437,21 +470,12 @@ const TilesGpu = () => {
             if (data.byteLength != bytes_per_image)
                 console.debug("set_image_data(): Image byte size mismatch, will stride through the given data");
             let stride = data.byteLength / bytes_per_image;
-            if (Math.floor(stride) != stride) {
-                console.error("Stride could not be deduces -> stride is not a whole number " + String(stride));
+            if (1 != stride) {
+                console.error("Stride ahs to be one but is " + stride);
                 return;
             }
-            let pos = i * bytes_per_image;
-            let bpe = this.texture_type.bytes_per_element;
-            const data_view = new Uint8Array(data.buffer);
-            const internal_view = new Uint8Array(this.texture_cpu.buffer);
-            for (let i = 0; i < this.tile_width * this.tile_height; ++i)
-                for (let b = 0; b < bpe; ++b)
-                    internal_view[pos + i * bpe + b] = data_view[i * stride * bpe + b];
-        },
-        /** @brief syncs the cpu data with the gpu data */
-        upload_data_to_gpu: function (i) {
             let t = performance.now();
+            this.texture_cpu.set(data, bytes_per_image * i);
             this.gl_context.bindTexture(this.gl_context.TEXTURE_2D_ARRAY, this.texture_gpu);
             this.gl_context.texSubImage3D(
                 this.gl_context.TEXTURE_2D_ARRAY,
@@ -461,10 +485,9 @@ const TilesGpu = () => {
                 1,
                 this.texture_type.format,
                 this.texture_type.element_type,
-                this.texture_cpu,
-                this.texture_type.bytes_per_element * this.tile_width * this.tile_height * i
+                data
             );
-            // console.log(`TilesGpu::upload_data_to_gpu() took ${performance.now() - t} milli s`);
+            this.gl_context.bindTexture(this.gl_context.TEXTURE_2D_ARRAY, null);
         },
         bind_to_shader: function (gl_texture_slot) {
             const gl = this.gl_context;
@@ -500,6 +523,7 @@ const Tile = () => {
         last_use: 0,
         /** @type{Image} */
         image: null,
+        loaded: false,
         data_uploaded_to_gpu: false,
 
         // member functions
@@ -804,7 +828,7 @@ const Util = {
     glsl_get_tile_index: function () {
         return `
         ivec3 get_tile_index() {
-            int mip_offset = 13;
+            int mip_offset = 16;
             vec2 dx = dFdx(loc_pos); // .xy * float(1 << 10);
             vec2 dy = dFdy(loc_pos); // .xy * float(1 << 10);
             float max_del = max(dot(dx, dx), dot(dy, dy));
@@ -851,4 +875,43 @@ const Util = {
     execution_break: async function () {
         await new Promise(resolve => setTimeout(resolve, 0));
     },
+
+    check_virtual_texture: async function(tex) {
+        const ctx = this.create_canvas_context(tex.tile_width, tex.tile_height);
+        // simply go through all textures and see if the table entries and the data is correct
+        for(let i = 0; i < tex.tiles_storage_cpu.length; ++i) {
+            console.log(`Checking tile at index ${i}`);
+            // small sanity checks
+            let tile = tex.tiles_storage_cpu[i];
+            if (tex.tiles_lookup_table[tile.lookup_table_string] != i) {
+                console.error(`tiles_lookup_table index mismatch for tile ${tile.lookup_table_string}, idx ${i}`);
+                return false;
+            }
+            if (!tile.data_uploaded_to_gpu) {
+                console.log("skipping due to not yet uploaded");
+                continue;
+            }
+            // check for data consistency
+            let img;
+            const p = new Promise(resolve => {
+                img = new Image();
+                img.crossOrigin = "anonymous";
+                img.onload = resolve;
+                img.src = tile.image.src;
+            });
+            await p;
+            ctx.drawImage(img, 0, 0);
+            let data = new Uint8Array(ctx.getImageData(0, 0, tex.tile_width, tex.tile_height).data.buffer);
+            let gpu_data = tex.tiles_storage_gpu.texture_cpu;
+            let base_offset = data.length * i;
+            for (let j = 0; j < data.length; ++j) {
+                if (data[j] != gpu_data[base_offset + j]) {
+                    console.log(`Data mismatch at image ${i} data index ${j}`);
+                    return false;
+                }
+            }
+        }
+        console.log("virtual texture check successful");
+        return true;
+    }
 };

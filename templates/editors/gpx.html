@@ -69,7 +69,9 @@
         <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles();">
             <option base_url="tile.openstreetmap.org/" ending=".png">OSM</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png">CyclOSM</option>
-            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw">Satellite</option>
+            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw">Satellit</option>
+            <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="">Straßen bayern</option>
+            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="">Satellit bayern</option>
         </select>
         {{/editor}}
     </div>
@@ -252,7 +254,7 @@
     }
 
     // draws the scene with all loaded data
-    async function draw_scene() {
+    function draw_scene() {
         if (!gl_context)
             return;
 
@@ -307,7 +309,7 @@
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = 100;
+            const triangle_resolution = 200;
             gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
             let cur_d = base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
@@ -366,11 +368,13 @@
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles);
         console.log(decoded_tiles);
     }
-    async function check_virtual_textures_update() {
+    function check_virtual_textures_update() {
+        virtual_height_map.upload_loaded_images();
+        virtual_street_map.upload_loaded_images();
         if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
-            await draw_scene();
+            draw_scene();
         }
     }
     // ----------------------------------------------------------------------------------------
@@ -402,6 +406,7 @@
         // out variables
         out vec2 loc_pos;
         flat out vec2 pos_off;
+        out float height_m;
 
         ${Util.glsl_wgs_84_m_to_ddeg()}
         ${Util.glsl_wgs_84_to_uv()}
@@ -425,7 +430,8 @@
             // get height vertex height
             vec2 uv_glob = wgs_84_to_uv(world_pos);
             vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
-            float height = wgs_84_m_to_ddeg((encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.);
+            height_m = (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
+            float height = wgs_84_m_to_ddeg(height_m);
             if (encoded_height == vec4(0))
                 height = 0.;
 
@@ -447,6 +453,7 @@
 
         in vec2 loc_pos;
         flat in vec2 pos_off;
+        in float height_m;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
         ${Util.glsl_wgs_84_m_to_ddeg()}
@@ -501,6 +508,7 @@
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             out_col = vec4(surface_col.xyz, 1);
+            // out_col = mix(out_col, vec4(1, 0, 0, 1), 1. - clamp(abs(height_m - floor(height_m / 20.) * 20. - 1.), 0., 1.));
             // float mist = pow((gl_FragCoord.z / gl_FragCoord.w), .3);
             // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33)));
             // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
