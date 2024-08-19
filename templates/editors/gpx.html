@@ -383,7 +383,7 @@
 
     async function init() {
         // webgl init
-        gl_context = canvas3d.getContext('webgl2') || canvas3d.getContext('experimental-webgl2');
+        gl_context = canvas3d.getContext('webgl2', {antialias: true}) || canvas3d.getContext('experimental-webgl2');
         if (!gl_context) {
             alert('Unable to initialize WebGL. Your browser or machine may not support it');
             return;
