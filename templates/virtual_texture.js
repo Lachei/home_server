@@ -45,21 +45,31 @@ const VirtualMap = () => {
         max_tiles: 0,
         v_tex_height: 0,
         v_tex_width: 0,
+        v_tex_coarse_width: 0,
+        v_tex_coarse_height: 0,
+        v_tex_detail_width: 0,
+        v_tex_detail_height: 0,
+        v_tex_detail_center_tile: {x: 0, y: 0},    // describes the center of the detail tiles in the most bottom tile layer (int coords)
+        v_tex_detail_level_thresh: 0,
         v_tex_extent: { min_lat: 0, max_lat: 0, min_lon: 0, max_lon: 0 },
         /** @type {{key: int}} */
         tiles_lookup_table: {}, // is a lookup table which maps a string containing "{lat}/{lon}/{width}" to an index
+        tiles_lookup_table_detail: {}, // is a lookup table which maps a string containing "{lat}/{lon}/{width}" to an index
         /** @type {TilesGpu} */
         tiles_storage_gpu: null,
         /** @type {WebGL2Buffer} */
         tiles_infos_buffer: null,
         /** @type {Array.<Tile>} */
         tiles_storage_cpu: [],
+        tiles_storage_cpu_detail: [],
         virtual_texture_byte_size: 0, // is determined according to the max_tiles parameter
         virtual_texture_rebuilt: false, // used to determine whether view has to be rerendered due to an updated virtual texture cache
         /** @type {Texture} */
         virtual_texture_gpu: null,
+        virtual_texture_gpu_detail: null,
         /** @type {WebGLFramebuffer} */
         virtual_texture_fb: null,
+        virtual_texture_detail_fb: null,
         virtual_texture_render_pipeline: null,
         /** @type {WebGL2RenderingContext} */
         gl_context: null,
@@ -82,22 +92,36 @@ const VirtualMap = () => {
             this.v_tex_width = v_tex_width;
             this.v_tex_height = v_tex_height;
             this.v_tex_extent = v_tex_extent;
+            this.v_tex_coarse_width = Math.min(1 << 11, v_tex_width);
+            this.v_tex_coarse_height = Math.min(1 << 11, v_tex_height);
+            this.v_tex_detail_width = Math.min(1 << 11, v_tex_width * 16 / this.v_tex_coarse_width);
+            this.v_tex_detail_height = Math.min(1 << 11, v_tex_height * 16 / this.v_tex_coarse_height);
+            this.v_tex_detail_level_thresh = Math.log2(this.v_tex_coarse_width);
+            console.log("Initializing a virtual map with the following parts:");
+            console.log(this);
             this.tiles_storage_gpu = TilesGpu().init(tile_width, tile_height, max_tiles, gl_context, texture_type);
             this.tiles_infos_buffer = gl_context.createBuffer();
             gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, this.tiles_infos_buffer);
-            gl_context.bufferData(gl_context.UNIFORM_BUFFER, new Int32Array(max_tiles * 4), gl_context.DYNAMIC_DRAW);
+            gl_context.bufferData(gl_context.UNIFORM_BUFFER, new Int32Array(max_tiles * 4 * 2), gl_context.DYNAMIC_DRAW);
             gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, null);
             this.virtual_texture_byte_size = Math.ceil(Math.ceil(Math.log2(max_tiles)) / 8); // get the bits required (log2) and then convert them to required bytes
+            const format = TextureTypes(gl_context).ui8r;   // always is 1 byte
             this.virtual_texture_gpu = gl_context.createTexture();
             gl_context.bindTexture(gl_context.TEXTURE_2D, this.virtual_texture_gpu);
-            const format = this.virtual_texture_byte_size == 1 ? TextureTypes(gl_context).ui8r : TextureTypes(gl_context).ui8rg;
             gl_context.texImage2D(gl_context.TEXTURE_2D, 0, format.format, v_tex_width, v_tex_height, 0, format.format_cpu || format.format, format.element_type, null);
             gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.NEAREST);
             gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.REPEAT);
             gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.REPEAT);
+            this.virtual_texture_gpu_detail = gl_context.createTexture();
+            gl_context.bindTexture(gl_context.TEXTURE_2D, this.virtual_texture_gpu_detail);
+            gl_context.texImage2D(gl_context.TEXTURE_2D, 0, format.format, v_tex_width, v_tex_height, 0, format.format_cpu || format.format, format.element_type, null);
+            gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.NEAREST);
             this.virtual_texture_fb = gl_context.createFramebuffer();
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, this.virtual_texture_fb);
             gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, this.virtual_texture_gpu, 0);
+            this.virtual_texture_detail_fb = gl_context.createFramebuffer();
+            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, this.virtual_texture_detail_fb);
+            gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, this.virtual_texture_gpu_detail, 0);
             const pipeline = initShaderProgram(gl_context,
                     `#version 300 es
                     uniform ivec4 bounds; // contains in xy the min and max x, and in zw min and max y
@@ -131,11 +155,40 @@ const VirtualMap = () => {
             // sorting the tile requests to have the highest detailed images last to guarantee that
             // detail images will have a later time stamp (important for correctly loading the lods)
             tile_requests.sort((a, b) => a.width > b.width);
-            let tile_width_bits = Math.log2(this.v_tex_width);
-            let c = 0;
+            // updating the center of the detail view according to the distance of the most detailed
+            // tile to the current detail view (such that it tries to stay centered)
+            const t = tile_request[tile_requests.length - 1];
+            const tile_width_bits = Math.log2(this.v_tex_width);
+            if (t.level >= this.v_tex_detail_level_thresh) {
+                let shift = tile_width_bits - tile_req.level;
+                let width = (1 << shift);
+                let final_x = t.x * width;
+                let final_y = t.y * width;
+                const c_x = final_x + .5 * width;
+                const c_y = final_y + .5 * width;
+                const detail_width = this.v_tex_detail_width;
+                const detail_height = this.v_tex_detail_height;
+                let center = this.v_tex_detail_center_tile;
+                // check if difference is outside the 75% center area -> recenter
+                if (Math.abs(c_x - center.x) > detail_width * .3 ||
+                    Math.abs(c_y - center.y) > detail_height * .3) {
+                    center.x = Math.floor(c_x);
+                    center.y = Math.floor(c_y);
+                    // go through all detail images and check if they have to be deleted
+                    let del_indices = [];
+                    let detail_tiles = this.tile_storage_cpu_detail;
+                    for (let i = 0; i < detail_tiles.length; ++i) {
+                        let cur_t = detail_tiles[i];
+                        if (Math.abs(cur_t.tile_x - center.x) + cur_t.width >= .5 * detail_width ||
+                            Math.abs(cur_t.tile_y - center.y) + cur_t.width >= .5 * detail_width)
+                            del_indices.push(i);
+                    }
+                    console.log("Deleting some detail tiles:");;
+                    console.log(del_indices);
+                    del_indices.foreach(i => this.drop_tile_at_index(i, false));
+                }
+            }
             for (tile_req of tile_requests) {
-                if (c++ >= this.max_tiles)
-                    continue;
                 if (tile_req.type != tile_request_type) {// ignore wrong type tiles
                     console.error("Wrong type for tile request, got type: " + String(tile_req.type));
                     continue;
@@ -152,19 +205,22 @@ const VirtualMap = () => {
                 }
                 let final_x = tile_req.x * width;
                 let final_y = tile_req.y * width;
+                const coarse = tile_req.level < this.v_tex_detail_level_thresh;
                 let lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
-                let already_loaded = lookup_table_string in this.tiles_lookup_table;
+                let tiles_storage = coarse ? this.tiles_storage_cpu: this.tiles_storage_cpu_detail;
+                let tiles_lookup = coarse ? this.tiles_lookup_table: this.tiles_lookup_table_detail;
+                let already_loaded = lookup_table_string in tiles_lookup;
                 // make space for a new tile if tile cache full
-                if (!already_loaded && this.tiles_storage_cpu.length >= this.max_tiles)
-                    this.drop_least_important_tiles(10);
+                if (!already_loaded && tiles_storage.length >= this.max_tiles)
+                    this.drop_least_important_tiles(10, coarse);
                 // add new tile to the storage
                 if (!already_loaded) {
-                    let i_gpu = this.tiles_storage_gpu.reserve_image_tile();
-                    let i_cpu = this.tiles_storage_cpu.length;
+                    let i_gpu = this.tiles_storage_gpu.reserve_image_tile(coarse);
+                    let i_cpu = tiles_storage.length;
                     if (i_gpu != i_cpu)
                         console.error("Added index mismatch for tiles");
-                    this.tiles_storage_cpu.push(Tile());
-                    let t = this.tiles_storage_cpu[i_cpu];
+                    tiles_storage.push(Tile());
+                    let t = tiles_storage[i_cpu];
                     t.init(
                         tile_req.url,
                         final_x,
@@ -174,11 +230,11 @@ const VirtualMap = () => {
                     )
                     if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height)
                         console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
-                    this.tiles_lookup_table[lookup_table_string] = i_cpu;
+                    tiles_lookup[lookup_table_string] = i_cpu;
                 }
                 // finally update the last use time
-                let i = this.tiles_lookup_table[lookup_table_string];
-                this.tiles_storage_cpu[i].last_use = Date.now();
+                let i = tiles_lookup[lookup_table_string];
+                tiles_storage[i].last_use = Date.now();
                 // the virtual texture is updated when a new image had to be loaded/was loaded (see image_i_loaded_callback)
             }
             console.log(this.tiles_lookup_table);
@@ -194,40 +250,70 @@ const VirtualMap = () => {
                 return;
             }
 
-            // filling virtual_texture_cpu -------------------------------------------
-            // let ordered_tiles = this.tiles_storage_cpu.map((x, i) => [x.last_use, i]).sort((a, b) => a[0] > b[0]);
+            // filling coarse virtual_texture_cpu -------------------------------------------
+            const gl = this.gl_context;
             let ordered_tiles = this.tiles_storage_cpu.map((x, i) => [x.width, i]).sort((a, b) => b[0] - a[0]);
-            this.gl_context.bindFramebuffer(this.gl_context.FRAMEBUFFER, this.virtual_texture_fb);
-            this.gl_context.viewport(0, 0, this.v_tex_width, this.v_tex_height);
-            this.gl_context.disable(this.gl_context.DEPTH_TEST);
-            this.gl_context.disable(this.gl_context.CULL_FACE);
-            this.gl_context.useProgram(this.virtual_texture_render_pipeline.program);
-            this.gl_context.uniform2i(this.virtual_texture_render_pipeline.uniforms.image_size, this.v_tex_width, this.v_tex_height);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.virtual_texture_fb);
+            gl.viewport(0, 0, this.v_tex_coarse_width, this.v_tex_coarse_height);
+            gl.disable(gl.DEPTH_TEST);
+            gl.disable(gl.CULL_FACE);
+            gl.useProgram(this.virtual_texture_render_pipeline.program);
+            gl.uniform2i(this.virtual_texture_render_pipeline.uniforms.image_size, this.v_tex_coarse_width, this.v_tex_coarse_height);
 
             // clear the whole image
-            this.gl_context.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, 0, this.v_tex_width, 0, this.v_tex_height);
-            this.gl_context.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, 0);
-            this.gl_context.drawArrays(this.gl_context.TRIANGLES, 0, 6);
+            gl.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, 0, this.v_tex_coarse_width, 0, this.v_tex_coarse_height);
+            gl.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
 
+            const s = this.v_tex_coarse_width / this.v_tex_width;
             for ([last_use, idx] of ordered_tiles) {
                 let tile = this.tiles_storage_cpu[idx];
                 if (!tile.data_uploaded_to_gpu) // ignore not uploaded tiles (will be updated later due to callback which calls this function in its final steps)
                     continue;
 
-                this.gl_context.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, tile.tile_x, tile.tile_x + tile.width, tile.tile_y, tile.tile_y + tile.width);
-                this.gl_context.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, idx + 1);
+                gl.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, tile.tile_x * s, (tile.tile_x + tile.width) * s, tile.tile_y * s, (tile.tile_y + tile.width) * s);
+                gl.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, idx + 1);
                 
-                this.gl_context.drawArrays(this.gl_context.TRIANGLES, 0, 6);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            }
+            // filling detail virtual_texture_cpu -------------------------------------------
+            ordered_tiles = this.tiles_storage_cpu_detail.map((x, i) => [x.width, i]).sort((a, b) => b[0] - a[0]);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.virtual_texture_detail_fb);
+            gl.viewport(0, 0, this.v_tex_detail_width, this.v_tex_detail_height);
+            gl.uniform2i(this.virtual_texture_render_pipeline.uniforms.image_size, this.v_tex_detail_width, this.v_tex_detail_height);
+
+            // clear the whole image
+            gl.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, 0, this.v_tex_detail_width, 0, this.v_tex_detail_height);
+            gl.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            const t_x = (x) => {return (x - this.v_tex_detail_center_tile.x) / this.v_tex_width * this.v_tex_detail_width;};
+            const t_y = (y) => {return (y - this.v_tex_detail_center_tile.y) / this.v_tex_width * this.v_tex_detail_width;};
+            for ([last_use, idx] of ordered_tiles) {
+                let tile = this.tiles_storage_cpu[idx];
+                if (!tile.data_uploaded_to_gpu) // ignore not uploaded tiles (will be updated later due to callback which calls this function in its final steps)
+                    continue;
+
+                gl.uniform4i(this.virtual_texture_render_pipeline.uniforms.bounds, t_x(tile.tile_x), t_x(tile.tile_x + tile.width), t_y(tile.tile_y), t_y(tile.tile_y + tile.width));
+                gl.uniform1ui(this.virtual_texture_render_pipeline.uniforms.index, idx + 1);
+                
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
             }
 
-            const gl = this.gl_context;
             // filling tiles_info_buffer_gpu with the tiles info
-            let tiles_info_cpu = new Int32Array(this.max_tiles * 4);
+            let tiles_info_cpu = new Int32Array(this.max_tiles * 4 * 2);
             for (let i = 0; i < this.tiles_storage_cpu.length; ++i) {
                 let tile = this.tiles_storage_cpu[i];
                 tiles_info_cpu[i * 4] = tile.tile_x;
                 tiles_info_cpu[i * 4 + 1] = tile.tile_y;
                 tiles_info_cpu[i * 4 + 2] = tile.width;
+            }
+            const off = this.max_tiles * 4;
+            for (let i = 0; i < this.tiles_storage_cpu_detail.length; ++i) {
+                let tile = this.tiles_storage_cpu_detail[i];
+                tiles_info_cpu[off + i * 4] = tile.tile_x;
+                tiles_info_cpu[off + i * 4 + 1] = tile.tile_y;
+                tiles_info_cpu[off + i * 4 + 2] = tile.width;
             }
             gl.bindBuffer(gl.UNIFORM_BUFFER, this.tiles_infos_buffer);
             gl.bufferData(gl.UNIFORM_BUFFER, tiles_info_cpu, gl.DYNAMIC_DRAW);
@@ -246,41 +332,45 @@ const VirtualMap = () => {
             this.tiles_storage_gpu.bind_to_shader(gl_texture_slot_texture);
         },
         /** @param {int} i Index of the element to drop, only removes from tiles_xxx member variables*/
-        drop_tile_at_index: function (i) {
+        drop_tile_at_index: function (i, coarse) {
             console.log(`Dropping tile ${this.tiles_storage_cpu[i].image.src} index ${i}`);
             console.log(`State before:`);
             console.log(this.tiles_lookup_table);
-            if (i >= this.tiles_storage_cpu.lengh) {
+            let tiles_storage = coarse ? this.tiles_storage_cpu: this.tiles_storage_cpu_detail;
+            let tiles_lookup = coarse ? this.tiles_lookup_table: this.tiles_lookup_table_detail;
+            if (i >= tiles_storage.lengh) {
                 log.error("tile to drop is not existing");
                 return;
             }
-            let lookup_table_string = this.tiles_storage_cpu[i].lookup_table_string;
-            if (this.tiles_lookup_table[lookup_table_string] != i)
-                console.error(`Index mismatch for delete: Found index ${this.ti8les_lookup_table[lookup_table_string]}`);
+            let lookup_table_string = tiles_storage[i].lookup_table_string;
+            if (tiles_lookup[lookup_table_string] != i)
+                console.error(`Index mismatch for delete: Found index ${tiles_lookup[lookup_table_string]}`);
             // remove from tiles_images
-            this.tiles_storage_cpu[i].deleted = true;
-            delete this.tiles_storage_cpu[i].image;
-            this.tiles_storage_cpu[i] = this.tiles_storage_cpu[this.tiles_storage_cpu.length - 1];
-            this.tiles_lookup_table[this.tiles_storage_cpu[i].lookup_table_string] = i;
-            this.tiles_storage_cpu.pop();
+            tiles_storage[i].deleted = true;
+            delete tiles_storage[i].image;
+            tiles_storage[i] = tiles_storage[tiles_storage.length - 1];
+            tiles_lookup[tiles_storage[i].lookup_table_string] = i;
+            tiles_storage.pop();
             // remove from tiles_storage
-            this.tiles_storage_gpu.drop_tile_at_index(i);
+            this.tiles_storage_gpu.drop_tile_at_index(i, coarse);
             // remove from lookup_table
-            delete this.tiles_lookup_table[lookup_table_string];
+            delete tiles_lookup[lookup_table_string];
             console.log(`State after:`);
-            console.log(this.tiles_lookup_table);
+            console.log(tiles_lookup);
             // console.info(`CPU: Dropped tile ${i} leaving ${this.tiles_storage_cpu.length} tiles`);
         },
         /** @param {int} n Number of tiles to drop from the tiles_xxx cache */
-        drop_least_important_tiles: function (n) {
+        drop_least_important_tiles: function (n, coarse) {
             if (!n) {
-                for (let i = this.tiles_storage_cpu.length - 1; i >= 0; --i)
-                    this.drop_tile_at_index(i);
+                const n = coarse ? this.tiles_storage_cpu.length: this.tiles_storage_cpu_detail.length;
+                for (let i = n - 1; i >= 0; --i)
+                    this.drop_tile_at_index(i, coarse);
             } else {
                 // gets for each tile in the cpu cache the priority and sorts it in ascending order
-                let sorted_prios = this.tiles_storage_cpu.map((x, i) => [x.get_priority(), i]).sort((a, b) => a[0] - b[0]);
+                let tiles = coarse ? this.tiles_storage_cpu: this.tiles_storage_cpu_detail;
+                let sorted_prios = tiles.map((x, i) => [x.get_priority(), i]).sort((a, b) => a[0] - b[0]);
                 for (let i = 0; i < n && i < sorted_prios.length; ++i)
-                    this.drop_tile_at_index(sorted_prios[i][1]);    // get the i-th least important tile and retrieve the index from it
+                    this.drop_tile_at_index(sorted_prios[i][1], coarse);    // get the i-th least important tile and retrieve the index from it
             }
             this.rebuild_virtual_texture();
         },
@@ -382,6 +472,7 @@ const TilesGpu = () => {
         type: tiles_gpu_type,
         // member variables
         length: 0,
+        length_detail: 0,
         tile_width: 0,
         tile_height: 0,
         max_size: 0,
@@ -398,7 +489,7 @@ const TilesGpu = () => {
         /**
          * @param {int} tile_width Tile width in pixels
          * @param {int} tile_height Tile height in pixels
-         * @param {int} max_size Max amounts of images
+         * @param {int} max_size Max amounts of images internally 2 times as many are stored for detail and coarse
          * @param {WebGL2RenderingContext} gl_context WeTile height in pixels
          */
         init: function (tile_width, tile_height, max_size, gl_context, texture_type) {
@@ -419,7 +510,7 @@ const TilesGpu = () => {
                 this.texture_type.format,
                 this.tile_width,
                 this.tile_height,
-                this.max_size,
+                this.max_size * 2,
                 0,
                 this.texture_type.format,
                 this.texture_type.element_type,
@@ -430,43 +521,53 @@ const TilesGpu = () => {
         },
         /** 
          * @param {int} n Drops the image color at index n and replaces the data with the data of the last tile, then pops the back 
+         * @param {bool} coarse If true then the first 255 images should be considered, else the last 255
          * @note Does not sync the data with the gpu, this has to be done in a call to upload_data_to_gpu
          */
-        drop_tile_at_index: function (n) {
+        drop_tile_at_index: function (n, coarse) {
             // swap last image to drop index and the pop (only do if the image is not the last one)
-            if (n < this.length - 1) {
+            const length = coarse ? this.length: this.length_detail;
+            if (n < length - 1) {
                 let bytes_per_image = this.texture_type.bytes_per_element * this.tile_width * this.tile_height;
                 let from_pos = (this.length - 1) * bytes_per_image;
+                if (!coarse) from_pos += this.max_size * bytes_per_image;
                 let data_from = new Uint8Array(this.texture_cpu.buffer, from_pos, bytes_per_image);
-                this.set_image_data(n, data_from);
+                this.set_image_data(n, data_from, coarse);
             }
             this.length -= 1;
             // console.info(`GPU: Dropped tile ${n} leaving ${this.length} tiles`);
         },
         /** 
          * @brief should be used before set_image_data is used to reserver a spot in the tile array 
+         * @param {bool} coarse Indicates whether a coarse or detailed tile has to be reserved
          * @return {int} Index which was reserved for the new tile
          */
-        reserve_image_tile: function () {
-            if (this.length >= this.max_size) {
+        reserve_image_tile: function (coarse) {
+            if (coarse && this.length >= this.max_size) {
                 console.error("set_image_data(): This TilesGpu object is already full, first delete a tile before pushing the image data");
                 return;
             }
-            return this.length++;
+            if (!coarse && this.length_detail >= this.max_size) {
+                console.error("set_image_data(): This TilesGpu object is already full, first delete a detail tile before pushing the image data");
+                return;
+            }
+            return coarse ? this.length++: this.length_detail++;
         },
         /** 
          * @brief Function to set data in the tile image. Automatically uses only the first x bytes from the
          * image to set if eg. the given data is from an rgba image and the stored images are only r images.
          * @param {int} i Index of the image that should be set
          * @param {ArrayBuffer} data Image data, needs to have the same byte size as the internal tile 
+         * @param {bool} coarse Indicates if the data is for the coarse data part or for a detail tile
          */
-        set_image_data: function (i, data) {
+        set_image_data: function (i, data, coarse) {
             console.log(`set_image_data(...) Setting data for image ${i}`);
-            if (i >= this.length) {
+            const length = coarse ? this.length: this.length_detail;
+            if (i >= length) {
                 console.error("set_image_data(): Image index to set is out of bounds");
                 return;
             }
-            let bytes_per_image = this.texture_type.bytes_per_element * this.tile_width * this.tile_height;
+            const bytes_per_image = this.texture_type.bytes_per_element * this.tile_width * this.tile_height;
             if (data.byteLength != bytes_per_image)
                 console.debug("set_image_data(): Image byte size mismatch, will stride through the given data");
             let stride = data.byteLength / bytes_per_image;
@@ -475,11 +576,12 @@ const TilesGpu = () => {
                 return;
             }
             let t = performance.now();
-            this.texture_cpu.set(data, bytes_per_image * i);
+            const offset = coarse ? 0: this.max_size;
+            this.texture_cpu.set(data, (i + offset) * bytes_per_image);
             this.gl_context.bindTexture(this.gl_context.TEXTURE_2D_ARRAY, this.texture_gpu);
             this.gl_context.texSubImage3D(
                 this.gl_context.TEXTURE_2D_ARRAY,
-                0, 0, 0, i,
+                0, 0, 0, i + offset,
                 this.tile_width,
                 this.tile_height,
                 1,
@@ -844,7 +946,7 @@ const Util = {
         return `
         uniform usampler2D virtual_${v_map_name}_index;
         uniform sampler2DArray virtual_${v_map_name};
-        uniform Infos_${v_map_name}{ivec4 virtual_${v_map_name}_infos[255];};
+        uniform Infos_${v_map_name}{ivec4 virtual_${v_map_name}_infos[510];};
         `;
     },
 
@@ -868,7 +970,7 @@ const Util = {
     },
 
     int32_to_tile_id: function (tiles) {
-        const to_obj = (x) => { return { level: (x >>> 28), x: ((x >>> 14) & 0x3fff), y: (x & 0x3fff) }; };
+        const to_obj = (x) => { return { level: (x >>> 24), x: ((x >>> 12) & 0xfff), y: (x & 0xfff) }; };
         return Array.from(tiles, x => to_obj(x));
     },
 
