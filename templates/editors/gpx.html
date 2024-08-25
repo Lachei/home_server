@@ -103,7 +103,8 @@
     let indices_render_objs = {}; // object containing render objects needed for index rendering
     let render_pipelines = null;
     let camera_center = null;
-    const cam_rot_speed = .001;
+    let camera_updated = false;
+    const cam_rot_speed = .002;
     const cam_dir_speed = Util.m_to_wgs_84_uv(1); // go forward 1 meter
     const up_dir = Vec4(0, 0, 1, 0);
     let camera_dir = 0;     // given in radians, 0 means dead north
@@ -116,50 +117,69 @@
     /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
     let virtual_street_map = null;
-    canvas3d.addEventListener("mousedown", (e) => { if (e.buttons == 1) canvas_drag_start = { x: e.screenX, y: e.screenY }; });
-    canvas3d.addEventListener("touchstart", (e) => {canvas_drag_start = { x: e.touches[0].screenX, y: e.touches[0].screenY, scale: e.scale}; });
-    canvas3d.addEventListener("mousemove", async (event) => {
+    const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
+    canvas3d.addEventListener("mousedown", (e) => { canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 ? "rotate": "unknown"}; });
+    canvas3d.addEventListener("touchstart", (e) => {
+                              let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
+                              let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
+                              canvas_drag_start = { x: x, y: y, 
+                              dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
+                              type: e.touches.length == 1 ? "move": "rotate"}; });
+    const move_camera = (cur_move) => {
         if (canvas_drag_start) {
-            let xDel = canvas_drag_start.x - event.screenX;
-            let yDel = canvas_drag_start.y - event.screenY;
-            camera_dir -= xDel * cam_rot_speed;
-            if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
-            if (camera_dir < 0) camera_dir += 2 * Math.PI;
-            camera_pitch += yDel * cam_rot_speed;
-            if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
-            if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
-            await draw_scene();
-            canvas_drag_start = { x: event.screenX, y: event.screenY };
-        }
-    });
-    canvas3d.addEventListener("touchmove", async (event) => {
-        if (canvas_drag_start) {
-            let xDel = canvas_drag_start.x - event.touches[0].screenX;
-            let yDel = canvas_drag_start.y - event.touches[0].screenY;
-            let sDel = canvas_drag_start.scale - event.scale;
-            camera_dir -= xDel * cam_rot_speed * 2;
-            if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
-            if (camera_dir < 0) camera_dir += 2 * Math.PI;
-            camera_pitch += yDel * cam_rot_speed * 2;
-            if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
-            if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
-            if (canvas_drag_start.scale) {
-                let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100));
-                camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * sDel));
+            let xDel = canvas_drag_start.x - cur_move.x;
+            let yDel = canvas_drag_start.y - cur_move.y;
+            let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+            let speed = cam_dir_speed * height_multiplier;
+            switch(canvas_drag_start.type) {
+            case "move":
+                camera_center.add(get_front_dir(camera_dir, camera_pitch).mul(speed * yDel));
+                camera_center.add(get_right_dir(camera_dir).mul(speed * xDel));
+                break;
+            case "rotate":
+                camera_dir -= xDel * cam_rot_speed;
+                if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
+                if (camera_dir < 0) camera_dir += 2 * Math.PI;
+                camera_pitch += yDel * cam_rot_speed;
+                if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
+                if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
+                if (cur_move.dist) {
+                    let zoomDel = canvas_drag_start.dist - cur_move.dist;
+                    camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel));
+                }
+                break;
+            default: console.error("Unknown move type " + canvas_drag_start.type);
             }
-            await draw_scene();
-            canvas_drag_start = { x: event.touches[0].screenX, y: event.touches[0].screenY, scale: event.scale };
-            e.preventDefault();
+            canvas_drag_start = cur_move;
+            camera_updated = true;
         }
+    };
+    canvas3d.addEventListener("mousemove", (e) => {
+        if (!canvas_drag_start)
+            return;
+        let cur_move = {x: e.screenX, y: e.screenY, type: canvas_drag_start.type || "unknown"};
+        move_camera(cur_move);
+        e.preventDefault();
+    });
+    canvas3d.addEventListener("touchmove", (e) => {
+        if (!canvas_drag_start)
+            return;
+        let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
+        let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
+        let cur_move = {x: x, y: y,
+            dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
+            type: canvas_drag_start.type || "unknown"};
+        move_camera(cur_move);
+        e.preventDefault();
     });
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("mouseleave", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchend", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
-    canvas3d.addEventListener("wheel", async (e) => {
+    canvas3d.addEventListener("wheel", (e) => {
         let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
         camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
-        await draw_scene();
+        draw_scene();
     });
     let pressed_keys = {};
     window.addEventListener("keydown", async (e) => {
@@ -186,7 +206,7 @@
         if (key === "e")
             camera_center.add(up_dir.multiply(speed));
         e.preventDefault();
-        await draw_scene();
+        camera_updated = true;
     });
 
     function filter_object(obj, callback) {
@@ -333,9 +353,10 @@
     function check_virtual_textures_update() {
         virtual_height_map.upload_loaded_images();
         virtual_street_map.upload_loaded_images();
-        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt) {
+        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || camera_updated) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
+            camera_updated = false;
             draw_scene();
         }
     }
@@ -541,7 +562,7 @@
         // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
-        draw_scene();
+        // draw_scene();
     }
     window.onload = init;
 
@@ -566,6 +587,8 @@
 
     // constructs the forward vector which also takes pitch into account (if looking down, the front vector should also go down
     const get_forward_dir = (dir, pitch) => { return Vec4(Math.sin(dir) * Math.cos(pitch), Math.cos(dir) * Math.cos(pitch), Math.sin(pitch), 0); };
+    // constructs the front vector which is always paralell to the ground (no z direction)
+    const get_front_dir = (dir, pitch) => { return Vec4(Math.sin(dir), Math.cos(dir), 0, 0); };
     // constructs the right vector which is independent of the viewing pitch
     const get_right_dir = (dir) => { return Vec4(Math.cos(-dir), Math.sin(-dir), 0, 0); }; // the - sign is added as the we interpret the direction to go clock-wise
 
