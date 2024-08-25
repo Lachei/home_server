@@ -71,8 +71,9 @@
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
             <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw" detail_switch_level="22">Satellit</option>
             <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern</option>
-            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18">Satellit bayern</option>
-            <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="18">Gelände relief</option>
+            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18" col_corr_b=".85">Satellit bayern</option>
+            <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
+            <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="14">Gelände relief</option>
         </select>
         {{/editor}}
     </div>
@@ -85,11 +86,11 @@
 <script type="text/javascript" src="{{&site_url}}/lin_alg.js"></script>
 <script type="text/javascript" src="{{&site_url}}/virtual_texture.js"></script>
 <script type="text/javascript" src="{{&site_url}}/pro4.js"></script>
-<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>
+<!--<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>-->
 <script>
-    var spector = new SPECTOR.Spector();
-    spector.displayUI();
-    spector.spyCanvases();
+    // var spector = new SPECTOR.Spector();
+    // spector.displayUI();
+    // spector.spyCanvases();
 
     const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
@@ -191,6 +192,11 @@
     function filter_object(obj, callback) {
         return Object.fromEntries(Object.entries(obj).filter(([key, val]) => callback(key, val)));
     };
+    
+    function get_selected_layer() {
+        let s = document.getElementById("layer_select");
+        return s.options[s.selectedIndex];
+    };
 
     // draws the scene with all loaded data
     function draw_scene() {
@@ -229,7 +235,14 @@
             gl.useProgram(program.program);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
             gl.uniform2f(program.uniform_locations.detail_corner, detail_corner.x, detail_corner.y);
-
+            if (program.uniform_locations.color_correction) { 
+                let selected_layer = get_selected_layer();
+                let b = 1.;
+                let attr = selected_layer.getAttribute("col_corr_b");
+                if (attr)
+                    b = parseFloat(attr);
+                gl.uniform4f(program.uniform_locations.color_correction, 1, 1, b, 1);
+            }
             
             // binding the virtual textures
             virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, gl.TEXTURE2, program.uniform_locations.virtual_heightmap_infos);
@@ -310,11 +323,10 @@
             `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
         ));
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
-        let s = document.getElementById("layer_select");
-        let layer = s.options[s.selectedIndex];
+        let layer = get_selected_layer();
         let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
             `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
-        ));
+        )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         console.log(decoded_tiles);
     }
@@ -379,7 +391,7 @@
             if (encoded_height == vec4(0))
                 height = 0.;
 
-            vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
+            vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
             //pos_cam_rel.xyz *= 1000.;
 
             gl_Position = view_proj * pos_cam_rel;
@@ -396,6 +408,7 @@
         in float height_m;
         uniform vec2 grid_offset_pos;
         uniform vec2 detail_corner;
+        uniform vec4 color_correction;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
         ${Util.glsl_wgs_84_to_uv()}
@@ -447,7 +460,7 @@
             // return;
 
             // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
-            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos);
+            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             out_col = vec4(surface_col.xyz, 1);
@@ -496,6 +509,7 @@
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
                     detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
+                    color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
                     virtual_heightmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index_detail'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
@@ -513,7 +527,7 @@
         };
 
         let c = Util.wgs_84_to_uv(47.80177, 12.89798);
-        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700));
+        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(1100 * 1.4));
 
         // linalg_tests();
         const is_mobile = navigator.userAgentData ? navigator.userAgentData.mobile: false;
@@ -521,7 +535,8 @@
         const max_depth = 18;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
-        virtual_street_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        const w_street = 1 << 20;
+        virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update);

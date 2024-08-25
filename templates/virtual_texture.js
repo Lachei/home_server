@@ -878,7 +878,7 @@ const Util = {
      * @param {double} height latitude in degress east/west
      */
     wgs_84_to_tile_idx: function (lat, lon, level) {
-        let uv = this.wgs_84_to_uv;
+        let uv = this.wgs_84_to_uv(lat, lon);
         return [Math.floor(uv[0] * (1 << level)), Math.floor(uv[1] * (1 << level))];
     },
     glsl_wgs_84_to_uv: function () {
@@ -925,11 +925,11 @@ const Util = {
     glsl_get_tile_index: function (v_map_name) {
         return `
         ivec3 get_tile_index() {
-            float mip_offset = 23.5;
+            float mip_offset = 25.5;
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
             float max_del = max(dot(dx, dx), dot(dy, dy));
-            int level = 17 - clamp(int(.5 * log2(max_del) + mip_offset), 0, 17);
+            int level = 19 - clamp(int(.5 * log2(max_del) + mip_offset), 0, 19);
             vec2 xy = (float(level < 11) * (grid_offset_pos + loc_pos)
                     + float(level >= 11) * ((grid_offset_pos - detail_corner) + loc_pos)) * float(1 << level);
 
