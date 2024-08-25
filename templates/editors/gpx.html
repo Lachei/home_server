@@ -66,12 +66,13 @@
         {{#editor}}
         <center id="title">GPX Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
-        <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles();">
-            <option base_url="tile.openstreetmap.org/" ending=".png">OSM</option>
-            <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png">CyclOSM</option>
-            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw">Satellit</option>
-            <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="">Straßen bayern</option>
-            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="">Satellit bayern</option>
+        <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles(null, true).drop_least_important_tiles(null, false);">
+            <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
+            <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
+            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw" detail_switch_level="22">Satellit</option>
+            <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern</option>
+            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18">Satellit bayern</option>
+            <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="18">Gelände relief</option>
         </select>
         {{/editor}}
     </div>
@@ -84,11 +85,11 @@
 <script type="text/javascript" src="{{&site_url}}/lin_alg.js"></script>
 <script type="text/javascript" src="{{&site_url}}/virtual_texture.js"></script>
 <script type="text/javascript" src="{{&site_url}}/pro4.js"></script>
-<!--<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>-->
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>
 <script>
-    // var spector = new SPECTOR.Spector();
-    // spector.displayUI();
-    // spector.spyCanvases();
+    var spector = new SPECTOR.Spector();
+    spector.displayUI();
+    spector.spyCanvases();
 
     const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
@@ -102,7 +103,7 @@
     let render_pipelines = null;
     let camera_center = null;
     const cam_rot_speed = .001;
-    const cam_dir_speed = Util.m_to_wgs_84_deg(1); // go forward 1 meter
+    const cam_dir_speed = Util.m_to_wgs_84_uv(1); // go forward 1 meter
     const up_dir = Vec4(0, 0, 1, 0);
     let camera_dir = 0;     // given in radians, 0 means dead north
     let camera_pitch = 0;   // given in radians, 0 means straight ahead, pi straight up -pi straight down
@@ -155,7 +156,7 @@
     canvas3d.addEventListener("touchend", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", async (e) => {
-        let height_multiplier = Math.max(1, 0.005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1100));
+        let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
         camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         await draw_scene();
     });
@@ -164,7 +165,8 @@
         if (document.querySelector(".preview:hover") == null)
             return;
 
-        let speed = cam_dir_speed;
+        let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        let speed = cam_dir_speed * height_multiplier;
         let key = e.key;
         if (key === key.toUpperCase()) {
             key = key.toLowerCase();
@@ -189,69 +191,6 @@
     function filter_object(obj, callback) {
         return Object.fromEntries(Object.entries(obj).filter(([key, val]) => callback(key, val)));
     };
-    // main function to load the images and update the image information buffer
-    let image_cache = {};   // image cache for detail height
-    async function update_cached_images() {
-        // checking detail image tiles which are available on the self hosted server
-        // the detail heights for the 4 closest tiles will always be tried to be kept in memory
-        let tiles_to_load = [];
-        for (let tile in heightmap_meta_data) {
-            // lat are the y coordinates
-            let lat_diff = Math.abs(heightmap_meta_data[tile].center_lat - camera_center.y());
-            // lon are the x coordinates
-            let lon_diff = Math.abs(heightmap_meta_data[tile].center_lon - camera_center.x());
-            if (lat_diff + lon_diff <= 1e3)
-                tiles_to_load.push(tile);
-            if (tiles_to_load.length >= 4)
-                break;
-        }
-        let all_tiles_to_load = tiles_to_load;
-        tiles_to_load = tiles_to_load.filter(v => v in image_cache === false)           // only load images that are not yet cached
-        if (tiles_to_load.length === 0)
-            return;
-        console.log("Loading the following tiles");
-        console.log(tiles_to_load);
-        tiles_to_load.forEach(v => {
-            let image = new Image();
-            image.onload = () => {
-                let texture = gl_context.createTexture();
-                gl_context.bindTexture(gl_context.TEXTURE_2D, texture);
-                gl_context.texImage2D(gl_context.TEXTURE_2D, 0, gl_context.RGBA, gl_context.RGBA, gl_context.UNSIGNED_BYTE, image);
-                gl_context.generateMipmap(gl_context.TEXTURE_2D);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_S, gl_context.CLAMP_TO_EDGE);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_WRAP_T, gl_context.CLAMP_TO_EDGE);
-                gl_context.texParameteri(gl_context.TEXTURE_2D, gl_context.TEXTURE_MIN_FILTER, gl_context.LINEAR_MIPMAP_LINEAR);
-                image_cache[v].texture = texture;
-                update_gpu_images();
-            }
-            image.src = location.origin + "/heightmap/" + v + "_h";
-            image_cache[v] = { image: image };
-        });
-        image_cache = filter_object(image_cache, (key, val) => all_tiles_to_load.find(v => key === v) != undefined); // remove unused cached stuff
-    }
-
-    // is called by the update_cached images when a new image was loaded
-    // the gpu textures are already uploaded, the main thing being updated here is the gpu array information
-    // which is then bound for expansion information
-    let image_gpu_infos = { textures: [], texture_infos: [] };
-    async function update_gpu_images() {
-        image_gpu_infos.textures = [];
-        image_gpu_infos.texture_infos = [];
-        let i = 0;
-        for (let image in image_cache) {
-            image_gpu_infos.texture_infos.push(i);                                  // texture index
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min_lat); // lat min
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max_lat); // lat max
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min_lon); // lon min
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max_lon); // lon max
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].min);     // height min
-            image_gpu_infos.texture_infos.push(heightmap_meta_data[image].max);     // height max
-            image_gpu_infos.textures.push(image_cache[image].texture);
-            i += 1;
-        }
-
-        await draw_scene();
-    }
 
     // draws the scene with all loaded data
     function draw_scene() {
@@ -259,16 +198,24 @@
             return;
 
         // creating the view matrix -------------------------------------------
-        //console.log("Cam dir: " + String(camera_dir) + ", pitch: " + String(camera_pitch));
+        const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
+        // grid jump for triangles is done all x meters
+        let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
         let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
+        at.entries[0] += camera_center.x() - grid_offset_pos.lat;
+        at.entries[1] += camera_center.y() - grid_offset_pos.lon;
         at.entries[2] += camera_center.z();
-        const view = LookAt(Vec4(0, 0, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
+        const view = LookAt(Vec4(camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
             at,
             up_dir);
         let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
 
         // drawing the tiles --------------------------------------------------
+        const overlap_width = (1 << 22) / virtual_height_map.v_tex_width;
+        const half_overlap = overlap_width >> 1;
+        let detail_corner = {x: Math.floor(camera_center.x() * virtual_height_map.v_tex_coarse_width - half_overlap) / virtual_height_map.v_tex_coarse_width, 
+                             y: Math.floor(camera_center.y() * virtual_height_map.v_tex_coarse_height - half_overlap) / virtual_height_map.v_tex_coarse_height};
         const draw_tiles = (gl, fb_size, program, framebuffer) => {
             gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
             gl.viewport(0, 0, fb_size.width, fb_size.height);
@@ -280,31 +227,28 @@
             gl.enable(gl.DEPTH_TEST);
 
             gl.useProgram(program.program);
-            // gl.uniform3fv(program.uniform_locations.cam_pos, [camera_center.x(), camera_center.y(), camera_center.z()]);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
+            gl.uniform2f(program.uniform_locations.detail_corner, detail_corner.x, detail_corner.y);
+
             
             // binding the virtual textures
-            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, program.uniform_locations.virtual_heightmap_infos);
+            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, gl.TEXTURE2, program.uniform_locations.virtual_heightmap_infos);
             gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
-            gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
+            gl.uniform1i(program.uniform_locations.virtual_heightmap_index_detail, 1);
+            gl.uniform1i(program.uniform_locations.virtual_heightmap, 2);
             gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_heightmap_infos, program.uniform_locations.virtual_heightmap_infos);
             if (program.uniform_locations.virtual_streetmap_infos < 10) {
-                virtual_street_map.bind_to_shader(gl.TEXTURE2, gl.TEXTURE3, program.uniform_locations.virtual_streetmap_infos);
-                gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 2);
-                gl.uniform1i(program.uniform_locations.virtual_streetmap, 3);
+                virtual_street_map.bind_to_shader(gl.TEXTURE3, gl.TEXTURE4, gl.TEXTURE5, program.uniform_locations.virtual_streetmap_infos);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 3);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap_index_detail, 4);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap, 5);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
             }
-
-            const base_width = Util.m_to_wgs_84_deg(100 * Math.max(1, .005 * (Util.wgs_84_ddeg_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
-            const width_multiplier = Math.cos(camera_center.x() / 180 * Math.PI); // x is latitude
-            // grid jump for triangles is done all x meters
-            let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
-            let grid_offset_pos_rel = Pos(grid_offset_pos.lat - camera_center.x(), grid_offset_pos.lon - camera_center.y());
             // drawing the hq center triangles
             gl.uniform1i(program.uniform_locations.tile_width, 100);
-            gl.uniform2f(program.uniform_locations.tile_width_m, base_width, width_multiplier);
+            gl.uniform2f(program.uniform_locations.tile_width_uv, base_width, 1.);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
-            gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, grid_offset_pos_rel.lat, grid_offset_pos_rel.lon);
+            gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
             gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
 
             // drawing the surrounding lower quality triangles
@@ -313,10 +257,9 @@
             gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
             let cur_d = base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
-            const draw_patch = (cam, cur_base_pos, tile_width_m) => {
-                const cur_base_pos_rel = Pos(cur_base_pos.lat - cam.x(), cur_base_pos.lon - cam.y());
-                gl.uniform2f(program.uniform_locations.tile_width_m, tile_width_m, width_multiplier);
-                gl.uniform2f(program.uniform_locations.grid_offset_pos, cur_base_pos.lat, cur_base_pos.lon);
+            const draw_patch = (cam, cur_base_pos, tile_width_uv) => {
+                const cur_base_pos_rel = Pos(cur_base_pos.lat - grid_offset_pos.lat, cur_base_pos.lon - grid_offset_pos.lon);
+                gl.uniform2f(program.uniform_locations.tile_width_uv, tile_width_uv, 1.);
                 gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
                 gl.drawArrays(gl.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
             };
@@ -344,11 +287,10 @@
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.fb);
         const width = indices_render_objs.width;
         const height = indices_render_objs.height;
-        let data = new Uint8Array(width * height * 4);   // reinterpret cast the uint8_t as uint16_t
-        // const sync = gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0);
         // gl_context.flush();
         // gl_context.clientWaitSync(sync, 0, 100e6);
         // gl_context.deleteSync(sync);
+        let data = new Uint8Array(width * height * 4);
         gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         let indices = new Uint32Array(data.buffer);
@@ -356,16 +298,24 @@
         needed_tiles.delete(0xffffffff);
         console.log(`checking tiles took ${performance.now() - start} milli`);
         let decoded_tiles = Util.int32_to_tile_id(needed_tiles);
-        let requested_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+        decoded_tiles = decoded_tiles.map(e  => {; return {
+            level: e.level,
+            x: (e.level >= 11 ? e.x + detail_corner.x * (1 << e.level) : e.x),
+            y: (e.level >= 11 ? e.y + detail_corner.y * (1 << e.level) : e.y)
+        }}
+        );
+        Util.add_missing_parent_tiles(decoded_tiles);
+        // max level for height is tile 15 
+        let requested_tiles = decoded_tiles.filter(tile => tile.level <= 15).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
             `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
         ));
-        virtual_height_map.update_needed_tiles(requested_tiles);
+        virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let s = document.getElementById("layer_select");
         let layer = s.options[s.selectedIndex];
         let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
             `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
         ));
-        virtual_street_map.update_needed_tiles(requested_streetmap_tiles);
+        virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         console.log(decoded_tiles);
     }
     function check_virtual_textures_update() {
@@ -397,7 +347,7 @@
         precision highp usampler2D;
 
         uniform int tile_width;             // tile width in vertex count, always equals the tile height
-        uniform vec2 tile_width_m;         // tile width in meters, always equals the tile height
+        uniform vec2 tile_width_uv;         // tile width in uvs
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
         uniform mat4 view_proj;
@@ -405,12 +355,10 @@
 
         // out variables
         out vec2 loc_pos;
-        flat out vec2 pos_off;
         out float height_m;
 
-        ${Util.glsl_wgs_84_m_to_ddeg()}
-        ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("heightmap")}
+        ${Util.glsl_wgs_84_m_to_uv()}
         
         void main(void) {
             int quad_idx = gl_VertexID % 6 / 3;
@@ -419,29 +367,22 @@
             int pos_off_y = gl_VertexID / 6 / tile_width;
             int x_offset = int(triangle_idx == 1) ^ quad_idx;
             int y_offset = int(triangle_idx == 2) ^ quad_idx;
-            float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_m.x;
-            float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_m.x;
+            float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_uv.x;
+            float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_uv.x;
             
-            loc_pos = vec2(x, y);
-            vec2 world_pos = vec2(x, y);
-            world_pos += grid_offset_pos;
-            pos_off = grid_offset_pos;
+            loc_pos = vec2(x, y) + grid_offset_pos_rel;
 
             // get height vertex height
-            vec2 uv_glob = wgs_84_to_uv(world_pos);
-            vec4 encoded_height = virtual_heightmap_load(uv_glob) * 256.;
+            vec4 encoded_height = virtual_heightmap_load(grid_offset_pos, loc_pos) * 256.;
             height_m = (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
-            float height = wgs_84_m_to_ddeg(height_m);
+            float height = wgs_84_m_to_uv(height_m);
             if (encoded_height == vec4(0))
                 height = 0.;
 
-            vec4 pos_cam_rel = vec4(x, y, height, 1.);
-            pos_cam_rel.xy += grid_offset_pos_rel;
-            pos_cam_rel.y *= tile_width_m.y; // accommodate for circumference reduction of earth depending on the latitude
+            vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
+            //pos_cam_rel.xyz *= 1000.;
 
             gl_Position = view_proj * pos_cam_rel;
-            // vs_tid = float(gl_VertexID / 3);
-            // w_pos = pos_cam_rel.xyz;
         }
         `;
         const fs = `#version 300 es
@@ -452,17 +393,19 @@
         precision highp usampler2D;
 
         in vec2 loc_pos;
-        flat in vec2 pos_off;
         in float height_m;
+        uniform vec2 grid_offset_pos;
+        uniform vec2 detail_corner;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
 
-        ${Util.glsl_wgs_84_m_to_ddeg()}
         ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("streetmap")}
         ${Util.glsl_get_tile_index()}
 
         out vec4 out_col; 
         void main(void) {
+            if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
+                discard;
             // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
             //     out_col = vec4(1., 0., 0., 1.);
             // else
@@ -503,8 +446,8 @@
             //     out_col = vec4(0.);
             // return;
 
-            vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
-            vec4 surface_col = virtual_streetmap_load(uv_glob);
+            // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
+            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos);
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             out_col = vec4(surface_col.xyz, 1);
@@ -523,18 +466,20 @@
         precision highp usampler2D;
 
         in vec2 loc_pos;
-        flat in vec2 pos_off;
 
-        ${Util.glsl_wgs_84_to_uv()}
-        ${Util.glsl_wgs_84_ddeg_to_m()}
-        ${Util.glsl_get_tile_index()}
+        uniform vec2 grid_offset_pos;
+        uniform vec2 detail_corner;
+
+        ${Util.glsl_get_tile_index("heightmap")}
 
         out vec4 out_col; 
         void main(void) {
+            if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
+                discard;
             ivec3 tile_id = get_tile_index();
             float div = float((1 << 8) - 1);
             out_col = vec4(float(tile_id.y & 0xff) / div,
-                           float(((tile_id.x & f) << 4) | ((tile_id.y >> 4) & 0xff)) / div,
+                           float(((tile_id.x & 0xf) << 4) | ((tile_id.y >> 8) & 0xf)) / div,
                            float((tile_id.x >> 4) & 0xff) / div, 
                            float(tile_id.z) / div);
         }
@@ -546,14 +491,17 @@
                 program: pipeline,
                 uniform_locations: {
                     tile_width: gl_context.getUniformLocation(pipeline, 'tile_width'),
-                    tile_width_m: gl_context.getUniformLocation(pipeline, 'tile_width_m'),
+                    tile_width_uv: gl_context.getUniformLocation(pipeline, 'tile_width_uv'),
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
+                    detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
+                    virtual_heightmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index_detail'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
                     virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
                     virtual_streetmap_index: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index'),
+                    virtual_streetmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index_detail'),
                     virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
                     virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
                 }
@@ -564,35 +512,15 @@
             idx: create_pipeline(gl_context, vs, fs_id),
         };
 
-        // let meta = await fetch(location.origin + "/heightmap/meta");
-        // heightmap_meta_data = await meta.json();
-        // // adding center info
-        // for (let key in heightmap_meta_data) {
-        //     let cur = heightmap_meta_data[key];
-        //     cur.center_lat = cur.min_lat + 500;
-        //     cur.center_lon = cur.min_lon + 500;
-        // }
-
-        camera_center = Vec4(47.80177, 12.89798, Util.m_to_wgs_84_deg(1100));
-        bayernatlas_data = {
-            meta: {
-                origin: [3927040, 5923328],
-                resolutions: [4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 0.5, 0.25],
-                tile_size: 256,     // factor that the resolution has to be multiplied by to get the per tile size
-                server_urls: ["intergeo31.bayernwolke.de/betty/", "intergeo32.bayernwolke.de/betty/", "intergeo33.bayernwolke.de/betty/", "intergeo34.bayernwolke.de/betty/", "intergeo35.bayernwolke.de/betty/", "intergeo36.bayernwolke.de/betty/", "intergeo37.bayernwolke.de/betty/", "intergeo38.bayernwolke.de/betty/", "intergeo39.bayernwolke.de/betty/", "intergeo40.bayernwolke.de/betty/"],
-                map_folder: "atkis/",
-                satellite_folder: "satdop40_komplett"
-            },
-            load_cache: [],         // is being filled with images that should be downloaded
-            loaded_images: [],
-        }
+        let c = Util.wgs_84_to_uv(47.80177, 12.89798);
+        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700));
 
         // linalg_tests();
         const is_mobile = navigator.userAgentData ? navigator.userAgentData.mobile: false;
         const is_chrome = navigator.userAgent.toLowerCase().indexOf("chrome") > -1;
         const max_depth = 18;
         const v_width = 1 << max_depth;
-        virtual_height_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         virtual_street_map = VirtualMap().init(v_width, v_width, { min_lat: 0, max_lat: 360, min_lon: -90, max_lon: 90 }, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);
@@ -610,11 +538,15 @@
         }
     };
 
+    const f64_to_f32 = (f) => {
+        return new Float32Array([f])[0];
+    }
+
     const get_detail_base_pos = (pos, divider) => {
         // as the tiles are always increasing by 100, and we want a transfer of triangles
         // in 1/10th of the difference, we round the pos to multiple of 100 in each direction
         const offset = divider * 5;
-        return Pos(Math.floor(pos.lat / divider) * divider - offset, Math.floor(pos.lon / divider) * divider - offset);
+        return Pos(f64_to_f32(Math.floor(pos.lat / divider) * divider - offset), f64_to_f32(Math.floor(pos.lon / divider) * divider - offset));
     };
 
     // constructs the forward vector which also takes pitch into account (if looking down, the front vector should also go down
@@ -695,7 +627,7 @@
             }
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, .0001, 100);
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, .0000001, 100);
         const screen_size_factor = 1;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
