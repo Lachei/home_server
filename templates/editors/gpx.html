@@ -137,16 +137,20 @@
                 camera_center.add(get_right_dir(camera_dir).mul(speed * xDel));
                 break;
             case "rotate":
+                if (cur_move.dist) {
+                    let zoomDel = canvas_drag_start.dist - cur_move.dist;
+                    if (Math.abs(zoomDel) > Math.abs(xDel) && Math.abs(zoomDel) > Math.abs(yDel)) {
+                        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel));
+                        xDel = 0;
+                        yDel = 0;
+                    }
+                }
                 camera_dir -= xDel * cam_rot_speed;
                 if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
                 if (camera_dir < 0) camera_dir += 2 * Math.PI;
                 camera_pitch += yDel * cam_rot_speed;
                 if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
                 if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
-                if (cur_move.dist) {
-                    let zoomDel = canvas_drag_start.dist - cur_move.dist;
-                    camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel));
-                }
                 break;
             default: console.error("Unknown move type " + canvas_drag_start.type);
             }
@@ -556,7 +560,7 @@
         const max_depth = 18;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
-        const w_street = 1 << 20;
+        const w_street = 1 << 19;
         virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);

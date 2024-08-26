@@ -189,7 +189,7 @@ const VirtualMap = () => {
                     console.error("Wrong type for tile request, got type: " + String(tile_req.type));
                     continue;
                 }
-                if (tile_req.level >= tile_width_bits) {
+                if (tile_req.level > tile_width_bits) {
                     console.warn("Too deep level for this virtual texture. Ignoring");
                     continue;
                 }
