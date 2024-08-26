@@ -140,15 +140,15 @@
                 if (cur_move.dist) {
                     let zoomDel = canvas_drag_start.dist - cur_move.dist;
                     if (Math.abs(zoomDel) > Math.abs(xDel) && Math.abs(zoomDel) > Math.abs(yDel)) {
-                        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel));
+                        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel * 2));
                         xDel = 0;
                         yDel = 0;
                     }
                 }
-                camera_dir -= xDel * cam_rot_speed;
+                camera_dir -= xDel * cam_rot_speed * 2;
                 if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
                 if (camera_dir < 0) camera_dir += 2 * Math.PI;
-                camera_pitch += yDel * cam_rot_speed;
+                camera_pitch += yDel * cam_rot_speed * 2;
                 if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
                 if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
                 break;
