@@ -393,8 +393,9 @@
         // out variables
         out vec2 loc_pos;
         out float height_m;
+        out vec3 normal;
 
-        ${Util.glsl_virtual_texture_load("heightmap")}
+        ${Util.glsl_virtual_heightmap_load()}
         ${Util.glsl_wgs_84_m_to_uv()}
         
         void main(void) {
@@ -410,11 +411,10 @@
             loc_pos = vec2(x, y) + grid_offset_pos_rel;
 
             // get height vertex height
-            vec4 encoded_height = virtual_heightmap_load(grid_offset_pos, loc_pos) * 256.;
-            height_m = (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos);
+            height_m = d_info.x;
+            normal = d_info.yzw;
             float height = wgs_84_m_to_uv(height_m);
-            if (encoded_height == vec4(0))
-                height = 0.;
 
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
             //pos_cam_rel.xyz *= 1000.;
@@ -431,6 +431,7 @@
 
         in vec2 loc_pos;
         in float height_m;
+        in vec3 normal;
         uniform vec2 grid_offset_pos;
         uniform vec2 detail_corner;
         uniform vec4 color_correction;
@@ -488,7 +489,7 @@
             vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
-            out_col = vec4(surface_col.xyz, 1);
+            out_col = vec4(surface_col.xyz, 1) * (dot(vec3(0, .7, .7), normal) * .5 + .5) + .1;
             // out_col = mix(out_col, vec4(1, 0, 0, 1), 1. - clamp(abs(height_m - floor(height_m / 20.) * 20. - 1.), 0., 1.));
             // float mist = pow((gl_FragCoord.z / gl_FragCoord.w), .3);
             // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33)));

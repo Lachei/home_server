@@ -163,6 +163,7 @@ const VirtualMap = () => {
             // tile to the current detail view (such that it tries to stay centered)
             const overlap_width = (1 << 22) / this.v_tex_width;
             const half_overlap = overlap_width >> 1;
+            let rebuild_vtex_needed = false;
             let tex_off = this.v_tex_detail_offset;
             let new_off_x = Math.floor(cam_center_uv.x * this.v_tex_coarse_width - half_overlap) / this.v_tex_coarse_width;
             let new_off_y = Math.floor(cam_center_uv.y * this.v_tex_coarse_height - half_overlap) / this.v_tex_coarse_height;
@@ -178,8 +179,10 @@ const VirtualMap = () => {
                 for (let i = detail_tiles.length - 1; i >= 0; --i) {
                     let cur_t = detail_tiles[i];
                     if (cur_t.tile_x + cur_t.width - new_off_x > detail_width ||
-                        cur_t.tile_y + cur_t.width - new_off_y > detail_width)
+                        cur_t.tile_y + cur_t.width - new_off_y > detail_width) {
                         this.drop_tile_at_index(i, false);
+                        rebuild_vtex_needed = true;
+                    }
                 }
             }
 
@@ -211,8 +214,10 @@ const VirtualMap = () => {
                 let tiles_lookup = coarse ? this.tiles_lookup_table: this.tiles_lookup_table_detail;
                 let already_loaded = lookup_table_string in tiles_lookup;
                 // make space for a new tile if tile cache full
-                if (!already_loaded && tiles_storage.length >= this.max_tiles)
+                if (!already_loaded && tiles_storage.length >= this.max_tiles) {
                     this.drop_least_important_tiles(10, coarse);
+                    rebuild_vtex_needed = true;
+                }
                 // add new tile to the storage
                 if (!already_loaded) {
                     let i_gpu = this.tiles_storage_gpu.reserve_image_tile(coarse);
@@ -235,6 +240,8 @@ const VirtualMap = () => {
                 let i = tiles_lookup[lookup_table_string];
                 tiles_storage[i].last_use = Date.now();
             }
+            if (rebuild_vtex_needed)
+                this.rebuild_virtual_texture();
             console.log(this.tiles_lookup_table);
         },
         /** @brief updates the virtual texture to contain the correct textures stored in the virtual texture cache */
@@ -974,6 +981,64 @@ const Util = {
             uv_loc = (uv_offset - vec2(offset)) + uv_loc;
             uv_loc /= width;
             return texture(virtual_${v_map_name}, vec3(uv_loc, float(index)));
+        }
+        `;
+    },
+    glsl_virtual_heightmap_load: function() {
+        return `
+        float decode_height(vec4 encoded_height){
+            if (encoded_height == vec4(0))
+                return 0.;
+            encoded_height *= 256.; 
+            return (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
+        }
+        // returns the height in x, and the normal in yzw
+        vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc) {
+            // check detail map for data
+            float v_tex_width = virtual_heightmap_index_off.z;
+            uint index = 0u;
+            vec2 detail = (uv_offset - virtual_heightmap_index_off.xy) + uv_loc;
+            detail *= v_tex_width / float(1 << 11);
+            if (detail == clamp(detail, vec2(0), vec2(1)))
+                index = texture(virtual_heightmap_index_detail, detail).x;
+            if (index != 0u)
+                index += 255u;   // detail tiles are in the last portion of the virtual map
+            else
+                index = texture(virtual_heightmap_index, uv_offset + uv_loc).x;
+
+            if (index == 0u)
+                return vec4(0);
+            index -= 1u;
+            ivec2 offset = ivec2(virtual_heightmap_infos[index].x, virtual_heightmap_infos[index].y);
+            float width = float(virtual_heightmap_infos[index].z);
+            uv_offset *= v_tex_width;
+            uv_loc *= v_tex_width;
+            uv_loc = (uv_offset - vec2(offset)) + uv_loc;
+            uv_loc /= width;
+            // fetching the surrounding pixels
+            uv_loc = uv_loc * 256.;    // assumes always a tile size of 256
+            ivec2 l10 = ivec2(uv_loc) + ivec2(1, 0);
+            ivec2 l01 = ivec2(uv_loc) + ivec2(0, 1);
+            ivec2 l11 = ivec2(uv_loc) + ivec2(1, 1);
+            if (l10.x == 256) l10.x -= 2;
+            if (l01.y == 256) l01.y -= 2;
+            if (l11.x == 256) l11.x -= 2;
+            if (l11.y == 256) l11.y -= 2;
+            float d00 = decode_height(texelFetch(virtual_heightmap, ivec3(ivec2(uv_loc), index), 0));
+            float d10 = decode_height(texelFetch(virtual_heightmap, ivec3(l10, index), 0));
+            float d01 = decode_height(texelFetch(virtual_heightmap, ivec3(l01, index), 0));
+            float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
+            vec2 a = uv_loc - floor(uv_loc);
+            // vec4 n00 = vec4(d00, cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d01 - d00))));
+            // vec4 n10 = vec4(d10, cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d11 - d10))));
+            // vec4 n01 = vec4(d01, cross(normalize(vec3(width / 4., 0, d11 - d11)), normalize(vec3(0, width / 4., d01 - d00))));
+            // vec4 n11 = vec4(d11, cross(normalize(vec3(width / 4., 0, d11 - d11)), normalize(vec3(0, width / 4., d11 - d10))));
+            // return (1. - a.y) * ((1. - a.x) * n00 + a.x * n10) +
+            //              a.y  * ((1. - a.x) * n01 + a.x * n11);
+            float d = (1. - a.y) * ((1. - a.x) * d00 + a.x * d10) +
+                            a.y  * ((1. - a.x) * d01 + a.x * d11);
+            vec3 n = cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d01 - d00)));
+            return vec4(d, normalize(n));
         }
         `;
     },
