@@ -992,6 +992,9 @@ const Util = {
             encoded_height *= 256.; 
             return (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
         }
+        vec3 create_normal(float dx, float dy, float w) {
+            return normalize(cross(vec3(w, 0, dx), vec3(0, w, dy)));
+        }
         // returns the height in x, and the normal in yzw
         vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc) {
             // check detail map for data
@@ -1017,28 +1020,29 @@ const Util = {
             uv_loc /= width;
             // fetching the surrounding pixels
             uv_loc = uv_loc * 256.;    // assumes always a tile size of 256
-            ivec2 l10 = ivec2(uv_loc) + ivec2(1, 0);
-            ivec2 l01 = ivec2(uv_loc) + ivec2(0, 1);
-            ivec2 l11 = ivec2(uv_loc) + ivec2(1, 1);
-            if (l10.x == 256) l10.x -= 2;
-            if (l01.y == 256) l01.y -= 2;
-            if (l11.x == 256) l11.x -= 2;
-            if (l11.y == 256) l11.y -= 2;
-            float d00 = decode_height(texelFetch(virtual_heightmap, ivec3(ivec2(uv_loc), index), 0));
+            ivec2 iuv_loc = ivec2(uv_loc);
+            ivec2 l10 = min(iuv_loc + ivec2(1, 0), ivec2(255));
+            ivec2 l01 = min(iuv_loc + ivec2(0, 1), ivec2(255));
+            ivec2 l11 = min(iuv_loc + ivec2(1, 1), ivec2(255));
+            // getting negative side pixels for better normals
+            ivec2 ln10 = max(iuv_loc + ivec2(-1, 0), ivec2(0));
+            ivec2 ln01 = max(iuv_loc + ivec2(0, -1), ivec2(0));
+            float d00 = decode_height(texelFetch(virtual_heightmap, ivec3(iuv_loc, index), 0));
             float d10 = decode_height(texelFetch(virtual_heightmap, ivec3(l10, index), 0));
             float d01 = decode_height(texelFetch(virtual_heightmap, ivec3(l01, index), 0));
             float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
+            float dn10 = decode_height(texelFetch(virtual_heightmap, ivec3(ln10, index), 0));
+            float dn01 = decode_height(texelFetch(virtual_heightmap, ivec3(ln01, index), 0));
+            if (iuv_loc.x == 255) d10 = 2. * d00 - dn10;
+            if (iuv_loc.y == 255) d01 = 2. * d00 - dn01;
+            if (iuv_loc.x == 255 && iuv_loc.y == 255) d11 = 2. * d11 - .5 * (dn01 + dn10);
+            if (iuv_loc.x == 0) dn10 = 2. * d00 - d10;
+            if (iuv_loc.y == 0) dn01 = 2. * d00 - d01;
             vec2 a = uv_loc - floor(uv_loc);
-            // vec4 n00 = vec4(d00, cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d01 - d00))));
-            // vec4 n10 = vec4(d10, cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d11 - d10))));
-            // vec4 n01 = vec4(d01, cross(normalize(vec3(width / 4., 0, d11 - d11)), normalize(vec3(0, width / 4., d01 - d00))));
-            // vec4 n11 = vec4(d11, cross(normalize(vec3(width / 4., 0, d11 - d11)), normalize(vec3(0, width / 4., d11 - d10))));
-            // return (1. - a.y) * ((1. - a.x) * n00 + a.x * n10) +
-            //              a.y  * ((1. - a.x) * n01 + a.x * n11);
-            float d = (1. - a.y) * ((1. - a.x) * d00 + a.x * d10) +
-                            a.y  * ((1. - a.x) * d01 + a.x * d11);
-            vec3 n = cross(normalize(vec3(width / 4., 0, d10 - d00)), normalize(vec3(0, width / 4., d01 - d00)));
-            return vec4(d, normalize(n));
+            float gw = width / 4.;
+            vec3 t = (1. - a.y) * ((1. - a.x) * vec3(d00, d00 - dn10, d00 - dn01) + a.x * vec3(d10, d10 - d00, d00 - dn01)) +
+                           a.y  * ((1. - a.x) * vec3(d01, d00 - dn10, d01 - d00 ) + a.x * vec3(d11, d10 - d00, d01 - d00 ));
+            return vec4(t.x, create_normal(t.y, t.z, gw));
         }
         `;
     },
