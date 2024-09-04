@@ -75,6 +75,8 @@
             <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
             <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="14">Gelände relief</option>
         </select>
+        <input id="enable_tile_update" type="checkbox" checked onchange="draw_scene();">
+        <label for="enable_tile_update">Karten tiles nachladen</label>
         {{/editor}}
     </div>
     <div id="content">
@@ -223,7 +225,9 @@
     };
 
     // draws the scene with all loaded data
-    function draw_scene() {
+    let data = null;
+    let in_flight = false;
+    async function draw_scene() {
         if (!gl_context)
             return;
 
@@ -290,7 +294,7 @@
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = 200;
+            const triangle_resolution = 800;
             gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
             let cur_d = base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
@@ -311,9 +315,11 @@
                 draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
             }
         }
+        const update_tiles = document.getElementById("enable_tile_update").checked;
         let start = performance.now();
         // draw tile ids ---------------------------------------
-        draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
+        if (update_tiles)
+            draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
@@ -321,15 +327,23 @@
         start = performance.now();
 
         // get needed tile indices
+        if (in_flight || !update_tiles)
+            return;
+        in_flight = true;
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.fb);
         const width = indices_render_objs.width;
         const height = indices_render_objs.height;
+        if (!data || data.byteLength < width * height * 4) {
+            console.debug("Recreating data buffer");
+            data = new Uint8Array(width * height * 4);
+        }
         // gl_context.flush();
         // gl_context.clientWaitSync(sync, 0, 100e6);
         // gl_context.deleteSync(sync);
-        let data = new Uint8Array(width * height * 4);
         gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
+        //await readPixelsAsync(gl_context, width, height, data)
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
+        start = performance.now();
         let indices = new Uint32Array(data.buffer);
         let needed_tiles = new Set(indices);
         needed_tiles.delete(0xffffffff);
@@ -353,14 +367,17 @@
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         console.log(decoded_tiles);
+        in_flight = false;
     }
     function check_virtual_textures_update() {
+        let start = performance.now();
         virtual_height_map.upload_loaded_images();
         virtual_street_map.upload_loaded_images();
         if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || camera_updated) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
             camera_updated = false;
+            console.log(`updating virtual textures took ${performance.now() - start} milli`);
             draw_scene();
         }
     }
@@ -445,6 +462,7 @@
         void main(void) {
             if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
                 discard;
+
             // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
             //     out_col = vec4(1., 0., 0., 1.);
             // else
@@ -568,6 +586,8 @@
         setInterval(check_virtual_textures_update);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         // draw_scene();
+        // console.log = () => {};
+        // console.info = () => {};
     }
     window.onload = init;
 

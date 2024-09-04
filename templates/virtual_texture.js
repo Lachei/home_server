@@ -1033,15 +1033,15 @@ const Util = {
             float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
             float dn10 = decode_height(texelFetch(virtual_heightmap, ivec3(ln10, index), 0));
             float dn01 = decode_height(texelFetch(virtual_heightmap, ivec3(ln01, index), 0));
-            if (iuv_loc.x == 255) d10 = 2. * d00 - dn10;
-            if (iuv_loc.y == 255) d01 = 2. * d00 - dn01;
-            if (iuv_loc.x == 255 && iuv_loc.y == 255) d11 = 2. * d11 - .5 * (dn01 + dn10);
+            vec2 a = uv_loc - floor(uv_loc);
+            if (iuv_loc.x == 255) {d10 = mix(d00, dn10, -1.); d11 = 3. * d00 - dn01 - dn10;}
+            if (iuv_loc.y == 255) {d01 = mix(d00, dn01, -1.); d11 = 3. * d00 - dn01 - dn10;}
+            if (iuv_loc.x == 255 && iuv_loc.y == 255) d11 = 3. * d11 - dn01 - dn10;
             if (iuv_loc.x == 0) dn10 = 2. * d00 - d10;
             if (iuv_loc.y == 0) dn01 = 2. * d00 - d01;
-            vec2 a = uv_loc - floor(uv_loc);
             float gw = width / 4.;
-            vec3 t = (1. - a.y) * ((1. - a.x) * vec3(d00, d00 - dn10, d00 - dn01) + a.x * vec3(d10, d10 - d00, d00 - dn01)) +
-                           a.y  * ((1. - a.x) * vec3(d01, d00 - dn10, d01 - d00 ) + a.x * vec3(d11, d10 - d00, d01 - d00 ));
+            vec3 t = mix(mix(vec3(d00, d00 - dn10, d00 - dn01), vec3(d10, d10 - d00, d00 - dn01), a.x), 
+                         mix(vec3(d01, d00 - dn10, d01 - d00 ), vec3(d11, d10 - d00, d01 - d00 ), a.x), a.y);
             return vec4(t.x, create_normal(t.y, t.z, gw));
         }
         `;
@@ -1114,4 +1114,40 @@ const Util = {
         console.log("virtual texture check successful");
         return true;
     }
+};
+
+const clientWaitAsync = function (gl, sync, flags = 0, interval_ms = 10) {
+    return new Promise(function (resolve, reject) {
+        var check = function () {
+            var res = gl.clientWaitSync(sync, flags, 0);
+            if (res == gl.WAIT_FAILED) {
+                reject();
+                return;
+            }
+            if (res == gl.TIMEOUT_EXPIRED) {
+                setTimeout(check, interval_ms);
+                return;
+            }
+            resolve();
+        };
+        check();
+    });
+};
+
+const readPixelsAsync = function (gl, width, height, buffer) {
+    const bufpak = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bufpak);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, buffer.byteLength, gl.STREAM_READ);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    var sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!sync) return null;
+    gl.flush();
+    return clientWaitAsync(gl, sync, 0, 10).then(function () {
+        gl.deleteSync(sync);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bufpak);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, buffer);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        gl.deleteBuffer(bufpak);
+        return buffer;
+    });
 };
