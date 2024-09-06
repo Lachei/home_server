@@ -77,6 +77,8 @@
         </select>
         <input id="enable_tile_update" type="checkbox" checked onchange="draw_scene();">
         <label for="enable_tile_update">Karten tiles nachladen</label>
+        <input id="triangle_resolution" type="number" min="10" max="1000" value="600">
+        <label for="triangle_resolution">Geometrieauflösung</label>
         {{/editor}}
     </div>
     <div id="content">
@@ -115,7 +117,6 @@
     let camera_orthographic = null;
     let camera_interpolation = 0; // interpolation value between orthographic and projection mapping (0 means full projection, 1 means full orthographic)
     let heightmap_meta_data = null;
-    let bayernatlas_data = null;
     /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
     let virtual_street_map = null;
@@ -294,15 +295,42 @@
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = 800;
-            gl.uniform1i(program.uniform_locations.tile_width, triangle_resolution);
+            const triangle_resolution = + document.getElementById("triangle_resolution").value;
             let cur_d = base_width;
+            const center_triangles_per_width = 100 / base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
+            const inside_view = (base_pos, width) => {
+                const x = base_pos.lat;
+                const y = base_pos.lon;
+                let p1 = view_projection.multiply(Vec4(x, y));
+                let p2 = view_projection.multiply(Vec4(x + width, y));
+                let p3 = view_projection.multiply(Vec4(x, y + width));
+                let p4 = view_projection.multiply(Vec4(x + width, y + width));
+                p1.mul(1 / p1.w());
+                p2.mul(1 / p2.w());
+                p3.mul(1 / p3.w());
+                p4.mul(1 / p4.w());
+                if (p1.z() < 0 && p2.z() < 0 && p3.z() < 0 && p4.z() < 0) return false;
+                if (p1.z() > 1 && p2.z() > 1 && p3.z() > 1 && p4.z() > 1) return false;
+
+                if (p1.x() < -1 && p2.x() < -1 && p3.x() < -1 && p4.x() < -1) return false;
+                if (p1.x() > 1 && p2.x() > 1 && p3.x() > 1 && p4.x() > 1) return false;
+
+                // if (p1.y() < -1 && p2.y() < -1 && p3.y() < -1 && p4.y() < -1) return false;
+                // if (p1.y() > 1 && p2.y() > 1 && p3.y() > 1 && p4.y() > 1) return false;
+                return true;
+            };
+            let draw_count = 0;
             const draw_patch = (cam, cur_base_pos, tile_width_uv) => {
                 const cur_base_pos_rel = Pos(cur_base_pos.lat - grid_offset_pos.lat, cur_base_pos.lon - grid_offset_pos.lon);
+                if (!inside_view(cur_base_pos_rel, tile_width_uv))
+                    return;
+                ++draw_count;
+                const cur_triangles = Math.round(Math.min(center_triangles_per_width, triangle_resolution / tile_width_uv) * tile_width_uv);
+                gl.uniform1i(program.uniform_locations.tile_width, cur_triangles);
                 gl.uniform2f(program.uniform_locations.tile_width_uv, tile_width_uv, 1.);
                 gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
-                gl.drawArrays(gl.TRIANGLES, 0, 6 * triangle_resolution * triangle_resolution);
+                gl.drawArrays(gl.TRIANGLES, 0, 6 * cur_triangles * cur_triangles);
             };
             for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
                 draw_patch(camera_center, cur_base_pos, cur_d);
@@ -314,6 +342,7 @@
                 draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
             }
+            console.log("Drew " + draw_count + "tiles");
         }
         const update_tiles = document.getElementById("enable_tile_update").checked;
         let start = performance.now();
@@ -340,8 +369,8 @@
         // gl_context.flush();
         // gl_context.clientWaitSync(sync, 0, 100e6);
         // gl_context.deleteSync(sync);
-        gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
-        //await readPixelsAsync(gl_context, width, height, data)
+        // gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
+        await readPixelsAsync(gl_context, width, height, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         start = performance.now();
         let indices = new Uint32Array(data.buffer);
@@ -357,8 +386,10 @@
         );
         Util.add_missing_parent_tiles(decoded_tiles);
         // max level for height is tile 15 
-        let requested_tiles = decoded_tiles.filter(tile => tile.level <= 15).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
-            `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`
+        const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
+        let requested_tiles = decoded_tiles.filter(tile => tile_on_minifuzi(tile) || tile.level <= 15).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+            !tile_on_minifuzi(tile) ? `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`:
+                                   `${location.origin}/heightmap/${tile.level}/${tile.x}/${tile.y}`
         ));
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let layer = get_selected_layer();
@@ -430,7 +461,7 @@
             // get height vertex height
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos);
             height_m = d_info.x;
-            n_dot_l = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .1;
+            n_dot_l = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             float height = wgs_84_m_to_uv(height_m);
 
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
@@ -508,9 +539,9 @@
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             out_col = vec4(surface_col.xyz, 1) * n_dot_l;
-            // out_col = mix(out_col, vec4(1, 0, 0, 1), 1. - clamp(abs(height_m - floor(height_m / 20.) * 20. - 1.), 0., 1.));
-            // float mist = pow((gl_FragCoord.z / gl_FragCoord.w), .3);
-            // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33)));
+            // out_col = mix(out_col, vec4(1, .5, 0, 1), pow(1. - clamp(abs(height_m - floor(height_m / 10.) * 10. - 1.), 0., 1.), 16.));
+            // float mist = min(pow((gl_FragCoord.z / gl_FragCoord.w), .4) * 10., 1.);
+            // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33))) * 1.5;
             // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
         }
         `;
@@ -571,11 +602,12 @@
         };
 
         let c = Util.wgs_84_to_uv(47.80177, 12.89798);
-        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(1100 * 1.4));
+        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700 * 1.4));
 
         // linalg_tests();
-        const is_mobile = navigator.userAgentData ? navigator.userAgentData.mobile: false;
-        const is_chrome = navigator.userAgent.toLowerCase().indexOf("chrome") > -1;
+        const is_mobile = 'ontouchstart' in document.documentElement;
+        if (is_mobile)
+            document.getElementById("triangle_resolution").value = 100;
         const max_depth = 18;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
@@ -585,6 +617,10 @@
         // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
+        
+        heightmap_meta_data = await (await fetch(location.origin + "/heightmap/meta")).json();
+        // adding a set for all the available tiles
+        heightmap_meta_data.tiles_set = new Set(heightmap_meta_data.tiles);
         // draw_scene();
         // console.log = () => {};
         // console.info = () => {};

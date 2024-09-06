@@ -362,18 +362,34 @@ int main(int argc, const char** argv) {
     // Map loading (read only and currently does not need authentication)
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/heightmap/meta")([](const crow::request& req) {
-        std::string filepath = "data/heightmaps/meta.json";
-        if (!std::filesystem::exists(filepath))
-            return crow::response{"{error: \"The hieghtmap meta file could not be found\"}"};
+        // the tiles are already string encoded for faster processing
+        // on the website side)
+        static nlohmann::json meta = [](){  // single instantiate on first call
+            std::vector<std::string> tiles;
+            for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
+                if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".png") {
+                    // finding the 2 last / from the back
+                    std::string_view string_view = dir_entry.path().c_str();
+                    string_view = string_view.substr(0, string_view.find_last_of("."));
+                    int slash_count = 0;
+                    auto c = string_view.end() - 1;
+                    for (; c >= string_view.begin(); --c) {
+                        if (*c == '/') ++slash_count;
+                        if (slash_count >= 3) break;
+                    }
+                    tiles.emplace_back(c + 1, string_view.end());
+                }
+            }
+            return nlohmann::json{{"tiles", std::move(tiles)}};
+        }();
 
-        crow::response res;
-        res.set_static_file_info(filepath);
+        crow::response res{meta.dump()};
         return res;
     });
-    CROW_ROUTE(app, "/heightmap/<string>")([](const crow::request& req, const std::string& tile) {
-        std::string filepath = "data/heightmaps/" + tile + ".jpg";
+    CROW_ROUTE(app, "/heightmap/<path>")([](const crow::request& req, const std::string& tile) {
+        std::string filepath = "data/tiles/" + tile + ".png";
         if (!std::filesystem::exists(filepath))
-            return crow::response{"{error: \"The hieghtmap could not be found\"}"};
+            return crow::response{404, "{error: \"The heightmap could not be found\"}"};
 
         crow::response res;
         res.set_static_file_info(filepath);

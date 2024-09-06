@@ -989,7 +989,7 @@ const Util = {
         float decode_height(vec4 encoded_height){
             if (encoded_height == vec4(0))
                 return 0.;
-            encoded_height *= 256.; 
+            encoded_height = encoded_height * 255.; 
             return (encoded_height.r * 256. + encoded_height.g + encoded_height.b / 256.) - 32768.;
         }
         vec3 create_normal(float dx, float dy, float w) {
