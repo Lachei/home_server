@@ -302,14 +302,23 @@
             const inside_view = (base_pos, width) => {
                 const x = base_pos.lat;
                 const y = base_pos.lon;
+                const z = Util.m_to_wgs_84_uv(5000 * 1.4);
                 let p1 = view_projection.multiply(Vec4(x, y));
                 let p2 = view_projection.multiply(Vec4(x + width, y));
                 let p3 = view_projection.multiply(Vec4(x, y + width));
                 let p4 = view_projection.multiply(Vec4(x + width, y + width));
+                let p1u = view_projection.multiply(Vec4(x, y, z));
+                let p2u = view_projection.multiply(Vec4(x + width, y, z));
+                let p3u = view_projection.multiply(Vec4(x, y + width, z));
+                let p4u = view_projection.multiply(Vec4(x + width, y + width), z);
                 p1.mul(1 / p1.w());
                 p2.mul(1 / p2.w());
                 p3.mul(1 / p3.w());
                 p4.mul(1 / p4.w());
+                p1u.mul(1 / p1u.w());
+                p2u.mul(1 / p2u.w());
+                p3u.mul(1 / p3u.w());
+                p4u.mul(1 / p4u.w());
                 if (p1.z() < 0 && p2.z() < 0 && p3.z() < 0 && p4.z() < 0) return false;
                 if (p1.z() > 1 && p2.z() > 1 && p3.z() > 1 && p4.z() > 1) return false;
 
@@ -317,9 +326,10 @@
                 if (p1.x() > 1 && p2.x() > 1 && p3.x() > 1 && p4.x() > 1) return false;
 
                 // if (p1.y() < -1 && p2.y() < -1 && p3.y() < -1 && p4.y() < -1) return false;
-                // if (p1.y() > 1 && p2.y() > 1 && p3.y() > 1 && p4.y() > 1) return false;
+                // if (p1u.y() > 1 && p2u.y() > 1 && p3u.y() > 1 && p4u.y() > 1) return false;
                 return true;
             };
+            let i = inside_view({lat: 0, lon: 0}, base_width);
             let draw_count = 0;
             const draw_patch = (cam, cur_base_pos, tile_width_uv) => {
                 const cur_base_pos_rel = Pos(cur_base_pos.lat - grid_offset_pos.lat, cur_base_pos.lon - grid_offset_pos.lon);
@@ -465,7 +475,6 @@
             float height = wgs_84_m_to_uv(height_m);
 
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
-            //pos_cam_rel.xyz *= 1000.;
 
             gl_Position = view_proj * pos_cam_rel;
         }
@@ -726,7 +735,7 @@
             }
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, .0000001, 100);
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, 1e-10, 100);
         const screen_size_factor = 1;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
