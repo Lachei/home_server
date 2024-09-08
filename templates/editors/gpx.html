@@ -735,7 +735,7 @@
             }
         }
         // create camera projection matrices
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, 1e-10, 100);
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, 5e-8, .1);
         const screen_size_factor = 1;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
