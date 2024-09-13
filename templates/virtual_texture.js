@@ -317,6 +317,13 @@ const VirtualMap = () => {
                 tiles_info_cpu[i * 4] = tile.tile_x;
                 tiles_info_cpu[i * 4 + 1] = tile.tile_y;
                 tiles_info_cpu[i * 4 + 2] = tile.width;
+                // store parent in the last element
+                const parent_width = tile.width << 1;
+                const parent_x = Math.floor(tile.tile_x / parent_width) * parent_width;
+                const parent_y = Math.floor(tile.tile_y / parent_width) * parent_width;
+                const lookup_str = CoordinateMappings.coords_to_lookup_string(parent_x, parent_y, parent_width);
+                tiles_info_cpu[i * 4 + 3] = lookup_str in this.tiles_lookup_table ? this.tiles_lookup_table[lookup_str]
+                                                                                  : -1;
             }
             const off = this.max_tiles * 4;
             for (let i = 0; i < this.tiles_storage_cpu_detail.length; ++i) {
@@ -324,6 +331,14 @@ const VirtualMap = () => {
                 tiles_info_cpu[off + i * 4] = tile.tile_x;
                 tiles_info_cpu[off + i * 4 + 1] = tile.tile_y;
                 tiles_info_cpu[off + i * 4 + 2] = tile.width;
+                // store parent in the last element
+                const parent_width = tile.width << 1;
+                const parent_x = Math.floor(tile.tile_x / parent_width) * parent_width;
+                const parent_y = Math.floor(tile.tile_y / parent_width) * parent_width;
+                const lookup_str = CoordinateMappings.coords_to_lookup_string(parent_x, parent_y, parent_width);
+                tiles_info_cpu[off + i * 4 + 3] = lookup_str in this.tiles_lookup_table_detail ? this.max_tiles + this.tiles_lookup_table_detail[lookup_str] :
+                                                  lookup_str in this.tiles_lookup_table        ? this.tiles_lookup_table[lookup_str]
+                                                                                               : -1;
             }
             gl.bindBuffer(gl.UNIFORM_BUFFER, this.tiles_infos_buffer);
             gl.bufferData(gl.UNIFORM_BUFFER, buffer, gl.DYNAMIC_DRAW);
@@ -928,15 +943,21 @@ const Util = {
         }
         `;
     },
-
+    glsl_calc_level: function () {
+        return `
+        float get_level(float d2) {
+            float mip_offset = 25.5;
+            return 19. - clamp(.5 * log2(d2) + mip_offset, 0., 19.);
+        }
+        `
+    },
     glsl_get_tile_index: function (v_map_name) {
         return `
         ivec3 get_tile_index() {
-            float mip_offset = 25.5;
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
             float max_del = max(dot(dx, dx), dot(dy, dy));
-            int level = 19 - clamp(int(.5 * log2(max_del) + mip_offset), 0, 19);
+            int level = int(get_level(max_del));
             vec2 xy = (float(level < 11) * (grid_offset_pos + loc_pos)
                     + float(level >= 11) * ((grid_offset_pos - detail_corner) + loc_pos)) * float(1 << level);
 
@@ -996,7 +1017,7 @@ const Util = {
             return normalize(cross(vec3(w, 0, dx), vec3(0, w, dy)));
         }
         // returns the height in x, and the normal in yzw
-        vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc) {
+        vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc, int level) {
             // check detail map for data
             float v_tex_width = virtual_heightmap_index_off.z;
             uint index = 0u;
@@ -1012,6 +1033,9 @@ const Util = {
             if (index == 0u)
                 return vec4(0);
             index -= 1u;
+            for(int cur_l = 18 - int(log2(float(virtual_heightmap_infos[index].z))); 
+                cur_l > level && cur_l >= 0 && virtual_heightmap_infos[index].w >= 0; 
+                --cur_l, index = uint(virtual_heightmap_infos[index].w));
             ivec2 offset = ivec2(virtual_heightmap_infos[index].x, virtual_heightmap_infos[index].y);
             float width = float(virtual_heightmap_infos[index].z);
             uv_offset *= v_tex_width;

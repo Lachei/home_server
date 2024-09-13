@@ -291,6 +291,7 @@
             gl.uniform2f(program.uniform_locations.tile_width_uv, base_width, 1.);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
+            gl.uniform2i(program.uniform_locations.tile_p, 0, 0);
             gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
 
             // drawing the surrounding lower quality triangles
@@ -343,13 +344,21 @@
                 gl.drawArrays(gl.TRIANGLES, 0, 6 * cur_triangles * cur_triangles);
             };
             for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
+                gl.uniform2i(program.uniform_locations.tile_p, -1, -1);
                 draw_patch(camera_center, cur_base_pos, cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, 0, -1);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, 1, -1);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, -1, 0);
                 draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + cur_d), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, 1, 0);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + cur_d), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, -1, 1);
                 draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + 2 * cur_d), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, 0, 1);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
+                gl.uniform2i(program.uniform_locations.tile_p, 0, 1);
                 draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
             }
             console.log("Drew " + draw_count + "tiles");
@@ -445,6 +454,7 @@
         uniform vec2 tile_width_uv;         // tile width in uvs
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
+        uniform ivec2 tile_p;               // tile local index (-1 left, -1 top, 1 right, 1 bottom)
         uniform mat4 view_proj;
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
@@ -453,6 +463,7 @@
         out float height_m;
         out float n_dot_l;
 
+        ${Util.glsl_calc_level()}
         ${Util.glsl_virtual_heightmap_load()}
         ${Util.glsl_wgs_84_m_to_uv()}
         
@@ -463,13 +474,23 @@
             int pos_off_y = gl_VertexID / 6 / tile_width;
             int x_offset = int(triangle_idx == 1) ^ quad_idx;
             int y_offset = int(triangle_idx == 2) ^ quad_idx;
-            float x = float(pos_off_x + x_offset) / float(tile_width) * tile_width_uv.x;
-            float y = float(pos_off_y + y_offset) / float(tile_width) * tile_width_uv.x;
+            float x = float(pos_off_x + x_offset) / float(tile_width - 1) * tile_width_uv.x;
+            float y = float(pos_off_y + y_offset) / float(tile_width - 1) * tile_width_uv.x;
             
             loc_pos = vec2(x, y) + grid_offset_pos_rel;
 
             // get height vertex height
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos);
+            // float du = length(loc_pos) * 1e-7;
+            // if ((pos_off_x == 0 && (tile_p.x == -1 || tile_p == ivec2(0))) 
+            //     || (pos_off_x == tile_width - 1 && (tile_p.x == 1 || tile_p == ivec2(0))) 
+            //     || (pos_off_y == 0 && (tile_p.y == -1 || tile_p == ivec2(0))) 
+            //     || (pos_off_y == tile_width - 1 && (tile_p.y == 1 || tile_p == ivec2(0))))
+            //     du *= 2.;
+            // make local height readout pos snap to cur grid size(should avoid flimmering)
+            // float del = tile_width_uv.x / float(tile_width - 1);
+            // vec2 snap_pos_off = floor(grid_offset_pos / del) * del;
+            // vec2 snap_pos_loc = floor((loc_pos) / del) * del + (grid_offset_pos - snap_pos_off);
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18); // int(get_level(pow(du, 3.))));
             height_m = d_info.x;
             n_dot_l = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             float height = wgs_84_m_to_uv(height_m);
@@ -493,9 +514,12 @@
         uniform vec2 detail_corner;
         uniform vec4 color_correction;
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
+        ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
         ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("streetmap")}
+        ${Util.glsl_virtual_heightmap_load()}
+        ${Util.glsl_calc_level()}
         ${Util.glsl_get_tile_index()}
 
         out vec4 out_col; 
@@ -547,7 +571,9 @@
             vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
-            out_col = vec4(surface_col.xyz, 1) * n_dot_l;
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18); // int(get_level(pow(du, 3.))));
+            float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
+            out_col = vec4(surface_col.xyz, 1) * nl;
             // out_col = mix(out_col, vec4(1, .5, 0, 1), pow(1. - clamp(abs(height_m - floor(height_m / 10.) * 10. - 1.), 0., 1.), 16.));
             // float mist = min(pow((gl_FragCoord.z / gl_FragCoord.w), .4) * 10., 1.);
             // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33))) * 1.5;
@@ -567,6 +593,7 @@
         uniform vec2 grid_offset_pos;
         uniform vec2 detail_corner;
 
+        ${Util.glsl_calc_level()}
         ${Util.glsl_get_tile_index("heightmap")}
 
         out vec4 out_col; 
@@ -591,6 +618,7 @@
                     tile_width_uv: gl_context.getUniformLocation(pipeline, 'tile_width_uv'),
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
+                    tile_p: gl_context.getUniformLocation(pipeline, 'tile_p'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
                     detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
