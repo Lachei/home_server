@@ -27,7 +27,7 @@ namespace data_util
                 {"name", p.filename()},
                 {"size", e.is_directory() ? 0: e.file_size()},
                 {"changed_by", "Nobody"},
-                {"change_date", to_json_date_string(std::chrono::time_point_cast<std::chrono::utc_clock::duration>(std::chrono::utc_clock::from_sys(std::chrono::file_clock::to_sys(e.last_write_time()))))},
+                {"change_date", to_json_date_string(std::chrono::file_clock::to_utc(e.last_write_time()))},
                 {"full_path", p.string().substr(base.length())}
             });
         }

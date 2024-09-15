@@ -63,11 +63,11 @@ int file_check()
     {
         using namespace std::chrono;
         constexpr auto s = "/home/lachei/Dokumente/github/home_server/index.html";
-        auto t = std::filesystem::last_write_time(s);
-        auto sys_t = file_clock::to_sys(t);
-        auto utc_t = utc_clock::from_sys(sys_t);
-        auto utc_c = time_point_cast<utc_clock::duration>(utc_t);
-        std::cout << "file_time" << t << " , sys_t " << sys_t << " , utc_t " << utc_t << " , utc_c " << utc_c << std::endl;
+        // auto t = std::filesystem::last_write_time(s);
+        // auto sys_t = file_clock::to_sys(t);
+        // auto utc_t = utc_clock::from_sys(sys_t);
+        // auto utc_c = time_point_cast<utc_clock::duration>(utc_t);
+        // std::cout << "file_time" << t << " , sys_t " << sys_t << " , utc_t " << utc_t << " , utc_c " << utc_c << std::endl;
     }
     catch (const std::exception &e)
     {

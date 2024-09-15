@@ -25,7 +25,7 @@ namespace editor_util
 
     crow::response get_editor(bool editor, const crow::request &req, std::string_view path, std::string_view data_base_folder)
     {
-        std::string ext = std::filesystem::path(path).extension();
+        std::string ext = std::filesystem::path(path).extension().string();
         if (!extension_editors.contains(ext))
             return crow::response{nlohmann::json{{"error", "Unknown editor extension"}}.dump()};
         
@@ -45,7 +45,7 @@ namespace editor_util
         std::cout << "found credentials " << (req.headers.find("credentials") != req.headers.end()) << std::endl;
         TRY_ADD_HEADER(crow_context, "credentials", req);
         crow_context["file_data"] = d;
-        crow_context["file_name"] = std::filesystem::path(data_path).filename();
+        crow_context["file_name"] = std::filesystem::path(data_path).filename().string();
         crow_context["file_path"] = std::string(path);
         TRY_ADD_HEADER(crow_context, "site_url", req);
         crow_context["editor"] = editor;

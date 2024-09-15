@@ -68,7 +68,7 @@ int main(int argc, const char** argv) {
     if (show_help)
         print_help();
 
-    crow::App app;
+    crow::App app{};
     
     Credentials credentials("credentials/cred.json");
     Database database("data/events");
@@ -269,7 +269,7 @@ int main(int argc, const char** argv) {
         crow::response res;
         std::filesystem::path file_path = data_base_folder.data() + path;
         if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path)) {
-            std::string ext = file_path.extension();
+            std::string ext = file_path.extension().string();
             if (editor_util::is_extension_editor(ext))
                 res = editor_util::get_editor(false, req, path, data_base_folder);
             else
@@ -369,7 +369,7 @@ int main(int argc, const char** argv) {
             for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
                 if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".png") {
                     // finding the 2 last / from the back
-                    std::string_view string_view = dir_entry.path().c_str();
+                    std::string_view string_view = dir_entry.path().string();
                     string_view = string_view.substr(0, string_view.find_last_of("."));
                     int slash_count = 0;
                     auto c = string_view.end() - 1;
@@ -487,10 +487,8 @@ int main(int argc, const char** argv) {
     else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
         app.ssl_file(std::string(certificates_folder) + "/rsa.pem");
     else {
-        bool folder_exists = std::filesystem::exists(certificates_folder.data());
         std::cout << "[error] Could not find the certificates files in the given"
-                     "certificates folder: " << certificates_folder << "\n";
-        return -1;
+                     "certificates folder: " << certificates_folder << ". Starting sever without certs\n";
     }
 #endif
     
