@@ -373,8 +373,10 @@ const VirtualMap = () => {
                 log.error("tile to drop is not existing");
                 return;
             }
-            if (!tiles_storage[i])
-                console.log("Strango")
+            if (!tiles_storage[i]) {
+                console.error("Tile to drop does not exist")
+                return;
+            }
             let lookup_table_string = tiles_storage[i].lookup_table_string;
             if (tiles_lookup[lookup_table_string] != i)
                 console.error(`Index mismatch for delete: Found index ${tiles_lookup[lookup_table_string]}`);
@@ -1024,7 +1026,7 @@ const Util = {
             return normalize(cross(vec3(w, 0, dx), vec3(0, w, dy)));
         }
         // returns the height in x, and the normal in yzw
-        vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc, int level) {
+        vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc, float level) {
             // check detail map for data
             float v_tex_width = virtual_heightmap_index_off.z;
             uint index = 0u;
@@ -1040,18 +1042,19 @@ const Util = {
             if (index == 0u)
                 return vec4(0);
             index -= 1u;
+            int ilevel = int(level);
             for(int cur_l = 18 - int(log2(float(virtual_heightmap_infos[index].z))); 
-                cur_l > level && cur_l >= 0 && virtual_heightmap_infos[index].w >= 0; 
+                cur_l > ilevel && cur_l >= 0 && virtual_heightmap_infos[index].w >= 0; 
                 --cur_l, index = uint(virtual_heightmap_infos[index].w));
             ivec2 offset = ivec2(virtual_heightmap_infos[index].x, virtual_heightmap_infos[index].y);
             float width = float(virtual_heightmap_infos[index].z);
             uv_offset *= v_tex_width;
             uv_loc *= v_tex_width;
-            uv_loc = (uv_offset - vec2(offset)) + uv_loc;
-            uv_loc /= width;
+            vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
+            image_uv /= width;
             // fetching the surrounding pixels
-            uv_loc = uv_loc * 256.;    // assumes always a tile size of 256
-            ivec2 iuv_loc = ivec2(uv_loc);
+            image_uv = image_uv * 256.;    // assumes always a tile size of 256
+            ivec2 iuv_loc = ivec2(image_uv);
             ivec2 l10 = min(iuv_loc + ivec2(1, 0), ivec2(255));
             ivec2 l01 = min(iuv_loc + ivec2(0, 1), ivec2(255));
             ivec2 l11 = min(iuv_loc + ivec2(1, 1), ivec2(255));
@@ -1064,7 +1067,7 @@ const Util = {
             float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
             float dn10 = decode_height(texelFetch(virtual_heightmap, ivec3(ln10, index), 0));
             float dn01 = decode_height(texelFetch(virtual_heightmap, ivec3(ln01, index), 0));
-            vec2 a = uv_loc - floor(uv_loc);
+            vec2 a = image_uv - floor(image_uv);
             if (iuv_loc.x == 255) {d10 = mix(d00, dn10, -1.); d11 = 3. * d00 - dn01 - dn10;}
             if (iuv_loc.y == 255) {d01 = mix(d00, dn01, -1.); d11 = 3. * d00 - dn01 - dn10;}
             if (iuv_loc.x == 255 && iuv_loc.y == 255) d11 = 3. * d11 - dn01 - dn10;
@@ -1073,6 +1076,16 @@ const Util = {
             float gw = width / 4.;
             vec3 t = mix(mix(vec3(d00, d00 - dn10, d00 - dn01), vec3(d10, d10 - d00, d00 - dn01), a.x), 
                          mix(vec3(d01, d00 - dn10, d01 - d00 ), vec3(d11, d10 - d00, d01 - d00 ), a.x), a.y);
+            float d_w = pow(level - floor(level), .25);
+            if (virtual_heightmap_infos[index].w >= 0) {
+                int n_idx = virtual_heightmap_infos[index].w;
+                offset = ivec2(virtual_heightmap_infos[n_idx].x, virtual_heightmap_infos[n_idx].y);
+                width = float(virtual_heightmap_infos[n_idx].z);
+                vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
+                image_uv /= width;
+                float deeper_d = decode_height(texture(virtual_heightmap, vec3(image_uv, float(n_idx))));
+                t.x = mix(deeper_d, t.x, d_w);
+            }
             return vec4(t.x, create_normal(t.y, t.z, gw));
         }
         `;

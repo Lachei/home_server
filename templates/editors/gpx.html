@@ -287,16 +287,17 @@
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
             }
             // drawing the hq center triangles
+            const triangle_resolution = + document.getElementById("triangle_resolution").value;
             gl.uniform1i(program.uniform_locations.tile_width, 100);
+            gl.uniform1i(program.uniform_locations.geo_res, triangle_resolution);
             gl.uniform2f(program.uniform_locations.tile_width_uv, base_width, 1.);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
-            gl.uniform2i(program.uniform_locations.tile_p, 0, 0);
+            gl.uniform2f(program.uniform_locations.cam_off, camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon);
             gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
 
             // drawing the surrounding lower quality triangles
             const radius = 7;
-            const triangle_resolution = + document.getElementById("triangle_resolution").value;
             let cur_d = base_width;
             const center_triangles_per_width = 100 / base_width;
             let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
@@ -452,10 +453,11 @@
         precision highp usampler2D;
 
         uniform int tile_width;             // tile width in vertex count, always equals the tile height
+        uniform int geo_res;
         uniform vec2 tile_width_uv;         // tile width in uvs
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
-        uniform ivec2 tile_p;               // tile local index (-1 left, -1 top, 1 right, 1 bottom)
+        uniform vec2 cam_off;               // cam off needed to convert the loc_pos to loc_pos_cam (camera at the center)
         uniform mat4 view_proj;
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
@@ -481,17 +483,9 @@
             loc_pos = vec2(x, y) + grid_offset_pos_rel;
 
             // get height vertex height
-            // float du = length(loc_pos) * 1e-7;
-            // if ((pos_off_x == 0 && (tile_p.x == -1 || tile_p == ivec2(0))) 
-            //     || (pos_off_x == tile_width - 1 && (tile_p.x == 1 || tile_p == ivec2(0))) 
-            //     || (pos_off_y == 0 && (tile_p.y == -1 || tile_p == ivec2(0))) 
-            //     || (pos_off_y == tile_width - 1 && (tile_p.y == 1 || tile_p == ivec2(0))))
-            //     du *= 2.;
-            // make local height readout pos snap to cur grid size(should avoid flimmering)
-            // float del = tile_width_uv.x / float(tile_width - 1);
-            // vec2 snap_pos_off = floor(grid_offset_pos / del) * del;
-            // vec2 snap_pos_loc = floor((loc_pos) / del) * del + (grid_offset_pos - snap_pos_off);
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18); // int(get_level(pow(du, 3.))));
+            float du = length(loc_pos - cam_off) * .05 * (100. / float(geo_res));
+            du *= du;
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, get_level(du)); // int(get_level(pow(du, 3.))));
             height_m = d_info.x;
             n_dot_l = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             float height = wgs_84_m_to_uv(height_m);
@@ -572,7 +566,7 @@
             vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18); // int(get_level(pow(du, 3.))));
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
             float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             out_col = vec4(surface_col.xyz, 1) * nl;
             // out_col = mix(out_col, vec4(1, .5, 0, 1), pow(1. - clamp(abs(height_m - floor(height_m / 10.) * 10. - 1.), 0., 1.), 16.));
@@ -616,10 +610,11 @@
                 program: pipeline,
                 uniform_locations: {
                     tile_width: gl_context.getUniformLocation(pipeline, 'tile_width'),
+                    geo_res: gl_context.getUniformLocation(pipeline, 'geo_res'),
                     tile_width_uv: gl_context.getUniformLocation(pipeline, 'tile_width_uv'),
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
-                    tile_p: gl_context.getUniformLocation(pipeline, 'tile_p'),
+                    cam_off: gl_context.getUniformLocation(pipeline, 'cam_off'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
                     detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
