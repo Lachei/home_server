@@ -369,7 +369,8 @@ int main(int argc, const char** argv) {
             for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
                 if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".png") {
                     // finding the 2 last / from the back
-                    std::string_view string_view = dir_entry.path().string();
+                    const std::string tmp = dir_entry.path().string();
+                    std::string_view string_view = tmp;
                     string_view = string_view.substr(0, string_view.find_last_of("."));
                     int slash_count = 0;
                     auto c = string_view.end() - 1;

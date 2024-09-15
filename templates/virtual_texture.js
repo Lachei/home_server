@@ -231,8 +231,7 @@ const VirtualMap = () => {
                         final_x,
                         final_y,
                         width,
-                        coarse,
-                        () => { t.loaded = true; }
+                        coarse
                     )
                     tiles_lookup[lookup_table_string] = i_cpu;
                 }
@@ -409,10 +408,16 @@ const VirtualMap = () => {
         upload_loaded_images: function () {
             const check_upload = (tiles_storage) => {
                 let change = false;
-                for (let i = 0; i < tiles_storage.length; ++i) {
+                // reverse loop to be able to drop frames without reiteration
+                for (let i = tiles_storage.length - 1; i >= 0; --i) {
                     let tile = tiles_storage[i];
                     if (!tile.loaded || tile.data_uploaded_to_gpu)
                         continue;
+                    if (tile.load_error) {
+                        this.drop_tile_at_index(i);
+                        change = true;
+                        continue;
+                    }
                     if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
                         console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
                     this.image_canvas_context.drawImage(tile.image, 0, 0);
@@ -629,6 +634,7 @@ const Tile = () => {
         /** @type{Image} */
         image: null,
         loaded: false,
+        load_error: false,
         data_uploaded_to_gpu: false,
 
         // member functions
@@ -640,7 +646,7 @@ const Tile = () => {
          * @param {bool}     coarse Bool indicating whether this tile describes a coarse tile (should be stored in the coarse storage)
          * @param {function():void} image_callback Callback that is executed after the tile is loaded
          */
-        init: function (tile_url, tile_x, tile_y, width, coarse, image_callback) {
+        init: function (tile_url, tile_x, tile_y, width, coarse) {
             this.width = width;
             this.tile_x = tile_x;
             this.tile_y = tile_y;
@@ -649,7 +655,8 @@ const Tile = () => {
             this.last_use = Date.now();
             this.image = new Image();
             this.image.crossOrigin = 'anonymous';
-            this.image.onload = image_callback;
+            this.image.onload = () => {this.loaded = true};
+            this.image.onerror = () => {this.loaded = true; this.load_error = true;};
             this.image.src = tile_url;
             return this;
         },
@@ -946,7 +953,7 @@ const Util = {
     glsl_calc_level: function () {
         return `
         float get_level(float d2) {
-            float mip_offset = 25.5;
+            float mip_offset = 25.0;
             return 19. - clamp(.5 * log2(d2) + mip_offset, 0., 19.);
         }
         `

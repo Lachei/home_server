@@ -69,7 +69,7 @@
         <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles(null, true).drop_least_important_tiles(null, false);">
             <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
-            <option base_url="api.mapbox.com/v4/mapbox.satellite/" ending=".webp?sku=101tnFDhwLDVr&access_token=pk.eyJ1Ijoic3ZjLW9rdGEtbWFwYm94LXN0YWZmLWFjY2VzcyIsImEiOiJjbG5sMnFlZ28wb2d5MnFtb2xnMG90OW96In0.IE8Vqs0NTzCY0WqPzV9kcw" detail_switch_level="22">Satellit</option>
+            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" detail_switch_level="22">Satellit</option>
             <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern</option>
             <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18" col_corr_b=".85">Satellit bayern</option>
             <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
@@ -413,7 +413,8 @@
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let layer = get_selected_layer();
         let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
-            `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
+            !layer.getAttribute("swap_xy") ? `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
+                                           : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending")}`
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         console.log(decoded_tiles);
