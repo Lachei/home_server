@@ -80,6 +80,8 @@
         <label for="enable_tile_update">Karten tiles nachladen</label>
         <input id="triangle_resolution" type="number" min="10" max="1000" value="400">
         <label for="triangle_resolution">Geometrieauflösung</label>
+        <input id="enable_cam_follow" type="checkbox" onchange="follow_changed();">
+        <label for="enable_cam_follow">Kamera folgen</label>
         {{/editor}}
     </div>
     <div id="content">
@@ -294,6 +296,8 @@
             gl.uniform1i(program.uniform_locations.geo_res, triangle_resolution);
             if (cur_gps_pos)
                 gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, cur_gps_pos.lat - grid_offset_pos.lat, cur_gps_pos.lon - grid_offset_pos.lon);
+            else
+                gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, -1e10, -1e10);
             gl.uniform2f(program.uniform_locations.tile_width_uv, base_width, 1.);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
@@ -676,7 +680,7 @@
         // console.info = () => {};
         
         if (navigator.geolocation)
-            navigator.geolocation.watchPosition(updateGpsPosition, ()=>{}, {enableHighAccuracy: true, timeout: 3000});
+            navigator.geolocation.watchPosition(updateGpsPosition, ()=>{}, {enableHighAccuracy: true});
     }
     window.onload = init;
 
