@@ -682,9 +682,11 @@
         setInterval(check_virtual_textures_update);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         
-        heightmap_meta_data = await (await fetch(location.origin + "/heightmap/meta")).json();
-        // adding a set for all the available tiles
-        heightmap_meta_data.tiles_set = new Set(heightmap_meta_data.tiles);
+        try {
+            heightmap_meta_data = await (await fetch(location.origin + "/heightmap/meta")).json();
+            // adding a set for all the available tiles
+            heightmap_meta_data.tiles_set = new Set(heightmap_meta_data.tiles);
+        } catch(e) {}
         // draw_scene();
         // console.log = () => {};
         // console.info = () => {};
