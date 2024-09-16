@@ -1083,7 +1083,8 @@ const Util = {
                 width = float(virtual_heightmap_infos[n_idx].z);
                 vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
                 image_uv /= width;
-                float deeper_d = decode_height(texture(virtual_heightmap, vec3(image_uv, float(n_idx))));
+                image_uv = image_uv * 256.;
+                float deeper_d = decode_height(texelFetch(virtual_heightmap, ivec3(image_uv, n_idx), 0));
                 t.x = mix(deeper_d, t.x, d_w);
             }
             return vec4(t.x, create_normal(t.y, t.z, gw));
