@@ -80,7 +80,7 @@
         <label for="enable_tile_update">Karten tiles nachladen</label>
         <input id="triangle_resolution" type="number" min="10" max="1000" value="400">
         <label for="triangle_resolution">Geometrieauflösung</label>
-        <input id="enable_cam_follow" type="checkbox" onchange="follow_changed();">
+        <input id="enable_cam_follow" type="checkbox">
         <label for="enable_cam_follow">Kamera folgen</label>
         {{/editor}}
     </div>
@@ -433,6 +433,16 @@
         let start = performance.now();
         virtual_height_map.upload_loaded_images();
         virtual_street_map.upload_loaded_images();
+        if (document.getElementById("enable_cam_follow").checked) {
+            const interp_factor = .05;
+            let pre_x = camera_center.x();
+            let pre_y = camera_center.y();
+            // let f = get_forward_dir(camera_dir, camera_pitch);
+            // f.mul
+            camera_center.entries[0] = interp_factor * cur_gps_pos.lat + (1 - interp_factor) * camera_center.x();
+            camera_center.entries[1] = interp_factor * cur_gps_pos.lon + (1 - interp_factor) * camera_center.y();
+            camera_updated |= pre_x != camera_center.x() || pre_y != camera_center.y(); 
+        }
         if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || camera_updated) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
