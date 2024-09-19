@@ -365,7 +365,9 @@ int main(int argc, const char** argv) {
         // the tiles are already string encoded for faster processing
         // on the website side)
         static nlohmann::json meta = [](){  // single instantiate on first call
-            std::vector<std::string> tiles;
+            std::vector<std::string> tiles{};
+            if (!std::filesystem::exists("data/tiles"))
+                return nlohmann::json{{"tiles", std::move(tiles)}};
             for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
                 if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".png") {
                     // finding the 2 last / from the back

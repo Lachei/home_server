@@ -679,7 +679,7 @@
         virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);
-        setInterval(check_virtual_textures_update);
+        setInterval(check_virtual_textures_update, 16);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         
         try {
