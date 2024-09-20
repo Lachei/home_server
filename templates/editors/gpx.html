@@ -429,7 +429,11 @@
         console.log(decoded_tiles);
         in_flight = false;
     }
+    let tex_update_locked = false;
     function check_virtual_textures_update() {
+        if (tex_update_locked)
+            return;
+        tex_update_locked = true;
         let start = performance.now();
         virtual_height_map.upload_loaded_images();
         virtual_street_map.upload_loaded_images();
@@ -437,11 +441,13 @@
             const interp_factor = .05;
             let pre_x = camera_center.x();
             let pre_y = camera_center.y();
-            // let f = get_forward_dir(camera_dir, camera_pitch);
-            // f.mul
-            camera_center.entries[0] = interp_factor * cur_gps_pos.lat + (1 - interp_factor) * camera_center.x();
-            camera_center.entries[1] = interp_factor * cur_gps_pos.lon + (1 - interp_factor) * camera_center.y();
-            camera_updated |= pre_x != camera_center.x() || pre_y != camera_center.y(); 
+            let f = get_forward_dir(camera_dir, camera_pitch);
+            f.entries[2] = Math.max(.1, f.z());
+            f.normalize();
+            f.mul(camera_center.z() / f.z());
+            camera_center.entries[0] = interp_factor * (cur_gps_pos.lat + f.x()) + (1 - interp_factor) * camera_center.x();
+            camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
+            camera_updated |= Math.abs(pre_x - camera_center.x()) > 1e-6 || Math.abs(pre_y - camera_center.y()) > 1e-6; 
         }
         if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || camera_updated) {
             virtual_height_map.virtual_texture_rebuilt = false;
@@ -450,6 +456,7 @@
             console.log(`updating virtual textures took ${performance.now() - start} milli`);
             draw_scene();
         }
+        tex_update_locked = false;
     }
     function updateGpsPosition(p) {
         let [lat, lon] = Util.wgs_84_to_uv(p.coords.latitude, p.coords.longitude);
