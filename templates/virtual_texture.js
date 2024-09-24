@@ -1038,21 +1038,24 @@ const Util = {
             // getting negative side pixels for better normals
             ivec2 ln10 = max(iuv_loc + ivec2(-1, 0), ivec2(0));
             ivec2 ln01 = max(iuv_loc + ivec2(0, -1), ivec2(0));
+            ivec2 ln1p1 = max(iuv_loc + ivec2(-1, 1), ivec2(0));
+            ivec2 lp1n1 = max(iuv_loc + ivec2(1, -1), ivec2(0));
             float d00 = decode_height(texelFetch(virtual_heightmap, ivec3(iuv_loc, index), 0));
             float d10 = decode_height(texelFetch(virtual_heightmap, ivec3(l10, index), 0));
             float d01 = decode_height(texelFetch(virtual_heightmap, ivec3(l01, index), 0));
             float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
             float dn10 = decode_height(texelFetch(virtual_heightmap, ivec3(ln10, index), 0));
             float dn01 = decode_height(texelFetch(virtual_heightmap, ivec3(ln01, index), 0));
+            float dn1p1 = decode_height(texelFetch(virtual_heightmap, ivec3(ln1p1, index), 0));
+            float dp1n1 = decode_height(texelFetch(virtual_heightmap, ivec3(lp1n1, index), 0));
             vec2 a = image_uv - floor(image_uv);
-            if (iuv_loc.x == 255) {d10 = mix(d00, dn10, -1.); d11 = 3. * d00 - dn01 - dn10;}
-            if (iuv_loc.y == 255) {d01 = mix(d00, dn01, -1.); d11 = 3. * d00 - dn01 - dn10;}
-            if (iuv_loc.x == 255 && iuv_loc.y == 255) d11 = 3. * d11 - dn01 - dn10;
-            if (iuv_loc.x == 0) dn10 = 2. * d00 - d10;
-            if (iuv_loc.y == 0) dn01 = 2. * d00 - d01;
+            if (iuv_loc.x == 255) {d10 = mix(d00, dn10, -1.); d11 = 3. * d00 - dn01 - dn10; dp1n1 = dn01;}
+            if (iuv_loc.y == 255) {d01 = mix(d00, dn01, -1.); d11 = 3. * d00 - dn01 - dn10; dn1p1 = dn10;}
+            if (iuv_loc.x == 0) {dn10 = 2. * d00 - d10; dn1p1 = 2. * d01 - d11;}
+            if (iuv_loc.y == 0) {dn01 = 2. * d00 - d01; dp1n1 = 2. * d10 - d11;}
             float gw = width / 4.;
-            vec3 t = mix(mix(vec3(d00, d00 - dn10, d00 - dn01), vec3(d10, d10 - d00, d00 - dn01), a.x), 
-                         mix(vec3(d01, d00 - dn10, d01 - d00 ), vec3(d11, d10 - d00, d01 - d00 ), a.x), a.y);
+            vec3 t = mix(mix(vec3(d00, d00 - dn10, d00 - dn01), vec3(d10, d10 - d00, d10 - dp1n1), a.x), 
+                         mix(vec3(d01, d01 - dn1p1, d01 - d00 ), vec3(d11, d11 - d01, d11 - d10 ), a.x), a.y);
             float d_w = pow(level - floor(level), .25);
             if (false && virtual_heightmap_infos[index].w >= 0) {
                 int n_idx = virtual_heightmap_infos[index].w;
