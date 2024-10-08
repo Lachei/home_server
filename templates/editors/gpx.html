@@ -216,7 +216,6 @@
             camera_center.add(up_dir.multiply(-speed));
         if (key === "e")
             camera_center.add(up_dir.multiply(speed));
-        e.preventDefault();
         camera_updated = true;
     });
 
@@ -611,7 +610,7 @@
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
             float max_del = min(dot(dx, dx), dot(dy, dy));
-            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
+            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 12.)) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
