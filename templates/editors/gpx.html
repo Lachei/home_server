@@ -242,8 +242,8 @@
         const base_far = .1;
         const height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
         camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, base_near * height_multiplier, base_far * height_multiplier);
-        const screen_size_factor = 1;
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
+        const screen_size_factor = camera_center.z() * camera_center.z();
+        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, base_near * height_multiplier, base_far * height_multiplier);
         const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
         // grid jump for triangles is done all x meters
         let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
@@ -350,7 +350,7 @@
             let draw_count = 0;
             const draw_patch = (cam, cur_base_pos, tile_width_uv) => {
                 const cur_base_pos_rel = Pos(cur_base_pos.lat - grid_offset_pos.lat, cur_base_pos.lon - grid_offset_pos.lon);
-                if (!inside_view(cur_base_pos_rel, tile_width_uv))
+                if (false && !inside_view(cur_base_pos_rel, tile_width_uv))
                     return;
                 ++draw_count;
                 const cur_triangles = Math.round(Math.min(center_triangles_per_width, triangle_resolution / tile_width_uv) * tile_width_uv);
@@ -688,7 +688,7 @@
         // linalg_tests();
         const is_mobile = 'ontouchstart' in document.documentElement;
         if (is_mobile)
-            document.getElementById("triangle_resolution").value = 100;
+            document.getElementById("triangle_resolution").value = 80;
         const max_depth = 18;
         const v_width = 1 << max_depth;
         virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
