@@ -168,7 +168,7 @@ const VirtualMap = () => {
         update_needed_tiles: function (tile_requests, cam_center_uv) {
             // sorting the tile requests to have the highest detailed images last to guarantee that
             // detail images will have a later time stamp (important for correctly loading the lods)
-            tile_requests.sort((a, b) => a.width > b.width);
+            tile_requests.sort((a, b) => a.level - b.level);
             // updating the center of the detail view according to the distance of the most detailed
             // tile to the current detail view (such that it tries to stay centered)
             const overlap_width = (1 << 22) / this.v_tex_width;
@@ -210,10 +210,6 @@ const VirtualMap = () => {
                 }
                 let shift = tile_width_bits - tile_req.level;
                 let width = (1 << shift);
-                if (tile_req.x + width > this.v_tex_width || tile_req.y + width > this.v_tex_height) {
-                    console.warn("Too large tile, likely a too deep level. ignoring");
-                    continue;
-                }
                 let final_x = tile_req.x * width;
                 let final_y = tile_req.y * width;
                 if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height) {
@@ -942,7 +938,7 @@ const Util = {
         ivec3 get_tile_index() {
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
-            float max_del = max(dot(dx, dx), dot(dy, dy));
+            float max_del = min(dot(dx, dx), dot(dy, dy));
             int level = int(get_level(max_del));
             vec2 xy = (float(level < 11) * (grid_offset_pos + loc_pos)
                     + float(level >= 11) * ((grid_offset_pos - detail_corner) + loc_pos)) * float(1 << level);
@@ -982,9 +978,10 @@ const Util = {
                 return vec4(0);
             index -= 1u;
             int ilevel = int(level);
+            uint detail_idx = index;
             for(int cur_l = 19 - int(log2(float(virtual_${v_map_name}_infos[index].z))); 
                 cur_l > ilevel && cur_l >= 0 && virtual_${v_map_name}_infos[index].w >= 0; 
-                --cur_l, index = uint(virtual_${v_map_name}_infos[index].w));
+                --cur_l, detail_idx = index, index = uint(virtual_${v_map_name}_infos[index].w));
             ivec2 offset = ivec2(virtual_${v_map_name}_infos[index].x, virtual_${v_map_name}_infos[index].y);
             float width = float(virtual_${v_map_name}_infos[index].z);
             uv_offset *= v_tex_width;
@@ -992,15 +989,14 @@ const Util = {
             vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
             image_uv /= width;
             vec4 c = texture(virtual_${v_map_name}, vec3(image_uv, float(index)));
-            if (level < 19. && virtual_${v_map_name}_infos[index].w >= 0) {
-                int n_idx = virtual_${v_map_name}_infos[index].w;
-                offset = ivec2(virtual_${v_map_name}_infos[n_idx].x, virtual_${v_map_name}_infos[n_idx].y);
-                width = float(virtual_${v_map_name}_infos[n_idx].z);
+            if (detail_idx != index) {
+                offset = ivec2(virtual_${v_map_name}_infos[detail_idx].x, virtual_${v_map_name}_infos[detail_idx].y);
+                width = float(virtual_${v_map_name}_infos[detail_idx].z);
                 image_uv = (uv_offset - vec2(offset)) + uv_loc;
                 image_uv /= width;
-                vec4 t = texture(virtual_${v_map_name}, vec3(image_uv, float(n_idx)));
+                vec4 t = texture(virtual_${v_map_name}, vec3(image_uv, float(detail_idx)));
                 //t = vec4(1, 0 ,0, 1);
-                c = mix(t, c, clamp(level - floor(level), 0., 1.));
+                c = mix(c, t, clamp(level - floor(level), 0., 1.));
             }
             return c;
         }
