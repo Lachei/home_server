@@ -237,6 +237,14 @@
             return;
 
         // creating the view matrix -------------------------------------------
+        const displayWidth = canvas3d.width;
+        const displayHeight = canvas3d.height;
+        const base_near = 5e-8;
+        const base_far = .1;
+        const height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, base_near * height_multiplier, base_far * height_multiplier);
+        const screen_size_factor = 1;
+        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
         // grid jump for triangles is done all x meters
         let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
@@ -600,7 +608,11 @@
                 out_col = vec4(1, 0, 0, 1);
                 return;
             }
-            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos) * color_correction;
+            vec2 dx = dFdx(loc_pos);
+            vec2 dy = dFdy(loc_pos);
+            float max_del = max(dot(dx, dx), dot(dy, dy));
+            max_del = dot(dx, dx);
+            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del)) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
@@ -801,10 +813,6 @@
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);
             }
         }
-        // create camera projection matrices
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, 5e-8, .1);
-        const screen_size_factor = 1;
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, .0001, 10000);
         return needResize;
     }
     window.addEventListener("resize", async () => {

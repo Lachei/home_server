@@ -965,7 +965,7 @@ const Util = {
 
     glsl_virtual_texture_load: function (v_map_name) {
         return `
-        vec4 virtual_${v_map_name}_load(vec2 uv_offset, vec2 uv_loc) {
+        vec4 virtual_${v_map_name}_load(vec2 uv_offset, vec2 uv_loc, float level) {
             // check detail map for data
             float v_tex_width = virtual_${v_map_name}_index_off.z;
             uint index = 0u;
@@ -981,13 +981,28 @@ const Util = {
             if (index == 0u)
                 return vec4(0);
             index -= 1u;
+            int ilevel = int(level);
+            for(int cur_l = 19 - int(log2(float(virtual_${v_map_name}_infos[index].z))); 
+                cur_l > ilevel && cur_l >= 0 && virtual_${v_map_name}_infos[index].w >= 0; 
+                --cur_l, index = uint(virtual_${v_map_name}_infos[index].w));
             ivec2 offset = ivec2(virtual_${v_map_name}_infos[index].x, virtual_${v_map_name}_infos[index].y);
             float width = float(virtual_${v_map_name}_infos[index].z);
             uv_offset *= v_tex_width;
             uv_loc *= v_tex_width;
-            uv_loc = (uv_offset - vec2(offset)) + uv_loc;
-            uv_loc /= width;
-            return texture(virtual_${v_map_name}, vec3(uv_loc, float(index)));
+            vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
+            image_uv /= width;
+            vec4 c = texture(virtual_${v_map_name}, vec3(image_uv, float(index)));
+            if (level < 19. && virtual_${v_map_name}_infos[index].w >= 0) {
+                int n_idx = virtual_${v_map_name}_infos[index].w;
+                offset = ivec2(virtual_${v_map_name}_infos[n_idx].x, virtual_${v_map_name}_infos[n_idx].y);
+                width = float(virtual_${v_map_name}_infos[n_idx].z);
+                image_uv = (uv_offset - vec2(offset)) + uv_loc;
+                image_uv /= width;
+                vec4 t = texture(virtual_${v_map_name}, vec3(image_uv, float(n_idx)));
+                //t = vec4(1, 0 ,0, 1);
+                c = mix(t, c, clamp(level - floor(level), 0., 1.));
+            }
+            return c;
         }
         `;
     },
