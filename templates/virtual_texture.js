@@ -928,7 +928,7 @@ const Util = {
     glsl_calc_level: function () {
         return `
         float get_level(float d2) {
-            float mip_offset = 25.0;
+            float mip_offset = 25.5;
             return 19. - clamp(.5 * log2(d2) + mip_offset, 0., 19.);
         }
         `
