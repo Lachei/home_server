@@ -68,6 +68,8 @@
         <button id="save" onclick="save();">&#128190;</button>
         <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles(null, true).drop_least_important_tiles(null, false);">
             <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
+            <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
+            <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
             <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" detail_switch_level="22">Satellit</option>
             <option base_url="intergeo33.bayernwolke.de/betty/atkis/" ending="" detail_switch_level="18" detail_offset="4">Straßen bayern</option>
@@ -461,6 +463,7 @@
             virtual_street_map.virtual_texture_rebuilt = false;
             camera_updated = false;
             console.log(`updating virtual textures took ${performance.now() - start} milli`);
+            console.log(`Free: Detail: ${virtual_street_map.free_tiles_detail.size}, Coarse: ${virtual_street_map.free_tiles.size}`);
             draw_scene();
         }
         tex_update_locked = false;
@@ -526,7 +529,7 @@
             du *= du;
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, get_level(du)); // int(get_level(pow(du, 3.))));
             height_m = d_info.x;
-            n_dot_l = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
+            n_dot_l = (max(0., dot(vec3(0, .7, .7), d_info.yzw)) * .5 + .5) + .05;
             float height = wgs_84_m_to_uv(height_m);
 
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
