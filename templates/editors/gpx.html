@@ -84,6 +84,10 @@
         <label for="triangle_resolution">Geometrieauflösung</label>
         <input id="enable_cam_follow" type="checkbox">
         <label for="enable_cam_follow">Kamera folgen</label>
+        <input id="enable_fpv_cam" type="checkbox">
+        <label for="enable_fpv_cam">Erste person navigation</label>
+        <input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_scene();">
+        <label for="camera_interpolation">Projektion(3D.o.2D)</label>
         {{/editor}}
     </div>
     <div id="content">
@@ -127,7 +131,10 @@
     let virtual_street_map = null;
     let cur_gps_pos = null;
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
-    canvas3d.addEventListener("mousedown", (e) => { canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; });
+    canvas3d.addEventListener("mousedown", (e) => { 
+        canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
+        // get the depth value and use it to calculate the world position
+    });
     canvas3d.addEventListener("touchstart", (e) => {
                               let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
                               let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
@@ -256,6 +263,7 @@
         const view = LookAt(Vec4(camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
             at,
             up_dir);
+        camera_interpolation = Math.pow(document.getElementById("camera_interpolation").value, 8);
         let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
 

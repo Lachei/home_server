@@ -422,6 +422,11 @@ int main(int argc, const char** argv) {
         
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
+    CROW_ROUTE(app, "/edit_gpx")([&credentials, &data_base_folder](const crow::request& req) {
+        // EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        
+        return editor_util::get_editor(true, req, "test.gpx", data_base_folder);
+    });
     
     // ------------------------------------------------------------------------------------------------
     // General page loading
