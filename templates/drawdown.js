@@ -33,7 +33,7 @@ function markdown(src) {
     var rx_list = /\n( *)(?:[*\-+]|((\d+)|([a-z])|[A-Z])[.)]) +([^]*?)(?=(\n|$){2})/g;
     var rx_listjoin = /<\/(ol|ul)>\n\n<\1>/g;
     var rx_highlight = /(^|[^A-Za-z\d\\])(([*_])|(~)|(\^)|(--)|(\+\+)|`)(\2?)([^<]*?)\2\8(?!\2)(?=\W|_|$)/g;
-    var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
+    var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2)/g;
     var rx_code = /\n((```|~~~).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
     var rx_script = /<script>([^]*?)<\/script>/g;
     var rx_link = /((!?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;

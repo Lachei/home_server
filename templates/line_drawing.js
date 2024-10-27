@@ -46,7 +46,8 @@ const Line = () => {return {
     length: 0,
     /** 
      * @brief Contains the same as lines_gpu, kept to be able to 
-     * quickly access the data on the cpu without readback of gpu */
+     * quickly access the data on the cpu without readback of gpu 
+     * @type {Float32Array}*/
     lines_cpu: null,
     /**
      * @brief Contains the same data as lines_cpu
@@ -82,6 +83,13 @@ const Line = () => {return {
     },
     /** @brief Push vertices to the back of the line */
     push: function(e) {
+        ++length;
+        if (length > this.lines_cpu.length) {
+            const new_cap = Math.round(this.lines_cpu.length * LINE_CONST.ARRAY_GROWTH_FAC);
+            let t = new Float32Array(new_cap);
+            t.set(this.lines_cpu);
+            this.lines_cpu = t;
+        }
         
     },
     push_array: function (a) {
