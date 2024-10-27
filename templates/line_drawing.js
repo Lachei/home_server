@@ -32,19 +32,59 @@
  * the float precision problem on world scale
  */
 
+/** @brief Constants for the Lines library */
+const LINE_CONST = {
+    ARRAY_GROWTH_FAC: 1.5
+};
+
 const Line = () => {return {
+    /** 
+     * @brief contains the amount of LINES. The length of lines_cpu and gpu is
+     * not the correct length as they contain some already reserved space
+     * to get amortized linear runtime when doing a push of a vertex
+     */
+    length: 0,
     /** 
      * @brief Contains the same as lines_gpu, kept to be able to 
      * quickly access the data on the cpu without readback of gpu */
     lines_cpu: null,
+    /**
+     * @brief Contains the same data as lines_cpu
+     */
     lines_gpu: null,
-    /** 
+    /**
      * @brief Rendering context from which the lines_gpu buffer was created
-     * @type {WebGLRenderingContext} */
+     * @type {WebGL2RenderingContext} */
     gl: null,
+    /**
+     * The lines_cpu and lines_gpu coordinates are given in a local frame
+     * with the offset given by this center
+     */
+    lines_center: null,
 
+    /**
+     * @param {WebGL2RenderingContext} gl 
+     */
     init: function(gl) {
+        this.length = 0;
+        const capacity = 10; // default capacity
+        this.lines_cpu = new Float32Array(capacity);
+        this.lines_gpu = gl.createBuffer();
+        this.gl = gl;
+        return this;
+    },
+    /**
+     * @brief relives the webgl buffer and should be always called to avoid
+     * gpu memory buffer 'leaks'
+     */
+    deinit: function() {
+        this.gl.deleteBuffer(this.lines_gpu);
+    },
+    /** @brief Push vertices to the back of the line */
+    push: function(e) {
         
     },
-    
+    push_array: function (a) {
+
+    }
 }};
