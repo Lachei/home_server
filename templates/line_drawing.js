@@ -81,9 +81,13 @@ const Line = () => {return {
     deinit: function() {
         this.gl.deleteBuffer(this.lines_gpu);
     },
-    /** @brief Push vertices to the back of the line */
+    /** 
+     * @brief Push vertices to the back of the line, if this is the first vertex only
+     * the first line segment is set, but no new line segment is added 
+     */
     push: function(e) {
-        ++length;
+        if (length != 0) // if length is 1 the vertex is only pushed into the second spot of 
+            ++length;
         if (length > this.lines_cpu.length) {
             const new_cap = Math.round(this.lines_cpu.length * LINE_CONST.ARRAY_GROWTH_FAC);
             let t = new Float32Array(new_cap);
