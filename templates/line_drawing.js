@@ -47,21 +47,18 @@ const Line = () => {return {
     /** 
      * @brief Contains the same as lines_gpu, kept to be able to 
      * quickly access the data on the cpu without readback of gpu 
-     * @type {Float32Array}*/
+     * @note The points in here are always only stored once
+     * @type {Float64Array}*/
     lines_cpu: null,
     /**
      * @brief Contains the same data as lines_cpu
      */
     lines_gpu: null,
+    cpu_gpu_synced: false,
     /**
      * @brief Rendering context from which the lines_gpu buffer was created
      * @type {WebGL2RenderingContext} */
     gl: null,
-    /**
-     * The lines_cpu and lines_gpu coordinates are given in a local frame
-     * with the offset given by this center
-     */
-    lines_center: null,
 
     /**
      * @param {WebGL2RenderingContext} gl 
@@ -69,7 +66,7 @@ const Line = () => {return {
     init: function(gl) {
         this.length = 0;
         const capacity = 10; // default capacity
-        this.lines_cpu = new Float32Array(capacity);
+        this.lines_cpu = new Float64Array(capacity * 2);
         this.lines_gpu = gl.createBuffer();
         this.gl = gl;
         return this;
@@ -84,19 +81,45 @@ const Line = () => {return {
     /** 
      * @brief Push vertices to the back of the line, if this is the first vertex only
      * the first line segment is set, but no new line segment is added 
+     * @param [lat, lon] 
      */
     push: function(e) {
-        if (length != 0) // if length is 1 the vertex is only pushed into the second spot of 
-            ++length;
-        if (length > this.lines_cpu.length) {
+        this.cpu_gpu_synced = false;
+        const p = this.length++;
+        if (this.length * 2 > this.lines_cpu.length) {
             const new_cap = Math.round(this.lines_cpu.length * LINE_CONST.ARRAY_GROWTH_FAC);
-            let t = new Float32Array(new_cap);
+            let t = new Float64Array(new_cap);
             t.set(this.lines_cpu);
             this.lines_cpu = t;
         }
-        
+        const [lat, lon] = e;
+        this.lines_cpu[p * 2] = lat;
+        this.lines_cpu[p * 2 + 1] = lon;
     },
+    /**
+     * Adds an array of points with [lat1, lon1, ..., latn, lonn]
+     * @param {Array<float>} a 
+     */
     push_array: function (a) {
-
+        this.cpu_gpu_synced = false;
+        const p = this.length;
+        this.length += a.length / 2;
+        if (this.length * 2 > this.lines_cpu.length) {
+            let cap = this.lines_cpu.length / 2;
+            for (; cap < this.length; cap = Math.round(cap * LINE_CONST.ARRAY_GROWTH_FAC));
+            let t = new Float64Array(new_cap);
+            t.set(this.lines_cpu);
+            this.lines_cpu = t;
+        }
+        for (let i = 0; i < a.length; ++i)
+            this.lines_cpu[p + i] = a[i];
+    },
+    sync_with_gpu: function() {
+        if (this.cpu_gpu_synced)
+            return;
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.lines_gpu);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, this.lines_cpu, this.gl.DYNAMIC_DRAW);
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
+        this.cpu_gpu_synced = true;
     }
 }};
