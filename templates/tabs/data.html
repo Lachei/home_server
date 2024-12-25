@@ -275,7 +275,7 @@
         </div>
         <div id="name_header" class="header_div">Name</div>
         <div id="size_header" class="header_div">Gr&ouml;sse</div>
-        <div id="edit" class="header_div">Bearbeiten</div>
+        <div id="edit" class="header_div">Aktionen</div>
         <div id="change_date_header" class="header_div">Ge&auml;ndert</div>
     </div>
 </div>
@@ -379,16 +379,16 @@
     }
 
     function edit_icon(data_extension, data_path) {
+        let final="";
         const edit_icon = "✍";
         switch(data_extension) { 
             case "md" :
             case "tbl": 
             case "gpx": 
-            case "rech": return `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>`;
-        default:
-            // all other data extensions are not editable
-            return "";
+            case "rech": final = `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>&nbsp;`;
         }
+        final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
+        return final;
     }
 
     function update_explorer_list(files_json) {
