@@ -378,7 +378,7 @@
         return (n.toFixed(n < 10 && l > 0 ? 1 : 0) + ' ' + units[l]);
     }
 
-    function edit_icon(data_extension, data_path) {
+    function edit_icon(data_extension, data_path, data_type) {
         let final="";
         const edit_icon = "✍";
         switch(data_extension) { 
@@ -387,7 +387,8 @@
             case "gpx": 
             case "rech": final = `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>&nbsp;`;
         }
-        final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
+        if (data_type != "d")
+            final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
         return final;
     }
 
@@ -411,7 +412,7 @@
             else
                 list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
-            list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path) + "</div>";
+            list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path, element.type) + "</div>";
             list.innerHTML += "<div class='le_div'>" + data_pretty_date(element.change_date) + "</div>";
         }
     }
