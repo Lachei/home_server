@@ -27,6 +27,7 @@ namespace data_util
                 {"name", p.filename()},
                 {"size", e.is_directory() ? 0: e.file_size()},
                 {"changed_by", "Nobody"},
+                {"type", e.is_directory() ? "d": "f"},
 #ifdef _WIN32
                 {"change_date", to_json_date_string(std::chrono::file_clock::to_utc(e.last_write_time()))},
 #else
@@ -40,13 +41,18 @@ namespace data_util
 
     nlohmann::json create_dir(std::string_view dir)
     {
-        std::filesystem::create_directories(dir);
+        // sanitize dir
+        std::string final_dir{dir};
+        std::ranges::replace(final_dir, ' ', '_');
+        std::filesystem::create_directories(final_dir);
         return nlohmann::json{{"success", "Directory was created successfully"}};
     }
 
     nlohmann::json update_file(std::string_view file, std::span<const std::byte> data)
     {
-        std::ofstream f(file.data(), std::ios_base::binary);
+        std::string final_file{file};
+        std::ranges::replace(final_file, ' ', '_');
+        std::ofstream f(final_file.data(), std::ios_base::binary);
         f.write(reinterpret_cast<const char*>(data.data()), data.size());
         return {{"success", "Updated/created the file"}};
     }
@@ -88,9 +94,11 @@ namespace data_util
             }
             else if (move_infos.contains("new_name"))
             {
-                const std::filesystem::path new_name(move_infos["new_name"].get<std::string>());
+                std::string new_name(move_infos["new_name"].get<std::string>());
+                std::ranges::replace(new_name, ' ', '_');
+                const std::filesystem::path new_name_p{new_name};
                 const std::filesystem::path src_path(src);
-                const std::string new_file = new_file_folder + new_name.stem().string() + (new_name.has_extension() ? new_name.extension().string(): src_path.extension().string());
+                const std::string new_file = new_file_folder + new_name_p.stem().string() + (new_name_p.has_extension() ? new_name_p.extension().string(): src_path.extension().string());
                 std::filesystem::rename(src, new_file);
             }
             else
@@ -108,7 +116,9 @@ namespace data_util
 
     nlohmann::json write_file(std::string_view file, std::span<const std::byte> data)
     {
-        std::ofstream f(file.data(), std::ios_base::binary);
+        std::string final_file{file};
+        std::ranges::replace(final_file, ' ', '_');
+        std::ofstream f(final_file.data(), std::ios_base::binary);
         f.write(reinterpret_cast<const char*>(data.data()), data.size());
         return nlohmann::json{{"success", "The file was successfully stored"}};
     }

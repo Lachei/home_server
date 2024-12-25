@@ -204,8 +204,7 @@
     async function init_event_calendar() {
         // loading events
 
-        let server_events = await fetch(location.origin + "/get_events",
-            { headers: { "credentials": user_credentials } });
+        let server_events = await fetch(location.origin + "/get_events");
         let events = await server_events.json();
 
         // parsing the events to event calendar format
@@ -235,7 +234,6 @@
     async function create_new_event(event_infos) {
         let event_result = await fetch(location.origin + "/add_event",
             {
-                headers: { "credentials": user_credentials },
                 method: "POST",
                 body: JSON.stringify(event_infos)
             });
@@ -309,7 +307,7 @@
         selection.querySelector(".selection_text").innerHTML = new_value;
     }
     async function setup_user_selections() {
-        let users = await fetch(location.origin + "/get_all_users", { headers: { "credentials": user_credentials } });
+        let users = await fetch(location.origin + "/get_all_users");
         let users_array = await users.json();
         users = "[";
         for (e of users_array)
@@ -371,7 +369,7 @@
         }
     }
     async function get_event(id) {
-        let e = await fetch(location.origin + "/get_event/" + id, { headers: { "credentials": user_credentials } });
+        let e = await fetch(location.origin + "/get_event/" + id);
         return await e.json();
     }
     async function show_event_in_inspector(info, force_update = false) {
@@ -430,7 +428,6 @@
     async function update_event(event) {
         let res = await fetch(location.origin + "/update_event",
             {
-                headers: { "credentials": user_credentials },
                 method: "POST",
                 body: JSON.stringify(event),
             });
@@ -460,10 +457,7 @@
             e.onchange = inspector_observer_callback;
     }
     async function delete_event(id) {
-        let res = await fetch(location.origin + "/delete_event/" + id,
-            {
-                headers: { "credentials": user_credentials }
-            });
+        let res = await fetch(location.origin + "/delete_event/" + id);
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json);

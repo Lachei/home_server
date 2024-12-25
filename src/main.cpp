@@ -433,27 +433,32 @@ int main(int argc, const char** argv) {
     // ------------------------------------------------------------------------------------------------
     const auto overview_page = crow::mustache::load("overview.html");
     CROW_ROUTE(app, "/overview").methods("POST"_method, "GET"_method)([&credentials, &main_page_text, &overview_page](const crow::request& req){
-        EXTRACT_CREDENTIALS(req);
+        EXTRACT_CREDENTIALS_T(req, crow::response);
         
         crow::response res;
         if (!credentials.check_credential(std::string(username), sha)){
             CROW_LOG_INFO << "Credential check failed for username " << username << ':' << sha;
-            return main_page_text;
+            res.body = main_page_text;
+            return res;
         }
+
+        // the cookie is valid for 1 year
+        res.add_header("Set-Cookie", "credentials=" + std::string(username) + ':' + std::string(sha) + "; Max-Age=31536000");
 
         bool is_admin = username == admin_name;
         using op = std::pair<std::string const, crow::json::wvalue>;
         crow::mustache::context crow_context{};
-        crow_context["user_credentials"] = std::string(username) + ":" + std::string(sha);
         if (is_admin) {
             crow_context["benutzername"] = "admin";
             crow_context["user_specific_css"] = "admin.css";
-            return overview_page.render_string(crow_context);
+            res.body = overview_page.render_string(crow_context);
+            return res;
         }
         else {
             crow_context["benutzername"] = std::string(username);
             crow_context["user_specific_css"] = "user.css";
-            return overview_page.render_string(crow_context);
+            res.body = overview_page.render_string(crow_context);
+            return res;
         }
     });
     

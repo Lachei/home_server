@@ -85,6 +85,17 @@ inline std::optional<std::pair<std::string_view, std::string_view>> extract_cred
         {
             return std::optional{extract_credentials(cred->second)};
         }
+        // check for authorization field in cookies
+        cred = req.headers.find("Cookie");
+        if (cred != req.headers.end())
+        {
+            size_t cred_offset = std::string_view(cred->second).find("credentials");
+            if (cred_offset != std::string_view::npos) {
+                cred_offset += 11; // add size of credentials
+                for (; cred_offset < cred->second.size() && (cred->second[cred_offset] == ' ' || cred->second[cred_offset] == '='); ++cred_offset);
+                return std::optional{extract_credentials(std::string_view(cred->second).substr(cred_offset))};
+            }
+        }
     }
     return {};
 }

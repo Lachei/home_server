@@ -343,7 +343,7 @@
 
     function update_tree_search() {
         let directories = cur_directory.split('/');
-        let inner = "<a onclick='cur_directory=base_dir; reload_cur_directory()'>Daten</a>";
+        let inner = "<a onclick='cur_directory=base_dir; reload_cur_directory()'>/daten</a>";
         let composed_dir = "";
         let first = true;
         for (let dir of directories) {
@@ -357,8 +357,8 @@
         document.getElementById("tree_search").innerHTML = inner;
     }
 
-    function get_icon(extension) {
-        if (extension.length == 0)
+    function get_icon(type, extension) {
+        if (type === "d")
             return "<div class='less_top_gap folder'></div>";
         return "<div class='less_top_gap file-icon' data-type='" + extension + "'></div>";
     }
@@ -405,11 +405,11 @@
         });
         for (let element of files_json.elements) {
             list.innerHTML += "<div class='le_div'><input type='checkbox' class='file_checkbox' file='" + element.full_path + "'/></div>";
-            list.innerHTML += "<div class='le_div'>" + get_icon(element.extension) + "</div>";
-            if (element.extension.length > 0)
-                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
-            else
+            list.innerHTML += "<div class='le_div'>" + get_icon(element.type, element.extension) + "</div>";
+            if (element.type === "d")
                 list.innerHTML += "<div class='le_div'><a onclick='cur_directory=\"" + element.full_path + "\"; reload_cur_directory();'>" + element.name + "</a></div>";
+            else
+                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
             list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path) + "</div>";
             list.innerHTML += "<div class='le_div'>" + data_pretty_date(element.change_date) + "</div>";
@@ -417,7 +417,7 @@
     }
 
     async function get_file_list(directory) {
-        let res = await fetch("/daten/" + directory, { headers: { credentials: user_credentials } });
+        let res = await fetch("/daten/" + directory);
         res = await res.json();
         return res;
     }
@@ -434,7 +434,7 @@
 
     async function open_data(data_file, extension) {
         // todo: store fetched pdf to show
-        let data = await fetch(data_file, { headers: { credentials: user_credentials, site_url: window.origin} });
+        let data = await fetch(data_file, { headers: {site_url: window.origin} });
         data = await data.blob();
         let url = URL.createObjectURL(data);
         window.open(url);
@@ -469,7 +469,6 @@
             const contents = evt.target.result;
             let res = await fetch("/upload_daten", {
                 headers: {
-                    credentials: user_credentials,
                     path: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_input.name,
                 },
                 method: "POST",
@@ -487,7 +486,7 @@
     async function create_folder() {
         let folder_name = document.getElementById("new_folder_input").value;
         let folder_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + folder_name;
-        let res = await fetch("/create_folder", { headers: { credentials: user_credentials, path: folder_path } });
+        let res = await fetch("/create_folder", { headers: { path: folder_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);
@@ -497,7 +496,7 @@
     async function create_table_file() {
         let file_name = document.getElementById("new_table_file_input").value;
         let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".tbl";
-        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
+        let res = await fetch("/create_file", { headers: { path: file_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);
@@ -507,7 +506,7 @@
     async function create_md_file() {
         let file_name = document.getElementById("new_md_file_input").value;
         let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".md";
-        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
+        let res = await fetch("/create_file", { headers: { path: file_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);
@@ -517,7 +516,7 @@
     async function create_rech_file() {
         let file_name = document.getElementById("new_rech_file_input").value;
         let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".rech";
-        let res = await fetch("/create_rech", { headers: { credentials: user_credentials, path: file_path } });
+        let res = await fetch("/create_rech", { headers: { path: file_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);
@@ -527,7 +526,7 @@
     async function create_gpx_file() {
         let file_name = document.getElementById("new_gpx_file_input").value;
         let file_path = (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/") + file_name + ".gpx";
-        let res = await fetch("/create_file", { headers: { credentials: user_credentials, path: file_path } });
+        let res = await fetch("/create_file", { headers: { path: file_path } });
         res = await res.json();
         if (!("success" in res))
             console.log(res);
@@ -558,7 +557,6 @@
             files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/"),
         };
         let res = await fetch("/move_daten", {
-            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(send_data),
         });
@@ -577,7 +575,6 @@
             files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/")
         }
         let res = await fetch("/move_daten", {
-            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(send_data),
         });
@@ -596,7 +593,6 @@
             files_to: (cur_directory == null || cur_directory == "" ? "" : cur_directory + "/")
         }
         let res = await fetch("/move_daten", {
-            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(send_data),
         });
@@ -609,7 +605,6 @@
     async function delete_selected() {
         update_selected_files();
         let res = await fetch("/delete_daten", {
-            headers: { credentials: user_credentials },
             method: "POST",
             body: JSON.stringify(copy_files),
         });
@@ -623,11 +618,7 @@
         // opening the editor works by retrieving the editor page with credentials
         // and then opening a new window with the retrieved body as blob in new window
         let url = `/edit_${file_extension}/${file_path}`;
-        let res = await fetch(url, {headers: {credentials: user_credentials, site_url: window.origin}});
-        let new_site = await res.blob();
-
-        let new_site_url = URL.createObjectURL(new_site);
-        window.open(new_site_url);
+        window.open(url);
     }
 
     setup_file_explorer();

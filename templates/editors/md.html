@@ -223,7 +223,6 @@
     </div>
 </body>
 <script>
-    const user_credentials = "{{credentials}}";
     const file_path = "{{&file_path}}";
 
     function reattach_script(script_node) {
@@ -298,7 +297,7 @@
 
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
-            headers: { credentials: user_credentials, path: file_path },
+            headers: { path: file_path },
             method: "POST",
             body: document.getElementById("editor_text").value,
         });

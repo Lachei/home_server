@@ -153,7 +153,7 @@
         setup_shift_creation();
     }
     async function start_shift() {
-        let res = await fetch(location.origin + "/start_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
+        let res = await fetch(location.origin + "/start_shift/{{benutzername}}");
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
@@ -161,7 +161,7 @@
             update_shifts_text();
     }
     async function end_shift() {
-        let res = await fetch(location.origin + "/end_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
+        let res = await fetch(location.origin + "/end_shift/{{benutzername}}");
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
@@ -175,7 +175,7 @@
     };
     async function update_shifts_table() {
         let table_header = "<tr><th>Id</th> <th>Kommentar</th><th>Start</th><th>Ende</th></tr>";
-        fetch(location.origin + "/get_shifts", { headers: { credentials: user_credentials } })
+        fetch(location.origin + "/get_shifts")
             .then(response => {
                 response.json().then(entries => {
                     let user_shifts = "";
@@ -193,7 +193,7 @@
             });
     }
     async function update_shifts_text() {
-        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}", { headers: { credentials: user_credentials } });
+        let res = await fetch(location.origin + "/check_active_shift/{{benutzername}}");
         let res_json = await res.json();
         if ("error" in res_json)
             console.log(res_json.error);
@@ -236,7 +236,6 @@
         const shift_input = document.getElementById("shift_creation");
         let shift = parse_shift_data_from_form(shift_input);
         let result = await fetch("/create_shift", {
-            headers: { credentials: user_credentials, },
             method: "POST",
             body: JSON.stringify(shift)
         });
@@ -248,7 +247,7 @@
     }
 
     async function load_shift(shift_id) {
-        let shift = await fetch("/get_shift/" + shift_id, { headers: { "credentials": user_credentials } });
+        let shift = await fetch("/get_shift/" + shift_id);
         shift = await shift.json();
         return shift;
     }
@@ -314,7 +313,6 @@
             shift.end_time = timepoint_local_to_utc(document.getElementById("ins_end").value);
             shift.comment = document.getElementById("ins_comment").value;
             let res = await fetch("/update_shift", {
-                headers: { credentials: user_credentials, },
                 method: "POST",
                 body: JSON.stringify(shift)
             });
@@ -326,7 +324,7 @@
     }
     
     async function delete_shift() {
-        let res = await fetch("/delete_shift/" + cur_inspected_shift, {headers: {credentials: user_credentials}}); 
+        let res = await fetch("/delete_shift/" + cur_inspected_shift); 
         res = await res.json();
         if ("error" in res)
             console.log(res);

@@ -16,7 +16,7 @@
                 else {
                     let sha = sha256(password + text);
                     fetch(location.origin + "/change_password/" + username, {
-                        headers: { "credentials": user_credentials, "new_pwd": sha }
+                        headers: { "new_pwd": sha }
                     })
                         .then(response => {
                             response.text().then(res => {
@@ -32,8 +32,7 @@
     }
     
     function delete_user(uname) {
-        fetch(window.location.origin + "/delete_user/" + uname,
-            {headers: {"credentials": user_credentials}})
+        fetch(window.location.origin + "/delete_user/" + uname)
         .then(response => {
             response.text().then(text => {
                 console.log(text);
