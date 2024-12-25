@@ -434,11 +434,7 @@
     }
 
     async function open_data(data_file, extension) {
-        // todo: store fetched pdf to show
-        let data = await fetch(data_file, { headers: {site_url: window.origin} });
-        data = await data.blob();
-        let url = URL.createObjectURL(data);
-        window.open(url);
+        window.open(data_file);
     }
 
     function show_div(element, id) {
