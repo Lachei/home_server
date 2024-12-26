@@ -47,28 +47,38 @@ const Line = () => {return {
     /** 
      * @brief Contains the same as lines_gpu, kept to be able to 
      * quickly access the data on the cpu without readback of gpu 
-     * @note The points in here are always only stored once
+     * @note Internal points in here are always only stored once,
+     * and the points are stored in x/y (tile space) coords instead of
+     * lat/lon coords (avoids additional computation on gpu)
      * @type {Float64Array}*/
     lines_cpu: null,
     /**
-     * @brief Contains the same data as lines_cpu
+     * @brief Contains the same data as lines_cpu but offset to the the calculated
+     * center of the gpx track.
+     * First 2 elements of the array are the average position
+     * @type {WebGLBuffer}
      */
     lines_gpu: null,
     cpu_gpu_synced: false,
+    lines_center: {x: 0, y: 0},
     /**
      * @brief Rendering context from which the lines_gpu buffer was created
      * @type {WebGL2RenderingContext} */
     gl: null,
+    lat_lon_to_xy: null,
 
     /**
      * @param {WebGL2RenderingContext} gl 
+     * @param {function(double, double) -> (double, double)} lat_lon_to_xy function to convert from
+     * lat lon coordinates to x/y map coordinates
      */
-    init: function(gl) {
+    init: function(gl, lat_lon_to_xy) {
         this.length = 0;
         const capacity = 10; // default capacity
         this.lines_cpu = new Float64Array(capacity * 2);
         this.lines_gpu = gl.createBuffer();
         this.gl = gl;
+        this.lat_lon_to_xy = lat_lon_to_xy;
         return this;
     },
     /**
@@ -80,7 +90,8 @@ const Line = () => {return {
     },
     /** 
      * @brief Push vertices to the back of the line, if this is the first vertex only
-     * the first line segment is set, but no new line segment is added 
+     * the first line segment is set, but no new line segment is added.
+     * Grows capacity of buffers exponential to avoid constant resizes (amortized constant growth rate)
      * @param [lat, lon] 
      */
     push: function(e) {
@@ -92,9 +103,9 @@ const Line = () => {return {
             t.set(this.lines_cpu);
             this.lines_cpu = t;
         }
-        const [lat, lon] = e;
-        this.lines_cpu[p * 2] = lat;
-        this.lines_cpu[p * 2 + 1] = lon;
+        const [x, y] = this.lat_lon_to_xy(e.lat, e.lon);
+        this.lines_cpu[p * 2] = x;
+        this.lines_cpu[p * 2 + 1] = y;
     },
     /**
      * Adds an array of points with [lat1, lon1, ..., latn, lonn]
@@ -111,14 +122,41 @@ const Line = () => {return {
             t.set(this.lines_cpu);
             this.lines_cpu = t;
         }
-        for (let i = 0; i < a.length; ++i)
-            this.lines_cpu[p + i] = a[i];
+        for (let i = 0; i < a.length / 2; ++i) {
+            const [x, y] = this.lat_lon_to_xy(a[i * 2], a[i * 2 + 1]);
+            this.lines_cpu[p + i * 2] = x;
+            this.lines_cpu[p + i * 2 + 1] = y;
+        }
+    },
+    set_point_coords: function(idx, lat, lon) {
+        this.cpu_gpu_synced = false;
+        const [x, y] = this.lat_lon_to_xy(lat, lon);
+        this.lines_cpu[idx * 2] = x;
+        this.lines_cpu[idx * 2 + 1] = y;
     },
     sync_with_gpu: function() {
         if (this.cpu_gpu_synced)
             return;
+        
+        // 2 way pass to 1. find mean, 2. calc offset positions
+        let m_x = .0;
+        let m_y = .0;
+        for (let i = 0; i < this.lines_cpu.length / 2; ++i) {
+            m_x += this.lines_cpu[i * 2];
+            m_y += this.lines_cpu[i * 2 + 1];
+        }
+        m_x /= this.lines_cpu.length / 2;
+        m_y /= this.lines_cpu.length / 2;
+        this.lines_center.x = m_x;
+        this.lines_center.y = m_y;
+        let upload_buf = new Float64Array(lines_cpu.length);
+        for (let i = 0; i < this.lines_cpu.length/ 2; ++i) {
+            upload_buf[i * 2] = this.lines_cpu[i * 2] - m_x;
+            upload_buf[i * 2 + 1] = this.lines_cpu[i * 2 + 1] - m_y;
+        }
+
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.lines_gpu);
-        this.gl.bufferData(this.gl.ARRAY_BUFFER, this.lines_cpu, this.gl.DYNAMIC_DRAW);
+        this.gl.bufferData(this.gl.ARRAY_BUFFER, this.upload_buf, this.gl.DYNAMIC_DRAW);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
         this.cpu_gpu_synced = true;
     }
