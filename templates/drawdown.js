@@ -35,7 +35,9 @@ function markdown(src) {
     var rx_highlight = /(^|[^A-Za-z\d\\])(([*_])|(~)|(\^)|(--)|(\+\+)|`)(\2?)([^<]*?)\2\8(?!\2)(?=\W|_|$)/g;
     var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2)/g;
     var rx_code = /\n((```|~~~).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
-    var rx_script = /<script>([^]*?)<\/script>/g;
+    var rx_script = /<script.*>([^]*?)<\/script>/g;
+    var rx_style = /<style.*>([^]*?)<\/style>/g;
+    var rx_svg = /<svg.*>([^]*?)<\/svg>/g;
     var rx_link = /((!?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;
     var rx_table = /\n(( *\|.*?\| *\n)+)/g;
     var rx_thead = /^.*\n( *\|( *\:?-+\:?-+\:? *\|)* *\n|)/;
@@ -124,6 +126,18 @@ function markdown(src) {
     // script
     replace(rx_script, function(all, p1, p2, p3, p4) {
         stash[--si] = element('script', p1);
+        return si + '\uf8ff';
+    });
+
+    // style
+    replace(rx_style, function(all, p1, p2, p3, p4) {
+        stash[--si] = element('style', p1);
+        return si + '\uf8ff';
+    });
+
+    // svg
+    replace(rx_svg, function(all, p1, p2, p3, p4) {
+        stash[--si] = element('svg', p1);
         return si + '\uf8ff';
     });
 
