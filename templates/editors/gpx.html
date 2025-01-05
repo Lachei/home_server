@@ -310,16 +310,16 @@
                 gl.uniform1i(program.uniform_locations.virtual_streetmap, 5);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
             }
-            if (document.getElementById("enable_parcell_map").checked && program.uniform_locations.virtual_parcellmap_infos < 20) {
-                console.log("Enabling parcell map");
-                gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
+            if (program.uniform_locations.virtual_parcellmap_infos < 20) {
                 virtual_parcell_map.bind_to_shader(gl.TEXTURE6, gl.TEXTURE7, gl.TEXTURE8, program.uniform_locations.virtual_parcellmap_infos);
                 gl.uniform1i(program.uniform_locations.virtual_parcellmap_index, 6);
                 gl.uniform1i(program.uniform_locations.virtual_parcellmap_index_detail, 7);
                 gl.uniform1i(program.uniform_locations.virtual_parcellmap, 8);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_parcellmap_infos, program.uniform_locations.virtual_parcellmap_infos);
+            }
+            if (document.getElementById("enable_parcell_map").checked) {
+                gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
             } else {
-                console.log("Disabling parcell map");
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
             }
             // drawing the hq center triangles
