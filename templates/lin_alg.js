@@ -312,6 +312,17 @@ const Vec4 = (x = 0, y = 0, z = 0, w = 1) => {
     ret.entries = [x, y, z, w];
     return ret;
 };
+/**
+ * Transforms projected depth back to linear depth
+ * @param {Float} depth depth from the depth buffer (projected depth)
+ * @param {Float} front near plane of the perspective transformation
+ * @param {Float} back far plane of the perspective transformation
+ */
+const projected_to_linear_depth = (depth, front, back) => {
+    const b_m_f = back - front;
+    const b_p_f = back + front;
+    return (-2 * back * front / b_m_f) / (-depth + b_p_f / b_m_f);
+}
 
 /**
  * Predefined testing function

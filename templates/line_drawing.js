@@ -134,6 +134,10 @@ const Line = () => {return {
         this.lines_cpu[idx * 2] = x;
         this.lines_cpu[idx * 2 + 1] = y;
     },
+    remove_point: function(idx) {
+        this.cpu_gpu_synced = false;
+        this.lines_cpu = this.lines_cpu.filter((_, i) => i != idx);
+    },
     sync_with_gpu: function() {
         if (this.cpu_gpu_synced)
             return;
@@ -159,5 +163,15 @@ const Line = () => {return {
         this.gl.bufferData(this.gl.ARRAY_BUFFER, this.upload_buf, this.gl.DYNAMIC_DRAW);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
         this.cpu_gpu_synced = true;
+    },
+    draw: function() {
+        // draw a box for each pair of coordinates (keep in mind that each vertex is only stored 
+        // once so each inner vertex of the line has to be drawn twice, can be achieved with the
+        // correct stride for the instanced rendering)
+        if (!this.cpu_gpu_synced) {
+            console.error("Line points not synced with gpu, skipping draw");
+            return;
+        }
+        let gl = this.gl;
     }
 }};

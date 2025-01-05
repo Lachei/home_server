@@ -88,6 +88,8 @@
         <label for="enable_fpv_cam">Erste person navigation</label>
         <input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_scene();">
         <label for="camera_interpolation">Projektion(3D.o.2D)</label>
+        <input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">
+        <label for="enable_parcell_map">Parzellkarte anzeigen</label>
         {{/editor}}
     </div>
     <div id="content">
@@ -128,6 +130,7 @@
     /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
     let virtual_street_map = null;
+    let virtual_parcell_map = null;
     let cur_gps_pos = null;
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     canvas3d.addEventListener("mousedown", (e) => { 
@@ -240,8 +243,9 @@
     let data = null;
     let in_flight = false;
     async function draw_scene() {
-        if (!gl_context)
+        if (!gl_context || in_flight)
             return;
+        in_flight = true;
 
         // creating the view matrix -------------------------------------------
         const displayWidth = canvas3d.width;
@@ -305,6 +309,18 @@
                 gl.uniform1i(program.uniform_locations.virtual_streetmap_index_detail, 4);
                 gl.uniform1i(program.uniform_locations.virtual_streetmap, 5);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
+            }
+            if (document.getElementById("enable_parcell_map").checked && program.uniform_locations.virtual_parcellmap_infos < 20) {
+                console.log("Enabling parcell map");
+                gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
+                virtual_parcell_map.bind_to_shader(gl.TEXTURE6, gl.TEXTURE7, gl.TEXTURE8, program.uniform_locations.virtual_parcellmap_infos);
+                gl.uniform1i(program.uniform_locations.virtual_parcellmap_index, 6);
+                gl.uniform1i(program.uniform_locations.virtual_parcellmap_index_detail, 7);
+                gl.uniform1i(program.uniform_locations.virtual_parcellmap, 8);
+                gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_parcellmap_infos, program.uniform_locations.virtual_parcellmap_infos);
+            } else {
+                console.log("Disabling parcell map");
+                gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
             }
             // drawing the hq center triangles
             const triangle_resolution = + document.getElementById("triangle_resolution").value;
@@ -400,9 +416,10 @@
         start = performance.now();
 
         // get needed tile indices
-        if (in_flight || !update_tiles)
+        if (!update_tiles){
+            in_flight = false;
             return;
-        in_flight = true;
+        }
         gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.fb);
         const width = indices_render_objs.width;
         const height = indices_render_objs.height;
@@ -410,10 +427,6 @@
             console.debug("Recreating data buffer");
             data = new Uint8Array(width * height * 4);
         }
-        // gl_context.flush();
-        // gl_context.clientWaitSync(sync, 0, 100e6);
-        // gl_context.deleteSync(sync);
-        // gl_context.readPixels(0, 0, width, height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, data);
         await readPixelsAsync(gl_context, width, height, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         start = performance.now();
@@ -438,10 +451,16 @@
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let layer = get_selected_layer();
         let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
-            !layer.getAttribute("swap_xy") ? `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending")}`
-                                           : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending")}`
+            !layer.getAttribute("swap_xy") ? `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending") || ""}`
+                                           : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending") || ""}`
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
+        if (document.getElementById("enable_parcell_map").checked) {
+            let requested_parcell_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+                `https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`
+            )).filter(e => e.level <= 19 && e.level >= 15);
+            virtual_parcell_map.update_needed_tiles(requested_parcell_tiles, {x: camera_center.x(), y: camera_center.y()});
+        }
         console.log(decoded_tiles);
         in_flight = false;
     }
@@ -453,6 +472,7 @@
         let start = performance.now();
         virtual_height_map.upload_loaded_images();
         virtual_street_map.upload_loaded_images();
+        virtual_parcell_map.upload_loaded_images();
         if (document.getElementById("enable_cam_follow").checked) {
             const interp_factor = .05;
             let pre_x = camera_center.x();
@@ -465,12 +485,13 @@
             camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
             camera_updated |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
         }
-        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || camera_updated) {
+        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || virtual_parcell_map.virtual_texture_rebuilt || camera_updated) {
             virtual_height_map.virtual_texture_rebuilt = false;
             virtual_street_map.virtual_texture_rebuilt = false;
+            virtual_parcell_map.virtual_texture_rebuilt = false;
             camera_updated = false;
             console.log(`updating virtual textures took ${performance.now() - start} milli`);
-            console.log(`Free: Detail: ${virtual_street_map.free_tiles_detail.size}, Coarse: ${virtual_street_map.free_tiles.size}`);
+            console.log(`Free spots street map Detail: ${virtual_street_map.free_tiles_detail.size}, Coarse: ${virtual_street_map.free_tiles.size}`);
             draw_scene();
         }
         tex_update_locked = false;
@@ -558,11 +579,14 @@
         uniform vec2 detail_corner;
         uniform vec4 color_correction;
         uniform vec2 cur_gps_pos_loc; // gps position in local pos
+        uniform int parcell_map_enabled; // 0->disabled, enabled else
         ${Util.glsl_virtual_texture_uniforms("streetmap")}
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
+        ${Util.glsl_virtual_texture_uniforms("parcellmap")}
 
         ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("streetmap")}
+        ${Util.glsl_virtual_texture_load("parcellmap")}
         ${Util.glsl_virtual_heightmap_load()}
         ${Util.glsl_calc_level()}
         ${Util.glsl_get_tile_index()}
@@ -620,9 +644,12 @@
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
             float max_del = min(dot(dx, dx), dot(dy, dy));
-            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 4.)) * color_correction;
+            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
+            if (1 == parcell_map_enabled) {
+                surface_col += virtual_parcellmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.));
+            }
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
             float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             out_col = vec4(surface_col.xyz, 1) * nl;
@@ -676,6 +703,7 @@
                     detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
                     cur_gps_pos_loc: gl_context.getUniformLocation(pipeline, 'cur_gps_pos_loc'),
+                    parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
                     virtual_heightmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index_detail'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
@@ -684,6 +712,10 @@
                     virtual_streetmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index_detail'),
                     virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
                     virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
+                    virtual_parcellmap_index: gl_context.getUniformLocation(pipeline, 'virtual_parcellmap_index'),
+                    virtual_parcellmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_parcellmap_index_detail'),
+                    virtual_parcellmap: gl_context.getUniformLocation(pipeline, 'virtual_parcellmap'),
+                    virtual_parcellmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_parcellmap"),
                 }
             };
         };
@@ -704,6 +736,8 @@
         virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         const w_street = 1 << 19;
         virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        const w_parcell = 1 << 19;
+        virtual_parcell_map = VirtualMap().init(w_parcell, w_parcell, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update, 16);

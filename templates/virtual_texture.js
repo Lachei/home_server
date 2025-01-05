@@ -433,6 +433,7 @@ const VirtualMap = () => {
                     }
                     if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
                         console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
+                    this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
                     this.image_canvas_context.drawImage(tile.image, 0, 0);
                     let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
                     this.tiles_storage_gpu.set_image_data(i, data, tile.coarse);
@@ -807,35 +808,6 @@ const CoordinateMappings = {
      * @brief Main function to map from world coordinate to the different map providers
      * @param {int} lat 
      * @param {int} lon 
-     * @param {int} map_type A value of the MapType enum
-     * @return {MapProvider} with functions to make map path lookup easy
-     */
-    global_coordinate_to_provider: function (lat, lon, map_type) {
-        // The function itself simply goes over the providers and picks the first one that covers the coordinates
-        // The order of the providers is such that the important providers come first
-        switch (map_type) {
-            case map_type.height:
-                if (MapProviders.height_minifuzi.supports_point(lat, lon))
-                    return MapProviders.height_minifuzi;
-                return MapProviders.height_row;
-            case map_type.satellite:
-                if (MapProviders.satellite_bayernatlas.supports_point(lat, lon))
-                    return MapProviders.satellite_bayernatlas;
-                return MapProviders.satellite_row;
-            case map_type.street_view:
-                if (MapProviders.street_view_bayernatlas.supports_point(lat, lon))
-                    return MapProviders.street_view_bayernatlas;
-                return MapProviders.street_view_row;
-            case map_type.parcel_borders:
-                if (MapProviders.parcel_borders_bayernatlas.supports_point(lat, lon))
-                    return MapProviders.parcel_borders_bayernatlas;
-        }
-        return null;
-    },
-    /**
-     * @brief Main function to map from world coordinate to the different map providers
-     * @param {int} lat 
-     * @param {int} lon 
      * @param {int} width 
      * @param {int} map_type A value of the MapType enum
      * @return {String} with a full path to download the final image tile
@@ -989,14 +961,18 @@ const Util = {
             vec2 image_uv = (uv_offset - vec2(offset)) + uv_loc;
             image_uv /= width;
             vec4 c = texture(virtual_${v_map_name}, vec3(image_uv, float(index)));
-            if (detail_idx != index) {
+            if (true || detail_idx != index) {
                 offset = ivec2(virtual_${v_map_name}_infos[detail_idx].x, virtual_${v_map_name}_infos[detail_idx].y);
                 width = float(virtual_${v_map_name}_infos[detail_idx].z);
                 image_uv = (uv_offset - vec2(offset)) + uv_loc;
                 image_uv /= width;
                 vec4 t = texture(virtual_${v_map_name}, vec3(image_uv, float(detail_idx)));
                 //t = vec4(1, 0 ,0, 1);
-                c = mix(c, t, clamp(level - floor(level), 0., 1.));
+                float alpha = clamp(level - floor(level), 0., 1.);
+                alpha = alpha * 10. - 5.;
+                alpha = (alpha / (1. + abs(alpha))) * .5 + .5;
+                c = mix(c, t, alpha);
+                // c = vec4(alpha, 0, 0, 1);
             }
             return c;
         }
@@ -1176,7 +1152,7 @@ const readPixelsAsync = function (gl, width, height, buffer) {
     gl.bufferData(gl.PIXEL_PACK_BUFFER, buffer.byteLength, gl.STREAM_READ);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
     var sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    if (!sync) return null;
+    if (!sync) return nullkk;
     gl.flush();
     return clientWaitAsync(gl, sync, 0, 10).then(function () {
         gl.deleteSync(sync);
