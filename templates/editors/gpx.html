@@ -112,6 +112,7 @@
     let canvas3d = document.getElementById("canvas3d");
     let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
+    let last_hovered_mouse_pos = null;
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
     let indices_render_objs = {}; // object containing render objects needed for index rendering
@@ -121,6 +122,7 @@
     const cam_rot_speed = .002;
     const cam_dir_speed = Util.m_to_wgs_84_uv(1); // go forward 1 meter
     const up_dir = Vec4(0, 0, 1, 0);
+    const pre_draw_buffer_size_fact = 1 / 4;
     let camera_dir = 0;     // given in radians, 0 means dead north
     let camera_pitch = 0;   // given in radians, 0 means straight ahead, pi straight up -pi straight down
     let camera_perspective = null;
@@ -135,6 +137,7 @@
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     canvas3d.addEventListener("mousedown", (e) => { 
         canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
+        last_hovered_mouse_pos = { x: e.pageX, y: e.pageY};
         // get the depth value and use it to calculate the world position
     });
     canvas3d.addEventListener("touchstart", (e) => {
@@ -142,7 +145,8 @@
                               let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
                               canvas_drag_start = { x: x, y: y, 
                               dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
-                              type: e.touches.length == 1 ? "move": "rotate"}; });
+                              type: e.touches.length == 1 ? "move": "rotate"};
+                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY}; });
     const move_camera = (cur_move) => {
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - cur_move.x;
@@ -173,13 +177,14 @@
             default: console.error("Unknown move type " + canvas_drag_start.type);
             }
             canvas_drag_start = cur_move;
+            last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY};
             camera_updated = true;
         }
     };
     canvas3d.addEventListener("mousemove", (e) => {
         if (!canvas_drag_start)
             return;
-        let cur_move = {x: e.screenX, y: e.screenY, type: canvas_drag_start.type || "unknown"};
+        let cur_move = {x: e.screenX, y: e.screenY, pageX: e.pageX, pageY: e.pageY, type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
         e.preventDefault();
     });
@@ -188,7 +193,7 @@
             return;
         let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
         let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
-        let cur_move = {x: x, y: y,
+        let cur_move = {x: x, y: y, pageX: e.pageX, pageY: e.pageY,
             dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
             type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
@@ -241,6 +246,7 @@
 
     // draws the scene with all loaded data
     let data = null;
+    let depth_data = new Uint8Array(4);
     let in_flight = false;
     async function draw_scene() {
         if (!gl_context || in_flight)
@@ -286,6 +292,7 @@
             gl.enable(gl.DEPTH_TEST);
 
             gl.useProgram(program.program);
+            gl.uniformMatrix4fv(program.uniform_locations.view, false, view.entries);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
             gl.uniform2f(program.uniform_locations.detail_corner, detail_corner.x, detail_corner.y);
             if (program.uniform_locations.color_correction) { 
@@ -420,15 +427,27 @@
             in_flight = false;
             return;
         }
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.fb);
+        gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.fb);
         const width = indices_render_objs.width;
         const height = indices_render_objs.height;
         if (!data || data.byteLength < width * height * 4) {
             console.debug("Recreating data buffer");
             data = new Uint8Array(width * height * 4);
         }
-        await readPixelsAsync(gl_context, width, height, data);
+        await readPixelsAsync(gl_context, 0, 0, width, height, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
+        let depth_promise = null;
+        if (last_hovered_mouse_pos) {
+            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.depth_fb);
+            let p_x = (last_hovered_mouse_pos.x - canvas3d.getBoundingClientRect().left) * pre_draw_buffer_size_fact;
+            let p_y = (last_hovered_mouse_pos.y - canvas3d.getBoundingClientRect().top) * pre_draw_buffer_size_fact;
+            if (p_x > 0 && p_x < width && p_y > 0 && p_y < height) {
+                console.log("Getting the depth value" + p_x + "|" + p_y);
+                depth_promise = readPixelsAsync(gl_context, Math.floor(p_x), Math.floor(p_y), 1, 1, depth_data);
+            }
+            else
+                console.warn("Outside of canvas");
+        }
         start = performance.now();
         let indices = new Uint32Array(data.buffer);
         let needed_tiles = new Set(indices);
@@ -462,6 +481,11 @@
             virtual_parcell_map.update_needed_tiles(requested_parcell_tiles, {x: camera_center.x(), y: camera_center.y()});
         }
         console.log(decoded_tiles);
+        
+        if (depth_promise) {
+            await depth_promise;
+            console.log("Got depth: " + depth_data[0] + " " + depth_data[1] + " " + depth_data[2] + " " + depth_data[3])
+        }
         in_flight = false;
     }
     let tex_update_locked = false;
@@ -528,6 +552,7 @@
         uniform vec2 grid_offset_pos;
         uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
         uniform vec2 cam_off;               // cam off needed to convert the loc_pos to loc_pos_cam (camera at the center)
+        uniform mat4 view;
         uniform mat4 view_proj;
         ${Util.glsl_virtual_texture_uniforms("heightmap")}
 
@@ -535,6 +560,7 @@
         out vec2 loc_pos;
         out float height_m;
         out float n_dot_l;
+        out float depth;
 
         ${Util.glsl_calc_level()}
         ${Util.glsl_virtual_heightmap_load()}
@@ -563,6 +589,7 @@
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
 
             gl_Position = view_proj * pos_cam_rel;
+            depth = (view * pos_cam_rel).z;
         }
         `;
         const fs = `#version 300 es
@@ -591,7 +618,7 @@
         ${Util.glsl_calc_level()}
         ${Util.glsl_get_tile_index()}
 
-        out vec4 out_col; 
+        layout (location = 0) out vec4 out_col;
         void main(void) {
             if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
                 discard;
@@ -668,6 +695,7 @@
         precision highp usampler2D;
 
         in vec2 loc_pos;
+        in float depth;
 
         uniform vec2 grid_offset_pos;
         uniform vec2 detail_corner;
@@ -675,7 +703,8 @@
         ${Util.glsl_calc_level()}
         ${Util.glsl_get_tile_index("heightmap")}
 
-        out vec4 out_col; 
+        layout (location = 0) out vec4 out_col;
+        layout (location = 1) out vec4 out_depth;
         void main(void) {
             if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
                 discard;
@@ -685,6 +714,12 @@
                            float(((tile_id.x & 0xf) << 4) | ((tile_id.y >> 8) & 0xf)) / div,
                            float((tile_id.x >> 4) & 0xff) / div, 
                            float(tile_id.z) / div);
+            uint depth_bits = floatBitsToUint(depth);
+            //out_depth = vec4(float( depth_bits         & 0xffU) / div,
+            //                 float((depth_bits >> 8u)  & 0xffU) / div,
+            //                 float((depth_bits >> 16u) & 0xffU) / div,
+            //                 float( depth_bits >> 24u         ) / div);
+            out_depth = vec4(1);
         }
         `;
 
@@ -699,6 +734,7 @@
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
                     cam_off: gl_context.getUniformLocation(pipeline, 'cam_off'),
+                    view: gl_context.getUniformLocation(pipeline, 'view'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
                     detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
@@ -835,24 +871,34 @@
             canvas.width = displayWidth;
             canvas.height = displayHeight;
 
-
             if (fb && gl) {
-                fb.width = Math.floor(displayWidth / 4);
-                fb.height = Math.floor(displayHeight / 4);
+                fb.width = Math.floor(displayWidth * pre_draw_buffer_size_fact);
+                fb.height = Math.floor(displayHeight * pre_draw_buffer_size_fact);
 
                 if (fb.texture)
                     gl.deleteTexture(fb.texture);
+                if (fb.depth_texture)
+                    gl.deleteTexture(fb.depth_texture);
                 if (fb.fb)
                     gl.deleteFramebuffer(fb.fb);
+                if (fb.depth_fb)
+                    gl.deleteFramebuffer(fb.depth_fb);
                 fb.texture = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, fb.texture);
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fb.width, fb.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                fb.depth_texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, fb.depth_texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fb.width, fb.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
                 fb.fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, fb.depth_texture, 0);
+                fb.depth_fb = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fb.depth_fb);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.depth_texture, 0);
             }
         }
         return needResize;

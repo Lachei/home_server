@@ -1146,11 +1146,11 @@ const clientWaitAsync = function (gl, sync, flags = 0, interval_ms = 10) {
     });
 };
 
-const readPixelsAsync = function (gl, width, height, buffer) {
+const readPixelsAsync = function (gl, x, y, width, height, buffer) {
     const bufpak = gl.createBuffer();
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bufpak);
     gl.bufferData(gl.PIXEL_PACK_BUFFER, buffer.byteLength, gl.STREAM_READ);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
     var sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     if (!sync) return nullkk;
     gl.flush();
