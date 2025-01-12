@@ -153,7 +153,7 @@
             let yDel = canvas_drag_start.y - cur_move.y;
             let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
             if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
-                height_multiplier = Math.max(1, last_hovered_mouse_pos.depth * 1e5);
+                height_multiplier = Math.max(1e-8, last_hovered_mouse_pos.depth * 1e5);
             let speed = cam_dir_speed * height_multiplier;
             switch(canvas_drag_start.type) {
             case "move":
@@ -207,6 +207,8 @@
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", (e) => {
         let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
+            height_multiplier = Math.max(1e-8, last_hovered_mouse_pos.depth * 2e5);
         camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         draw_scene();
     });
@@ -216,6 +218,8 @@
             return;
 
         let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
+            height_multiplier = Math.max(1e-8, last_hovered_mouse_pos.depth * 1e5);
         let speed = cam_dir_speed * height_multiplier;
         let key = e.key;
         if (key === key.toUpperCase()) {
