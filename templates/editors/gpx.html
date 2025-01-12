@@ -72,7 +72,7 @@
             <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
             <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" detail_switch_level="22">Satellit</option>
-            <option base_url="intergeo33.bayernwolke.de/betty/atkis/" ending="" detail_switch_level="18" detail_offset="4">Straßen bayern</option>
+            <option base_url="intergeo33.bayernwolke.de/betty/atkis/" ending="" detail_switch_level="18">Straßen bayern</option>
             <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern 3d</option>
             <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18" col_corr_b=".85">Satellit bayern</option>
             <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
@@ -112,7 +112,7 @@
     let canvas3d = document.getElementById("canvas3d");
     let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
-    let last_hovered_mouse_pos = null;
+    let last_hovered_mouse_pos = {x: 0, y: 0, depth: null};
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
     let indices_render_objs = {}; // object containing render objects needed for index rendering
@@ -137,7 +137,7 @@
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     canvas3d.addEventListener("mousedown", (e) => { 
         canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
-        last_hovered_mouse_pos = { x: e.pageX, y: e.pageY};
+        last_hovered_mouse_pos = { x: e.pageX, y: e.pageY, depth: last_hovered_mouse_pos.depth};
         // get the depth value and use it to calculate the world position
     });
     canvas3d.addEventListener("touchstart", (e) => {
@@ -146,12 +146,14 @@
                               canvas_drag_start = { x: x, y: y, 
                               dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
                               type: e.touches.length == 1 ? "move": "rotate"};
-                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY}; });
+                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY, depth: last_hovered_mouse_pos.depth}; });
     const move_camera = (cur_move) => {
         if (canvas_drag_start) {
             let xDel = canvas_drag_start.x - cur_move.x;
             let yDel = canvas_drag_start.y - cur_move.y;
             let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+            if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
+                height_multiplier = Math.max(1, last_hovered_mouse_pos.depth * 1e5);
             let speed = cam_dir_speed * height_multiplier;
             switch(canvas_drag_start.type) {
             case "move":
@@ -177,7 +179,7 @@
             default: console.error("Unknown move type " + canvas_drag_start.type);
             }
             canvas_drag_start = cur_move;
-            last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY};
+            last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY, depth: last_hovered_mouse_pos.depth};
             camera_updated = true;
         }
     };
@@ -247,6 +249,7 @@
     // draws the scene with all loaded data
     let data = null;
     let depth_data = new Uint8Array(4);
+    let depth_data_f32 = new Float32Array(depth_data.buffer);
     let in_flight = false;
     async function draw_scene() {
         if (!gl_context || in_flight)
@@ -341,6 +344,10 @@
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
             gl.uniform2f(program.uniform_locations.cam_off, camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon);
+            if (!framebuffer)
+                gl.drawBuffers([gl.BACK]);
+            else
+                gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
             gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
 
             // drawing the surrounding lower quality triangles
@@ -389,6 +396,10 @@
                 gl.uniform1i(program.uniform_locations.tile_width, cur_triangles);
                 gl.uniform2f(program.uniform_locations.tile_width_uv, tile_width_uv, 1.);
                 gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
+                if (!framebuffer)
+                    gl.drawBuffers([gl.BACK]);
+                else
+                    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
                 gl.drawArrays(gl.TRIANGLES, 0, 6 * cur_triangles * cur_triangles);
             };
             for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
@@ -469,9 +480,23 @@
         ));
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let layer = get_selected_layer();
-        let requested_streetmap_tiles = decoded_tiles.map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+        const offset_level = (level, layer) => {
+            if (layer.getAttribute("level_offset"))
+                level += +layer.getAttribute("level_offset");
+            return level;
+        };
+        const offset_xy = (layer) => {
+            let offset = {x: 0, y: 0};
+            if (layer.getAttribute("x_offset")) 
+                offset.x = parseFloat(layer.getAttribute("x_offset"));
+            if (layer.getAttribute("y_offset")) 
+                offset.y = parseFloat(layer.getAttribute("y_offset"));
+            return offset;
+        };
+        let requested_streetmap_tiles = decoded_tiles.map(tile => 
+            TileRequest().init(tile.x, tile.y, offset_level(tile.level, layer),
             !layer.getAttribute("swap_xy") ? `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending") || ""}`
-                                           : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending") || ""}`
+                                           : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending") || ""}`,
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         if (document.getElementById("enable_parcell_map").checked) {
@@ -484,7 +509,10 @@
         
         if (depth_promise) {
             await depth_promise;
-            console.log("Got depth: " + depth_data[0] + " " + depth_data[1] + " " + depth_data[2] + " " + depth_data[3])
+            if (!last_hovered_mouse_pos) last_hovered_mouse_pos = {};
+            if (isFinite(depth_data_f32[0] && !isNaN(depth_data_f32[0])))
+                last_hovered_mouse_pos.depth = depth_data_f32[0];
+            console.log("Got depth: " + depth_data_f32[0])
         }
         in_flight = false;
     }
@@ -589,7 +617,7 @@
             vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
 
             gl_Position = view_proj * pos_cam_rel;
-            depth = (view * pos_cam_rel).z;
+            depth = -(view * pos_cam_rel).z; // has to be inverted as the depth is in -z direction;
         }
         `;
         const fs = `#version 300 es
@@ -715,11 +743,10 @@
                            float((tile_id.x >> 4) & 0xff) / div, 
                            float(tile_id.z) / div);
             uint depth_bits = floatBitsToUint(depth);
-            //out_depth = vec4(float( depth_bits         & 0xffU) / div,
-            //                 float((depth_bits >> 8u)  & 0xffU) / div,
-            //                 float((depth_bits >> 16u) & 0xffU) / div,
-            //                 float( depth_bits >> 24u         ) / div);
-            out_depth = vec4(1);
+            out_depth = vec4(float( depth_bits         & 0xffU) / div,
+                             float((depth_bits >> 8u)  & 0xffU) / div,
+                             float((depth_bits >> 16u) & 0xffU) / div,
+                             float( depth_bits >> 24u         ) / div);
         }
         `;
 
@@ -892,6 +919,9 @@
                 fb.depth_texture = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, fb.depth_texture);
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, fb.width, fb.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 fb.fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);

@@ -183,7 +183,6 @@ const VirtualMap = () => {
                 new_off_x *= this.v_tex_width;  // convert to tile space
                 new_off_y *= this.v_tex_height; // convert to tile space
                 // go through all detail images and check if they have to be deleted
-                let del_indices = [];
                 let detail_tiles = this.tiles_storage_cpu_detail;
                 const detail_width = 1 << 11;
                 for (let i = 0; i < detail_tiles.length; ++i) {
@@ -210,8 +209,8 @@ const VirtualMap = () => {
                 }
                 let shift = tile_width_bits - tile_req.level;
                 let width = (1 << shift);
-                let final_x = tile_req.x * width;
-                let final_y = tile_req.y * width;
+                let final_x = (tile_req.x * width + Math.floor(tile_req.offsets.x * this.v_tex_width)) % this.v_tex_width;
+                let final_y = (tile_req.y * width + Math.floor(tile_req.offsets.y * this.v_tex_height)) % this.v_tex_height;
                 if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height) {
                     console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
                     continue;
@@ -660,9 +659,10 @@ const TileRequest = () => {
         y: 0,
         level: 0,
         url: "",
+        offsets: {x: 0, y: 0, z: 0},
 
         // member functions
-        init: function (x, y, level, url) { this.x = x; this.y = y; this.level = level; this.url = url; return this; },
+        init: function (x, y, level, url, offsets = {x: 0, y: 0, z: 0}) { this.x = x; this.y = y; this.level = level; this.url = url; this.offsets = offsets; return this; },
     };
 };
 
