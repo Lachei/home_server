@@ -443,7 +443,7 @@ int main(int argc, const char** argv) {
         }
 
         // the cookie is valid for 1 year
-        res.add_header("Set-Cookie", "credentials=" + std::string(username) + ':' + std::string(sha) + "; Max-Age=31536000");
+        res.add_header("Set-Cookie", "credentials=" + std::string(username) + ':' + std::string(sha) + "; Max-Age=31536000; SameSite=Strict");
 
         bool is_admin = username == admin_name;
         using op = std::pair<std::string const, crow::json::wvalue>;

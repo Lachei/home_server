@@ -159,7 +159,7 @@
         <textarea id="ne_description" name="ne_description" cols="40" rows="5"></textarea>
 
         <label for="ne_start_time"><b>Start Datum</b></label>
-        <input id="ne_start_time" type="datetime-local">
+        <input id="ne_start_time" type="datetime-local" onchange="start_time_changed();">
 
         <label for="ne_end_time"><b>End Datum</b></label>
         <input id="ne_end_time" type="datetime-local">
@@ -229,6 +229,10 @@
             eventClick: show_event_in_inspector,
             eventDrop: update_event_drag,
             eventResize: update_event_drag,
+            nowIndicator: true,
+            selectable: true,
+            select: select_time,
+            selectLongPressDelay: 500,
         });
     }
     async function create_new_event(event_infos) {
@@ -259,11 +263,9 @@
         tooltip.style.left = click_event.pageX + "px";
         // setting up the buttons
         for (user of left_values)
-            if (user != "{{benutzername}}")
-                left_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+            left_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
         for (user of right_values)
-            if (user != "{{benutzername}}")
-                right_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
+            right_select.innerHTML += "<button id='bn_" + user + "' class='selector_button' onclick=\"switch_side(this);\">" + user + "</button>\n";
 
         tooltip.style.display = "grid";
         let ignore_next = true;
@@ -278,7 +280,7 @@
                 e.clientY < div_rect.top || e.clientY > div_rect.bottom) {
                 tooltip.style.display = "none";
 
-                let new_value = user == "admin" ? "" : ",{{benutzername}}";
+                let new_value = "";
                 let all_included = false;
                 for (e of right_select.childNodes) {
                     if ("id" in e) {
@@ -465,6 +467,25 @@
             hide_inspector();
             event_calendar.removeEventById(id);
         }
+    }
+    function start_time_changed() {
+        const start = document.getElementById("ne_start_time");
+        const end = document.getElementById("ne_end_time");
+        if (start.value.length == 0 || end.value.length > 0) 
+            return;
+
+        let start_t = new Date(Date.parse(start.value));
+        console.log(start_t.getTime());
+        start_t.setTime(start_t.getTime() + (3600 * 2000));
+        console.log(start_t.getTime());
+        end.value = start_t.toISOString().slice(0, 16);
+        console.log(end.value);
+    }
+    function select_time(info) {
+        info.start.setMinutes(info.start.getMinutes() - info.start.getTimezoneOffset());
+        info.end.setMinutes(info.end.getMinutes() - info.end.getTimezoneOffset());
+        document.getElementById("ne_start_time").value = info.start.toISOString().slice(0, 16);
+        document.getElementById("ne_end_time").value = info.end.toISOString().slice(0, 16);
     }
 </script>
 <script onload="setup_arbeitsplanung();" onerror="console.log('error with script');" type="text/javascript"
