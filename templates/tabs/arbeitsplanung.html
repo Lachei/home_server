@@ -469,8 +469,8 @@
         }
     }
     function start_time_changed() {
-        const start = document.getElementById("ne_start_time");
-        const end = document.getElementById("ne_end_time");
+        const start = document.getElementById("timetable_editing").querySelector("#ne_start_time");
+        const end = document.getElementById("timetable_editing").querySelector("#ne_end_time");
         if (start.value.length == 0 || end.value.length > 0) 
             return;
 
@@ -481,11 +481,13 @@
         end.value = start_t.toISOString().slice(0, 16);
         console.log(end.value);
     }
+    let c=0;
     function select_time(info) {
+        console.log("selecting" + c++);
         info.start.setMinutes(info.start.getMinutes() - info.start.getTimezoneOffset());
         info.end.setMinutes(info.end.getMinutes() - info.end.getTimezoneOffset());
-        document.getElementById("ne_start_time").value = info.start.toISOString().slice(0, 16);
-        document.getElementById("ne_end_time").value = info.end.toISOString().slice(0, 16);
+        document.getElementById("timetable_editing").querySelector("#ne_start_time").value = info.start.toISOString().slice(0, 16);
+        document.getElementById("timetable_editing").querySelector("#ne_end_time").value = info.end.toISOString().slice(0, 16);
     }
 </script>
 <script onload="setup_arbeitsplanung();" onerror="console.log('error with script');" type="text/javascript"
