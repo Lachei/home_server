@@ -113,7 +113,6 @@
     let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
     let map_drag_start = null;      // same as canvas drag start but stores the surface position // in global format
-    let last_hovered_mouse_pos = null;
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
     let indices_render_objs = {}; // object containing render objects needed for index rendering
@@ -150,7 +149,6 @@
     };
     canvas3d.addEventListener("mousedown", (e) => { 
         canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
-        last_hovered_mouse_pos = { x: e.pageX, y: e.pageY};
         // get the depth value and use it to calculate the world position
         map_drag_start = get_map_drag_start(e.pageX, e.pageY);
     });
@@ -160,7 +158,6 @@
                               canvas_drag_start = { x: x, y: y, 
                               dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
                               type: e.touches.length == 1 ? "move": "rotate"};
-                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY}; 
                               map_drag_start = get_map_drag_start(x, y)}, { passive: true });
     const move_camera = (cur_move) => {
         if (!canvas_drag_start) 
@@ -210,7 +207,6 @@
         default: console.error("Unknown move type " + canvas_drag_start.type);
         }
         canvas_drag_start = cur_move;
-        last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY, depth: last_hovered_mouse_pos.depth};
         camera_updated = true;
     };
     canvas3d.addEventListener("mousemove", (e) => {
@@ -252,8 +248,6 @@
             return;
 
         let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
-        if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
-            height_multiplier = Math.max(1e-8, last_hovered_mouse_pos.depth * 1e5);
         let speed = cam_dir_speed * height_multiplier;
         let key = e.key;
         if (key === key.toUpperCase()) {
@@ -464,16 +458,14 @@
         await readPixelsAsync(gl_context, 0, 0, width, height, data);
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
         let depth_promise = null;
-        if (last_hovered_mouse_pos) {
-            gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.depth_fb);
-            const w =  indices_render_objs.width;
-            const h =  indices_render_objs.height;
-            if (!depth_data || depth_data.length < w * h * 4) {
-                depth_data = new Uint8Array(w * h * 4);
-                depth_data_f32 = new Float32Array(depth_data.buffer);
-            }
-            depth_promise = readPixelsAsync(gl_context, 0, 0, w, h, depth_data);
+        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.depth_fb);
+        const w =  indices_render_objs.width;
+        const h =  indices_render_objs.height;
+        if (!depth_data || depth_data.length < w * h * 4) {
+            depth_data = new Uint8Array(w * h * 4);
+            depth_data_f32 = new Float32Array(depth_data.buffer);
         }
+        depth_promise = readPixelsAsync(gl_context, 0, 0, w, h, depth_data);
         start = performance.now();
         let indices = new Uint32Array(data.buffer);
         let needed_tiles = new Set(indices);
