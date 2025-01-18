@@ -159,6 +159,130 @@ const MatBaseObject = (rows = 4, cols = 4) => {
             this.entries.forEach((e, i) => m.entries[i] = (1 - a) * e + a * o.entries[i]);
             return m;
         },
+        inverse: function () {
+            if (this.rows != 4 || this.cols != 4)
+                throw Error('Current implementation only supports inversion of 4x4 matrices');
+            let inv = MatBaseObject(this.rows, this.cols);
+            inv.entries[0] = this.entries[5]  * this.entries[10] * this.entries[15] - 
+                     this.entries[5]  * this.entries[11] * this.entries[14] - 
+                     this.entries[9]  * this.entries[6]  * this.entries[15] + 
+                     this.entries[9]  * this.entries[7]  * this.entries[14] +
+                     this.entries[13] * this.entries[6]  * this.entries[11] - 
+                     this.entries[13] * this.entries[7]  * this.entries[10];
+
+            inv.entries[4] = -this.entries[4]  * this.entries[10] * this.entries[15] + 
+                      this.entries[4]  * this.entries[11] * this.entries[14] + 
+                      this.entries[8]  * this.entries[6]  * this.entries[15] - 
+                      this.entries[8]  * this.entries[7]  * this.entries[14] - 
+                      this.entries[12] * this.entries[6]  * this.entries[11] + 
+                      this.entries[12] * this.entries[7]  * this.entries[10];
+
+            inv.entries[8] = this.entries[4]  * this.entries[9] * this.entries[15] - 
+                     this.entries[4]  * this.entries[11] * this.entries[13] - 
+                     this.entries[8]  * this.entries[5] * this.entries[15] + 
+                     this.entries[8]  * this.entries[7] * this.entries[13] + 
+                     this.entries[12] * this.entries[5] * this.entries[11] - 
+                     this.entries[12] * this.entries[7] * this.entries[9];
+
+            inv.entries[12] = -this.entries[4]  * this.entries[9] * this.entries[14] + 
+                       this.entries[4]  * this.entries[10] * this.entries[13] +
+                       this.entries[8]  * this.entries[5] * this.entries[14] - 
+                       this.entries[8]  * this.entries[6] * this.entries[13] - 
+                       this.entries[12] * this.entries[5] * this.entries[10] + 
+                       this.entries[12] * this.entries[6] * this.entries[9];
+
+            inv.entries[1] = -this.entries[1]  * this.entries[10] * this.entries[15] + 
+                      this.entries[1]  * this.entries[11] * this.entries[14] + 
+                      this.entries[9]  * this.entries[2] * this.entries[15] - 
+                      this.entries[9]  * this.entries[3] * this.entries[14] - 
+                      this.entries[13] * this.entries[2] * this.entries[11] + 
+                      this.entries[13] * this.entries[3] * this.entries[10];
+
+            inv.entries[5] = this.entries[0]  * this.entries[10] * this.entries[15] - 
+                     this.entries[0]  * this.entries[11] * this.entries[14] - 
+                     this.entries[8]  * this.entries[2] * this.entries[15] + 
+                     this.entries[8]  * this.entries[3] * this.entries[14] + 
+                     this.entries[12] * this.entries[2] * this.entries[11] - 
+                     this.entries[12] * this.entries[3] * this.entries[10];
+
+            inv.entries[9] = -this.entries[0]  * this.entries[9] * this.entries[15] + 
+                      this.entries[0]  * this.entries[11] * this.entries[13] + 
+                      this.entries[8]  * this.entries[1] * this.entries[15] - 
+                      this.entries[8]  * this.entries[3] * this.entries[13] - 
+                      this.entries[12] * this.entries[1] * this.entries[11] + 
+                      this.entries[12] * this.entries[3] * this.entries[9];
+
+            inv.entries[13] = this.entries[0]  * this.entries[9] * this.entries[14] - 
+                      this.entries[0]  * this.entries[10] * this.entries[13] - 
+                      this.entries[8]  * this.entries[1] * this.entries[14] + 
+                      this.entries[8]  * this.entries[2] * this.entries[13] + 
+                      this.entries[12] * this.entries[1] * this.entries[10] - 
+                      this.entries[12] * this.entries[2] * this.entries[9];
+
+            inv.entries[2] = this.entries[1]  * this.entries[6] * this.entries[15] - 
+                     this.entries[1]  * this.entries[7] * this.entries[14] - 
+                     this.entries[5]  * this.entries[2] * this.entries[15] + 
+                     this.entries[5]  * this.entries[3] * this.entries[14] + 
+                     this.entries[13] * this.entries[2] * this.entries[7] - 
+                     this.entries[13] * this.entries[3] * this.entries[6];
+
+            inv.entries[6] = -this.entries[0]  * this.entries[6] * this.entries[15] + 
+                      this.entries[0]  * this.entries[7] * this.entries[14] + 
+                      this.entries[4]  * this.entries[2] * this.entries[15] - 
+                      this.entries[4]  * this.entries[3] * this.entries[14] - 
+                      this.entries[12] * this.entries[2] * this.entries[7] + 
+                      this.entries[12] * this.entries[3] * this.entries[6];
+
+            inv.entries[10] = this.entries[0]  * this.entries[5] * this.entries[15] - 
+                      this.entries[0]  * this.entries[7] * this.entries[13] - 
+                      this.entries[4]  * this.entries[1] * this.entries[15] + 
+                      this.entries[4]  * this.entries[3] * this.entries[13] + 
+                      this.entries[12] * this.entries[1] * this.entries[7] - 
+                      this.entries[12] * this.entries[3] * this.entries[5];
+
+            inv.entries[14] = -this.entries[0]  * this.entries[5] * this.entries[14] + 
+                       this.entries[0]  * this.entries[6] * this.entries[13] + 
+                       this.entries[4]  * this.entries[1] * this.entries[14] - 
+                       this.entries[4]  * this.entries[2] * this.entries[13] - 
+                       this.entries[12] * this.entries[1] * this.entries[6] + 
+                       this.entries[12] * this.entries[2] * this.entries[5];
+
+            inv.entries[3] = -this.entries[1] * this.entries[6] * this.entries[11] + 
+                      this.entries[1] * this.entries[7] * this.entries[10] + 
+                      this.entries[5] * this.entries[2] * this.entries[11] - 
+                      this.entries[5] * this.entries[3] * this.entries[10] - 
+                      this.entries[9] * this.entries[2] * this.entries[7] + 
+                      this.entries[9] * this.entries[3] * this.entries[6];
+
+            inv.entries[7] = this.entries[0] * this.entries[6] * this.entries[11] - 
+                     this.entries[0] * this.entries[7] * this.entries[10] - 
+                     this.entries[4] * this.entries[2] * this.entries[11] + 
+                     this.entries[4] * this.entries[3] * this.entries[10] + 
+                     this.entries[8] * this.entries[2] * this.entries[7] - 
+                     this.entries[8] * this.entries[3] * this.entries[6];
+
+            inv.entries[11] = -this.entries[0] * this.entries[5] * this.entries[11] + 
+                       this.entries[0] * this.entries[7] * this.entries[9] + 
+                       this.entries[4] * this.entries[1] * this.entries[11] - 
+                       this.entries[4] * this.entries[3] * this.entries[9] - 
+                       this.entries[8] * this.entries[1] * this.entries[7] + 
+                       this.entries[8] * this.entries[3] * this.entries[5];
+
+            inv.entries[15] = this.entries[0] * this.entries[5] * this.entries[10] - 
+                      this.entries[0] * this.entries[6] * this.entries[9] - 
+                      this.entries[4] * this.entries[1] * this.entries[10] + 
+                      this.entries[4] * this.entries[2] * this.entries[9] + 
+                      this.entries[8] * this.entries[1] * this.entries[6] - 
+                      this.entries[8] * this.entries[2] * this.entries[5];
+
+            det = this.entries[0] * inv.entries[0] + this.entries[1] * inv.entries[4] + this.entries[2] * inv.entries[8] + this.entries[3] * inv.entries[12];
+
+            det = 1.0 / det;
+
+            for (i = 0; i < 16; i++)
+                inv.entries[i] *= det;
+            return inv;
+        },
         to_string: function () {
             let ret = '[';
             for (let row = 0; row < this.rows; ++row) {
@@ -399,5 +523,12 @@ function linalg_tests() {
         ASSERT(r.equals(Vec4()));
         m = Rotation(Vec4(0, 0, 1), Vec4(1, 0, 0), Vec4(0, 1, 0));
         ASSERT(m.multiply(m.transpose()).equals(Identity4()));
+    });
+    TEST('Inverse tests', () => {
+        let m = Translate(2,4,6).multiply(Scale(2,2,2));
+        let inv = m.inverse();
+        console.log(m.to_string());
+        console.log(inv.to_string());
+        ASSERT(m.multiply(inv).equals(Identity4()));
     });
 }

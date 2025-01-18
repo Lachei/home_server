@@ -112,6 +112,7 @@
     let canvas3d = document.getElementById("canvas3d");
     let canvas_tile_ids_2d_ctx = null;
     let canvas_drag_start = null;
+    let map_darg_start = null;      // same as canvas drag start but stores the surface position // in global format
     let last_hovered_mouse_pos = {x: 0, y: 0, depth: null};
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
@@ -134,11 +135,17 @@
     let virtual_street_map = null;
     let virtual_parcell_map = null;
     let cur_gps_pos = null;
+    let depth_data = null;
+    let depth_data_f32 = null;
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     canvas3d.addEventListener("mousedown", (e) => { 
         canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
         last_hovered_mouse_pos = { x: e.pageX, y: e.pageY, depth: last_hovered_mouse_pos.depth};
         // get the depth value and use it to calculate the world position
+        const clip_x = (e.pageX - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
+        const clip_y = (e.pageY - canvas3d.getBoundingClientRect().y) / canvas3d.getBoundingClientRect().height * 2 - 1;
+        const depth_x = 0;
+        const clip_z = 0;
     });
     canvas3d.addEventListener("touchstart", (e) => {
                               let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
@@ -252,8 +259,6 @@
 
     // draws the scene with all loaded data
     let data = null;
-    let depth_data = new Uint8Array(4);
-    let depth_data_f32 = new Float32Array(depth_data.buffer);
     let in_flight = false;
     async function draw_scene() {
         if (!gl_context || in_flight)
@@ -261,27 +266,7 @@
         in_flight = true;
 
         // creating the view matrix -------------------------------------------
-        const displayWidth = canvas3d.width;
-        const displayHeight = canvas3d.height;
-        const base_near = 5e-8;
-        const base_far = .1;
-        const height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, base_near * height_multiplier, base_far * height_multiplier);
-        const screen_size_factor = camera_center.z() * camera_center.z();
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, base_near * height_multiplier, base_far * height_multiplier);
-        const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
-        // grid jump for triangles is done all x meters
-        let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
-        let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
-        at.entries[0] += camera_center.x() - grid_offset_pos.lat;
-        at.entries[1] += camera_center.y() - grid_offset_pos.lon;
-        at.entries[2] += camera_center.z();
-        const view = LookAt(Vec4(camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
-            at,
-            up_dir);
-        camera_interpolation = Math.pow(document.getElementById("camera_interpolation").value, 8);
-        let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
-        view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
+        const [view_projection, view, base_width, grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
 
         // drawing the tiles --------------------------------------------------
         const overlap_width = (1 << 22) / virtual_height_map.v_tex_width;
@@ -454,14 +439,13 @@
         let depth_promise = null;
         if (last_hovered_mouse_pos) {
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.depth_fb);
-            let p_x = (last_hovered_mouse_pos.x - canvas3d.getBoundingClientRect().left) * pre_draw_buffer_size_fact;
-            let p_y = (last_hovered_mouse_pos.y - canvas3d.getBoundingClientRect().top) * pre_draw_buffer_size_fact;
-            if (p_x > 0 && p_x < width && p_y > 0 && p_y < height) {
-                console.log("Getting the depth value" + p_x + "|" + p_y);
-                depth_promise = readPixelsAsync(gl_context, Math.floor(p_x), Math.floor(p_y), 1, 1, depth_data);
+            const w =  indices_render_objs.width;
+            const h =  indices_render_objs.height;
+            if (!depth_data || depth_data.length < w * h * 4) {
+                depth_data = new Uint8Array(w * h * 4);
+                depth_data_f32 = new Float32Array(depth_data.buffer);
             }
-            else
-                console.warn("Outside of canvas");
+            depth_promise = readPixelsAsync(gl_context, 0, 0, w, h, depth_data);
         }
         start = performance.now();
         let indices = new Uint32Array(data.buffer);
@@ -513,10 +497,6 @@
         
         if (depth_promise) {
             await depth_promise;
-            if (!last_hovered_mouse_pos) last_hovered_mouse_pos = {};
-            if (isFinite(depth_data_f32[0] && !isNaN(depth_data_f32[0])))
-                last_hovered_mouse_pos.depth = depth_data_f32[0];
-            console.log("Got depth: " + depth_data_f32[0])
         }
         in_flight = false;
     }
@@ -746,7 +726,7 @@
                            float(((tile_id.x & 0xf) << 4) | ((tile_id.y >> 8) & 0xf)) / div,
                            float((tile_id.x >> 4) & 0xff) / div, 
                            float(tile_id.z) / div);
-            uint depth_bits = floatBitsToUint(depth);
+            uint depth_bits = floatBitsToUint(gl_FragCoord .z);
             out_depth = vec4(float( depth_bits         & 0xffU) / div,
                              float((depth_bits >> 8u)  & 0xffU) / div,
                              float((depth_bits >> 16u) & 0xffU) / div,
@@ -849,6 +829,39 @@
     const get_front_dir = (dir, pitch) => { return Vec4(Math.sin(dir), Math.cos(dir), 0, 0); };
     // constructs the right vector which is independent of the viewing pitch
     const get_right_dir = (dir) => { return Vec4(Math.cos(-dir), Math.sin(-dir), 0, 0); }; // the - sign is added as the we interpret the direction to go clock-wise
+    const get_projection_mat = (camera_center, canvas) => {
+        const displayWidth = canvas.width;
+        const displayHeight = canvas.height;
+        const base_near = 5e-8;
+        const base_far = .1;
+        const height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, base_near * height_multiplier, base_far * height_multiplier);
+        const screen_size_factor = camera_center.z() * camera_center.z();
+        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, base_near * height_multiplier, base_far * height_multiplier);
+        const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
+        // grid jump for triangles is done all x meters
+        let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
+        let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
+        at.entries[0] += camera_center.x() - grid_offset_pos.lat;
+        at.entries[1] += camera_center.y() - grid_offset_pos.lon;
+        at.entries[2] += camera_center.z();
+        const view = LookAt(Vec4(camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
+            at,
+            up_dir);
+        camera_interpolation = Math.pow(document.getElementById("camera_interpolation").value, 8);
+        let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
+        view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
+        return [view_projection, view, base_width, grid_offset_pos];
+    }
+    // Point in clip space to point in 3d space
+    const clip_space_to_world = (clip_x, clip_y, clip_z, camera_center, canvas) => {
+        const [view_projection, view, base_width, grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
+        const inv_view_proj = view_projection.inverse();
+        let w_pos = view_projection.inverse() * Vec4(clip_x, clip_y, clip_z);
+        for (let i = 0; i < 4; ++i)
+            w_pos.entries[i] /= w_pos.entries[3];
+        return w_pos;
+    };
 
     // ----------------------------------------------------------------------------------------
     // The following two functions are from https://mdn.github.io/webgl-examples/tutorial/sample5/index.html
