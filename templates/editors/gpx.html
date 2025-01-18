@@ -158,7 +158,7 @@
                               canvas_drag_start = { x: x, y: y, 
                               dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
                               type: e.touches.length == 1 ? "move": "rotate"};
-                              map_drag_start = get_map_drag_start(x, y)}, { passive: true });
+                              map_drag_start = get_map_drag_start(x, y)});
     const move_camera = (cur_move) => {
         if (!canvas_drag_start) 
             return;
@@ -226,7 +226,7 @@
             type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
         e.preventDefault();
-    }, { passive: true });
+    });
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("mouseleave", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchend", (e) => { canvas_drag_start = null; });
@@ -241,7 +241,7 @@
             camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 20000 * -e.deltaY));
         }
         draw_scene();
-    }, { passive: true });
+    });
     let pressed_keys = {};
     window.addEventListener("keydown", async (e) => {
         if (document.querySelector(".preview:hover") == null)
