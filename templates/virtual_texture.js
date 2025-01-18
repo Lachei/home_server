@@ -901,7 +901,8 @@ const Util = {
         return `
         float get_level(float d2) {
             float mip_offset = 25.5;
-            return 19. - clamp(.5 * log2(d2) + mip_offset, 0., 19.);
+            float max_l = 19.;
+            return max_l - clamp(.5 * log2(d2) + mip_offset, 0., max_l);
         }
         `
     },

@@ -138,60 +138,80 @@
     let depth_data = null;
     let depth_data_f32 = null;
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
+    const get_map_drag_start = (x, y) => {
+        const clip_x = (x - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
+        const clip_y = (y - canvas3d.getBoundingClientRect().y) / canvas3d.getBoundingClientRect().height * -2 + 1;
+        const depth_x = Math.floor((clip_x * .5 + .5) * indices_render_objs.width + .5);
+        const depth_y = Math.floor((clip_y * .5 + .5) * indices_render_objs.height + .5);
+        const linear_z = depth_data_f32[depth_y * indices_render_objs.width + depth_x];
+        let p = clip_space_to_world(clip_x, clip_y, linear_z, camera_center, canvas3d);
+        console.log(p.entries);
+        return p;
+    };
     canvas3d.addEventListener("mousedown", (e) => { 
         canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
         last_hovered_mouse_pos = { x: e.pageX, y: e.pageY};
         // get the depth value and use it to calculate the world position
-        const clip_x = (e.pageX - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
-        const clip_y = (e.pageY - canvas3d.getBoundingClientRect().y) / canvas3d.getBoundingClientRect().height * 2 - 1;
-        const depth_x = Math.floor((clip_x * .5 + .5) * indices_render_objs.width + .5);
-        const depth_y = Math.floor((clip_y * .5 + .5) * indices_render_objs.height + .5);
-        const linear_z = depth_data_f32[depth_y * indices_render_objs.width + depth_x];
-        map_drag_start = clip_space_to_world(clip_x, clip_y, linear_z, camera_center, canvas3d);
-        console.log(map_drag_start.entries);
+        map_drag_start = get_map_drag_start(e.pageX, e.pageY);
     });
     canvas3d.addEventListener("touchstart", (e) => {
-                              let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
-                              let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
+                              let x = e.touches.length == 1 ? e.touches[0].pageX: .5 * e.touches[0].pageX + .5 * e.touches[1].pageX;
+                              let y = e.touches.length == 1 ? e.touches[0].pageY: .5 * e.touches[0].pageY + .5 * e.touches[1].pageY;
                               canvas_drag_start = { x: x, y: y, 
-                              dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
+                              dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
                               type: e.touches.length == 1 ? "move": "rotate"};
-                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY}; });
+                              last_hovered_mouse_pos = { x: e.pageX, y: e.pageY}; 
+                              map_drag_start = get_map_drag_start(x, y)}, { passive: true });
     const move_camera = (cur_move) => {
-        if (canvas_drag_start) {
-            let xDel = canvas_drag_start.x - cur_move.x;
-            let yDel = canvas_drag_start.y - cur_move.y;
-            let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
-            if (last_hovered_mouse_pos && last_hovered_mouse_pos.depth)
-                height_multiplier = Math.max(1e-8, last_hovered_mouse_pos.depth * 1e5);
-            let speed = cam_dir_speed * height_multiplier;
-            switch(canvas_drag_start.type) {
-            case "move":
-                camera_center.add(get_front_dir(camera_dir, camera_pitch).mul(speed * yDel));
-                camera_center.add(get_right_dir(camera_dir).mul(speed * xDel));
-                break;
-            case "rotate":
-                if (cur_move.dist) {
-                    let zoomDel = canvas_drag_start.dist - cur_move.dist;
-                    if (Math.abs(zoomDel) > Math.abs(xDel) && Math.abs(zoomDel) > Math.abs(yDel)) {
-                        camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel * 2));
-                        xDel = 0;
-                        yDel = 0;
-                    }
+        if (!canvas_drag_start) 
+            return;
+        let xDel = canvas_drag_start.x - cur_move.x;
+        let yDel = canvas_drag_start.y - cur_move.y;
+        let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
+        if (map_drag_start && !isNaN(map_drag_start.entries[0]))
+            height_multiplier = Math.max(1e-8,  40000 * camera_center.distance3(map_drag_start));
+        let speed = cam_dir_speed * height_multiplier;
+        switch(canvas_drag_start.type) {
+        case "move":
+            camera_center.add(get_front_dir(camera_dir, camera_pitch).mul(speed * yDel));
+            camera_center.add(get_right_dir(camera_dir).mul(speed * xDel));
+            break;
+        case "rotate":
+            if (cur_move.dist) {
+                let zoomDel = canvas_drag_start.dist - cur_move.dist;
+                if (Math.abs(zoomDel) > Math.abs(xDel) && Math.abs(zoomDel) > Math.abs(yDel)) {
+                    camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel * 2));
+                    xDel = 0;
+                    yDel = 0;
                 }
-                camera_dir -= xDel * cam_rot_speed * 2;
-                if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
-                if (camera_dir < 0) camera_dir += 2 * Math.PI;
-                camera_pitch += yDel * cam_rot_speed * 2;
-                if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
-                if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
-                break;
-            default: console.error("Unknown move type " + canvas_drag_start.type);
             }
-            canvas_drag_start = cur_move;
-            last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY, depth: last_hovered_mouse_pos.depth};
-            camera_updated = true;
+            const yaw = xDel * cam_rot_speed * 2;
+            const pitch = yDel * cam_rot_speed * 2;
+            camera_dir -= yaw;
+            if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
+            if (camera_dir < 0) camera_dir += 2 * Math.PI;
+            camera_pitch += pitch;
+            if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
+            if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
+            if (map_drag_start && !isNaN(map_drag_start.x()) && !document.getElementById('enable_fpv_cam').checked) {
+                // following are the needed transformations:
+                //  1. center map_drag_start pos
+                //  2. rotate camera
+                //  3. move back
+                const cur_angle = -Math.atan2(camera_center.x() - map_drag_start.x(), camera_center.y() - map_drag_start.y());
+                const m = Translate(map_drag_start.x(), map_drag_start.y(), map_drag_start.z())
+                        .mul(RotateZ(cur_angle + yaw))
+                        .mul(RotateX(pitch))
+                        .mul(RotateZ(-cur_angle))
+                        .mul(Translate(-map_drag_start.x(), -map_drag_start.y(), -map_drag_start.z()));
+                camera_center = m.mul(camera_center);
+            }
+            break;
+        default: console.error("Unknown move type " + canvas_drag_start.type);
         }
+        canvas_drag_start = cur_move;
+        last_hovered_mouse_pos = { x: cur_move.pageX, y: cur_move.pageY, depth: last_hovered_mouse_pos.depth};
+        camera_updated = true;
     };
     canvas3d.addEventListener("mousemove", (e) => {
         if (!canvas_drag_start)
@@ -210,20 +230,14 @@
             type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
         e.preventDefault();
-    });
+    }, { passive: true });
     canvas3d.addEventListener("mouseup", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("mouseleave", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchend", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", (e) => {
-        const clip_x = (e.pageX - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
-        const clip_y = (e.pageY - canvas3d.getBoundingClientRect().y) / canvas3d.getBoundingClientRect().height * -2 + 1;
-        const depth_x = Math.floor((clip_x * .5 + .5) * indices_render_objs.width + .5);
-        const depth_y = Math.floor((clip_y * .5 + .5) * indices_render_objs.height + .5);
-        const linear_z = depth_data_f32[depth_y * indices_render_objs.width + depth_x];
-        map_drag_start = clip_space_to_world(clip_x, clip_y, linear_z, camera_center, canvas3d);
-        console.log(map_drag_start.entries);
-        if (isNaN(map_drag_start.entries[0])) {
+        map_drag_start = get_map_drag_start(e.pageX, e.pageY);
+        if (!map_drag_start || isNaN(map_drag_start.entries[0])) {
             let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
             camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         }
@@ -231,7 +245,7 @@
             camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 20000 * -e.deltaY));
         }
         draw_scene();
-    });
+    }, { passive: true });
     let pressed_keys = {};
     window.addEventListener("keydown", async (e) => {
         if (document.querySelector(".preview:hover") == null)
@@ -800,7 +814,6 @@
         const w_parcell = 1 << 19;
         virtual_parcell_map = VirtualMap().init(w_parcell, w_parcell, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
-        // setInterval(update_cached_images);
         setInterval(check_virtual_textures_update, 16);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         

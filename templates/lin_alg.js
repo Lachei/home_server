@@ -159,6 +159,27 @@ const MatBaseObject = (rows = 4, cols = 4) => {
             this.entries.forEach((e, i) => m.entries[i] = (1 - a) * e + a * o.entries[i]);
             return m;
         },
+        length: function() {
+            let l = 0;
+            this.entries.forEach( e => {l += e * e;} );
+            return Math.sqrt(l);
+        },
+        distance: function (o) {
+            if (this.rows != o.rows ||this.cols != o.cols)
+                throw Error('Only Matrices of same shape are possible');
+            let l = 0;
+            this.entries.forEach( (e, i) => {l += (e - o.entries[i]) * (e - o.entries[i]);} );
+            return Math.sqrt(l);
+        },
+        // ignores the z component
+        distance3: function (o) {
+            if (this.rows != o.rows ||this.cols != o.cols)
+                throw Error('Only Matrices of same shape are possible');
+            let l = 0;
+            for (let i = 0; i < 3; ++i)
+                l += (this.entries[i] - o.entries[i]) * (this.entries[i] - o.entries[i])
+            return Math.sqrt(l);
+        },
         inverse: function () {
             if (this.rows != 4 || this.cols != 4)
                 throw Error('Current implementation only supports inversion of 4x4 matrices');
@@ -345,6 +366,39 @@ const Rotation = (x_dir, y_dir, z_dir) => {
     ret.entries[15] = 1;
     return ret;
 };
+// create a rotation matrix that pitches (rotation around the X axis), pitch has to be given in radians
+const RotateX = (pitch) => {
+    let ret = Mat4();
+    ret.entries[ret.el_idx(0, 0)] = 1;
+    ret.entries[ret.el_idx(1, 1)] = Math.cos(pitch);
+    ret.entries[ret.el_idx(1, 2)] = -Math.sin(pitch);
+    ret.entries[ret.el_idx(2, 1)] = Math.sin(pitch);
+    ret.entries[ret.el_idx(2, 2)] = Math.cos(pitch);
+    ret.entries[ret.el_idx(3, 3)] = 1;
+    return ret;
+};
+// create a rotation matrix that rolls (rotation around the Y axis), roll has to be given in radians
+const RotateY = (roll) => {
+    let ret = Mat4();
+    ret.entries[ret.el_idx(0, 0)] = Math.cos(roll);
+    ret.entries[ret.el_idx(0, 2)] = -Math.sin(roll);
+    ret.entries[ret.el_idx(1, 1)] = 1;
+    ret.entries[ret.el_idx(2, 0)] = Math.sin(roll);
+    ret.entries[ret.el_idx(2, 2)] = Math.cos(roll);
+    ret.entries[ret.el_idx(3, 3)] = 1;
+    return ret;
+};
+// create a rotation matrix that yaws (rotation around the Z axis), yaw has to be given in radians
+const RotateZ = (yaw) => {
+    let ret = Mat4();
+    ret.entries[ret.el_idx(0, 0)] = Math.cos(yaw);
+    ret.entries[ret.el_idx(0, 1)] = -Math.sin(yaw);
+    ret.entries[ret.el_idx(1, 0)] = Math.sin(yaw);
+    ret.entries[ret.el_idx(1, 1)] = Math.cos(yaw);
+    ret.entries[ret.el_idx(2, 2)] = 1;
+    ret.entries[ret.el_idx(3, 3)] = 1;
+    return ret;
+};
 /**
  * The resulting view matrix makes such that after applying the matrix will set
  * the center of the coordinate system to pos, and align the coordinate system to have -z point
@@ -436,17 +490,6 @@ const Vec4 = (x = 0, y = 0, z = 0, w = 1) => {
     ret.entries = [x, y, z, w];
     return ret;
 };
-/**
- * Transforms projected depth back to linear depth
- * @param {Float} depth depth from the depth buffer (projected depth)
- * @param {Float} front near plane of the perspective transformation
- * @param {Float} back far plane of the perspective transformation
- */
-const projected_to_linear_depth = (depth, front, back) => {
-    const b_m_f = back - front;
-    const b_p_f = back + front;
-    return (-2 * back * front / b_m_f) / (-depth + b_p_f / b_m_f);
-}
 
 /**
  * Predefined testing function
