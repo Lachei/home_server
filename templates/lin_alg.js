@@ -88,7 +88,7 @@ const MatBaseObject = (rows = 4, cols = 4) => {
                 this.entries[i] += o.entries[i];
             return this; // returning this to allow for chaining
         },
-        substract: function (o) {
+        subtract: function (o) {
             if (this.cols != o.cols || this.rows != o.rows)
                 throw Error(`Can not subtract matrices of shape (${this.rows},${this.cols}) and shape (${o.rows},${o.cols})`);
             let ret = MatBaseObject(this.rows, this.cols);
@@ -366,7 +366,7 @@ const LookAt = (pos, at, up) => {
         throw Error('at is not an absolution position');
     if (!up.is_relative_vec())
         throw Error('up is not a direction');
-    let depth = at.substract(pos).normalize();
+    let depth = at.subtract(pos).normalize();
     let right = depth.cross(up).normalize();
     let corrected_up = right.cross(depth).normalize();
     return Rotation(right, corrected_up, depth).mul(Translate(-pos.x(), -pos.y(), -pos.z()));

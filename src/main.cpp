@@ -486,6 +486,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
     const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
     CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
+    CROW_ROUTE(app, "/favicon.ico")([]{ crow::response res; res.set_static_file_info("templates/server_logo.png"); return res; });
     
     // checking the certificates folder
 #ifdef CROW_ENABLE_SSL
