@@ -48,6 +48,7 @@
 
         #header,
         #content {
+            background-color: white;
             display: table-row;
         }
 
@@ -90,6 +91,7 @@
         <label for="camera_interpolation">Projektion(3D.o.2D)</label>
         <input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">
         <label for="enable_parcell_map">Parzellkarte anzeigen</label>
+        <button onclick="request_full_screen();">Vollbild</button>
         {{/editor}}
     </div>
     <div id="content">
@@ -148,7 +150,7 @@
         return p;
     };
     canvas3d.addEventListener("mousedown", (e) => { 
-        canvas_drag_start = { x: e.screenX, y: e.screenY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
+        canvas_drag_start = { x: e.pageX, y: e.pageY, type: e.button == 0 ? "move" : e.button == 1 || e.button == 2 ? "rotate": "unknown"}; 
         // get the depth value and use it to calculate the world position
         map_drag_start = get_map_drag_start(e.pageX, e.pageY);
     });
@@ -157,7 +159,7 @@
                               let y = e.touches.length == 1 ? e.touches[0].pageY: .5 * e.touches[0].pageY + .5 * e.touches[1].pageY;
                               canvas_drag_start = { x: x, y: y, 
                               dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
-                              type: e.touches.length == 1 ? "move": "rotate"};
+                              type: e.touches.length == 1 ? "move": "rot_or_zoom"};
                               map_drag_start = get_map_drag_start(x, y)});
     const move_camera = (cur_move) => {
         if (!canvas_drag_start) 
@@ -168,20 +170,30 @@
         if (map_drag_start && !isNaN(map_drag_start.entries[0]))
             height_multiplier = Math.max(1e-8,  40000 * camera_center.distance3(map_drag_start));
         let speed = cam_dir_speed * height_multiplier;
+        let clear_move = true;
         switch(canvas_drag_start.type) {
         case "move":
             camera_center.add(get_front_dir(camera_dir, camera_pitch).mul(speed * yDel));
             camera_center.add(get_right_dir(camera_dir).mul(speed * xDel));
             break;
-        case "rotate":
-            if (cur_move.dist) {
-                let zoomDel = canvas_drag_start.dist - cur_move.dist;
-                if (Math.abs(zoomDel) > Math.abs(xDel) && Math.abs(zoomDel) > Math.abs(yDel)) {
-                    camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel * 2));
-                    xDel = 0;
-                    yDel = 0;
-                }
+        case "rot_or_zoom":
+            if (Math.abs(canvas_drag_start.dist - cur_move.dist) > 20)
+                canvas_drag_start.type = "zoom";
+            else if (Math.abs(xDel) + Math.abs(yDel) > 20)
+                canvas_drag_start.type = "rotate";
+            clear_move = false;
+        case "zoom":
+            let zoomDel = canvas_drag_start.dist - cur_move.dist;
+            if (!map_drag_start || isNaN(map_drag_start.entries[0])) {
+                camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(speed * zoomDel * 2));
             }
+            else {
+                camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 100000 * -zoomDel));
+            }
+            xDel = 0;
+            yDel = 0;
+            break;
+        case "rotate":
             const yaw = xDel * cam_rot_speed * 2;
             const pitch = yDel * cam_rot_speed * 2;
             camera_dir -= yaw;
@@ -206,23 +218,25 @@
             break;
         default: console.error("Unknown move type " + canvas_drag_start.type);
         }
-        canvas_drag_start = cur_move;
-        camera_updated = true;
+        if (clear_move) {
+            canvas_drag_start = cur_move;
+            camera_updated = true;
+        }
     };
     canvas3d.addEventListener("mousemove", (e) => {
         if (!canvas_drag_start)
             return;
-        let cur_move = {x: e.screenX, y: e.screenY, pageX: e.pageX, pageY: e.pageY, type: canvas_drag_start.type || "unknown"};
+        let cur_move = {x: e.pageX, y: e.pageY, pageX: e.pageX, pageY: e.pageY, type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
         e.preventDefault();
     });
     canvas3d.addEventListener("touchmove", (e) => {
         if (!canvas_drag_start)
             return;
-        let x = e.touches.length == 1 ? e.touches[0].screenX: .5 * e.touches[0].screenX + .5 * e.touches[1].screenX;
-        let y = e.touches.length == 1 ? e.touches[0].screenY: .5 * e.touches[0].screenY + .5 * e.touches[1].screenY;
+        let x = e.touches.length == 1 ? e.touches[0].pageX: .5 * e.touches[0].pageX + .5 * e.touches[1].pageX;
+        let y = e.touches.length == 1 ? e.touches[0].pageY: .5 * e.touches[0].pageY + .5 * e.touches[1].pageY;
         let cur_move = {x: x, y: y, pageX: e.pageX, pageY: e.pageY,
-            dist: e.touches.length == 2? dist(e.touches[0].screenX, e.touches[0].screenY, e.touches[1].screenX, e.touches[1].screenY): 0, 
+            dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
             type: canvas_drag_start.type || "unknown"};
         move_camera(cur_move);
         e.preventDefault();
@@ -972,7 +986,15 @@
             }
         }
         return needResize;
-    }
+    };
+    function request_full_screen() {
+        var element = document.body;
+        // Supports most browsers and their versions.
+        var requestMethod = element.requestFullScreen || element.webkitRequestFullScreen || element.mozRequestFullScreen || element.msRequestFullScreen;
+
+        if (requestMethod)
+            requestMethod.call(element);
+    };
     window.addEventListener("resize", async () => {
         let height = String(document.documentElement.clientHeight - document.getElementById("header").clientHeight) + "px";
         canvas3d.style.height = height;
