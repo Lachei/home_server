@@ -431,7 +431,7 @@ const VirtualMap = () => {
                         continue;
                     }
                     if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
-                        console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.image.width}, ${image.image.height} needed for this virtual texture`);
+                        console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
                     this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
                     this.image_canvas_context.drawImage(tile.image, 0, 0);
                     let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
