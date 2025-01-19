@@ -204,15 +204,19 @@
             if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
             if (map_drag_start && !isNaN(map_drag_start.x()) && !document.getElementById('enable_fpv_cam').checked) {
                 // following are the needed transformations:
-                //  1. center map_drag_start pos
+                //  1. center projected map_drag_start pos
                 //  2. rotate camera
                 //  3. move back
-                const cur_angle = -Math.atan2(camera_center.x() - map_drag_start.x(), camera_center.y() - map_drag_start.y());
+                const forward = get_forward_dir(camera_dir, camera_pitch);
+                const center = camera_center.addition(forward.mul(map_drag_start.subtract(camera_center).dot(forward)));
+                const cur_angle = Math.atan2(camera_center.x() - center.x(), camera_center.y() - center.y());
                 const m = Translate(map_drag_start.x(), map_drag_start.y(), map_drag_start.z())
-                        .mul(RotateZ(cur_angle + yaw))
-                        .mul(RotateX(pitch))
+                        .mul(RotateZ(yaw))
+                        .mul(Translate(center.x() - map_drag_start.x(), center.y() - map_drag_start.y(), center.z() - map_drag_start.z()))
                         .mul(RotateZ(-cur_angle))
-                        .mul(Translate(-map_drag_start.x(), -map_drag_start.y(), -map_drag_start.z()));
+                        .mul(RotateX(pitch))
+                        .mul(RotateZ(cur_angle))
+                        .mul(Translate(-center.x(), -center.y(), -center.z()));
                 camera_center = m.mul(camera_center);
             }
             break;
@@ -486,16 +490,21 @@
         needed_tiles.delete(0xffffffff);
         console.log(`checking tiles took ${performance.now() - start} milli`);
         let decoded_tiles = Util.int32_to_tile_id(needed_tiles);
-        decoded_tiles = decoded_tiles.map(e  => {; return {
-            level: e.level,
-            x: (e.level >= 11 ? e.x + detail_corner.x * (1 << e.level) : e.x),
-            y: (e.level >= 11 ? e.y + detail_corner.y * (1 << e.level) : e.y)
-        }}
+        decoded_tiles = decoded_tiles.map(e  => {; let tile = {
+                level: e.level,
+                x: (e.level >= 11 ? e.x + detail_corner.x * (1 << e.level) : e.x),
+                y: (e.level >= 11 ? e.y + detail_corner.y * (1 << e.level) : e.y)
+            };
+            const max = (1 << e.level) - 1;
+            tile.x %= max;
+            tile.y %= max;
+            return tile;
+        }
         );
         Util.add_missing_parent_tiles(decoded_tiles);
         // max level for height is tile 15 
         const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
-        let requested_tiles = decoded_tiles.filter(tile => tile_on_minifuzi(tile) || tile.level <= 15).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
+        let requested_tiles = decoded_tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= 15)).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
             !tile_on_minifuzi(tile) ? `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`:
                                    `${location.origin}/heightmap/${tile.level}/${tile.x}/${tile.y}`
         ));
@@ -828,7 +837,6 @@
             // adding a set for all the available tiles
             heightmap_meta_data.tiles_set = new Set(heightmap_meta_data.tiles);
         } catch(e) {}
-        // draw_scene();
         // console.log = () => {};
         // console.info = () => {};
         
@@ -960,6 +968,8 @@
                     gl.deleteTexture(fb.texture);
                 if (fb.depth_texture)
                     gl.deleteTexture(fb.depth_texture);
+                if (fb.depth_test_texture)
+                    gl.deleteTexture(fb.depth_test_texture);
                 if (fb.fb)
                     gl.deleteFramebuffer(fb.fb);
                 if (fb.depth_fb)
@@ -976,10 +986,14 @@
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                fb.depth_test_texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, fb.depth_test_texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, fb.width, fb.height, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
                 fb.fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, fb.depth_texture, 0);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, fb.depth_test_texture, 0);
                 fb.depth_fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.depth_fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.depth_texture, 0);

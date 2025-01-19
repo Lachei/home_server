@@ -129,6 +129,14 @@ const MatBaseObject = (rows = 4, cols = 4) => {
             this.entries = tmp.entries;
             return this;
         },
+        dot: function(o) {
+            if (this.entries.length != o.entries.length)
+                throw Error('Matrices need to have the same amount of elements');
+            let t = 0;
+            for (let i = 0; i < this.entries.length; ++i)
+                t += this.entries[i] * o.entries[i];
+            return t;
+        },
         // assumes that every vector is in homogenous space (so the last item in the vector is ignored)
         cross: function (o) {
             if (!this.is_vec() || !o.is_vec())
