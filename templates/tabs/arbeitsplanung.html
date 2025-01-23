@@ -71,7 +71,7 @@
     }
 
     .affected_event {
-        border: 3px solid black;
+        border: 5px solid black;
     }
 </style>
 <div id="main_time_view">
@@ -189,19 +189,20 @@
 
     const divergingColors = generateDivergingColors();
     function db_event_to_cal_event(e) {
-        let editable = "{{benutzername}}" == e.creator || "{{benutzername}}" == "admin" || e.people.slice(1, -1).split(',').includes("{{benutzername}}");
+        let working = e.people.slice(1, -1).split(',').includes("{{benutzername}}");
+        let editable = "{{benutzername}}" == e.creator || "{{benutzername}}" == "admin" || working;
         return {
             id: e.id,
             resourceIds: [],
             allDay: e.expected_hours >= 24,
             start: new Date(e.start_time),
             end: new Date(e.end_time),
-            title: {html:e.title + "<br>" + e.people},
+            title: {html:e.title + " | " + e.people},
             editable: editable,
             startEditable: editable,
             durationEditable: editable,
             backgroundColor: divergingColors[e.creator.hashCode() % divergingColors.length],
-            classNames: editable ? ["affected_event"]: []
+            classNames: working ? ["affected_event"]: []
         }
     }
     function setup_arbeitsplanung() {
