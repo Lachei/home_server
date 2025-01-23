@@ -7,6 +7,7 @@
 #include "database_util.hpp"
 #include "data_util.hpp"
 #include "editor_util.hpp"
+#include "string_split.hpp"
 
 struct AccessControlHeader{
     struct context{};
@@ -167,7 +168,11 @@ int main(int argc, const char** argv) {
 
         const auto event = nlohmann::json::parse(req.body);
         const auto& creator = event["creator"].get<std::string>();
-        if (creator != username && username != admin_name)
+        bool user_affected = creator == username || username == admin_name;
+        for (auto user: string_split{json_array_to_comma_list(event["people"].get<std::string>()), ","sv})
+            if (user == username)
+                user_affected = true;
+        if (!user_affected)
             return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
         
         auto result = database_util::update_event(database, event);

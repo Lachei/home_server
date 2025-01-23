@@ -69,6 +69,10 @@
     .side_selection_tooltip {
         z-index: 100;
     }
+
+    .affected_event {
+        border: 3px solid black;
+    }
 </style>
 <div id="main_time_view">
     <div id="timetable"></div>
@@ -185,21 +189,31 @@
 
     const divergingColors = generateDivergingColors();
     function db_event_to_cal_event(e) {
+        let editable = "{{benutzername}}" == e.creator || "{{benutzername}}" == "admin" || e.people.slice(1, -1).split(',').includes("{{benutzername}}");
         return {
             id: e.id,
             resourceIds: [],
             allDay: e.expected_hours >= 24,
             start: new Date(e.start_time),
             end: new Date(e.end_time),
-            title: e.title,
-            editable: e.creator == "{{benutzername}}" || "admin" == "{{benutzername}}",
+            title: {html:e.title + "<br>" + e.people},
+            editable: editable,
+            startEditable: editable,
+            durationEditable: editable,
             backgroundColor: divergingColors[e.creator.hashCode() % divergingColors.length],
+            classNames: editable ? ["affected_event"]: []
         }
     }
     function setup_arbeitsplanung() {
         init_event_calendar();
         setup_event_input();
         setup_user_selections();
+        setInterval(async () => {
+            let server_events = await fetch(location.origin + "/get_events");
+            let events = await server_events.json();
+            for (e of events)
+                event_calendar.updateEvent(db_event_to_cal_event(e));
+        }, 5000);
     }
     async function init_event_calendar() {
         // loading events
@@ -384,7 +398,7 @@
         if ("error" in event)
             console.log(event["error"]);
         else {
-            let allowed_to_edit = "{{benutzername}}" == event.creator || "{{benutzername}}" == "admin";
+            let allowed_to_edit = "{{benutzername}}" == event.creator || "{{benutzername}}" == "admin" || event.people.slice(1, -1).split(',').includes("{{benutzername}}");
             let start = new Date(Date.parse(event.start_time));
             let end = new Date(Date.parse(event.end_time));
             start.setMinutes(start.getMinutes() - start.getTimezoneOffset());
