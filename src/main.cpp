@@ -146,7 +146,9 @@ int main(int argc, const char** argv) {
         auto event = database_util::get_event(database, username, event_id);
         return event.dump();
     });
-    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database](const crow::request& req){
+    std::mutex update_cache_mutex;
+    std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
+    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
         
         try{
@@ -156,6 +158,10 @@ int main(int argc, const char** argv) {
                 return nlohmann::json{{"error", "can not create event for other users, only admin can do that"}}.dump();
                 
             auto result = database_util::add_event(database, event);
+            {
+                std::scoped_lock lock{update_cache_mutex};
+                update_cache.emplace_back(std::chrono::utc_clock::now(), result);
+            }
             return result.dump();
         } catch(nlohmann::json::parse_error e){
             return nlohmann::json{{"error", e.what()}}.dump();
@@ -163,8 +169,6 @@ int main(int argc, const char** argv) {
         
         return std::string{};
     });
-    std::mutex update_cache_mutex;
-    std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
     CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
@@ -192,7 +196,7 @@ int main(int argc, const char** argv) {
         {
             std::scoped_lock lock{update_cache_mutex};
             auto p{update_cache.begin()};
-            for (; p != update_cache.end() && p->first < std::chrono::utc_clock::now() - std::chrono::seconds(20); ++p);
+            for (; p != update_cache.end() && p->first < std::chrono::utc_clock::now() - std::chrono::minutes(5); ++p);
             update_cache.erase(update_cache.begin(), p);
             for (const auto &[time, event]: update_cache)
                 ret.push_back(event);
