@@ -163,7 +163,9 @@ int main(int argc, const char** argv) {
         
         return std::string{};
     });
-    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database](const crow::request& req){
+    std::mutex update_cache_mutex;
+    std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
+    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
         const auto event = nlohmann::json::parse(req.body);
@@ -174,9 +176,29 @@ int main(int argc, const char** argv) {
                 user_affected = true;
         if (!user_affected)
             return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
-        
+        {
+            std::scoped_lock lock{update_cache_mutex};
+            update_cache.emplace_back(std::chrono::utc_clock::now(), event);
+        }
+
         auto result = database_util::update_event(database, event);
         return result.dump();
+    });
+    CROW_ROUTE(app, "/get_updated_events")([&credentials, &update_cache, &update_cache_mutex](const crow::request& req){
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        
+        // removing old entries
+        nlohmann::json ret{};
+        {
+            std::scoped_lock lock{update_cache_mutex};
+            auto p{update_cache.begin()};
+            for (; p != update_cache.end() && p->first < std::chrono::utc_clock::now() - std::chrono::seconds(20); ++p);
+            update_cache.erase(update_cache.begin(), p);
+            for (const auto &[time, event]: update_cache)
+                ret.push_back(event);
+        }
+
+        return ret.dump();
     });
     CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &database](const crow::request& req, uint64_t id){
         EXTRACT_CHECK_CREDENTIALS(req, credentials);

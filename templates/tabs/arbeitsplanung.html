@@ -210,8 +210,10 @@
         setup_event_input();
         setup_user_selections();
         setInterval(async () => {
-            let server_events = await fetch(location.origin + "/get_events");
+            let server_events = await fetch(location.origin + "/get_updated_events");
             let events = await server_events.json();
+            if (!events)
+                return;
             for (e of events)
                 event_calendar.updateEvent(db_event_to_cal_event(e));
         }, 5000);
