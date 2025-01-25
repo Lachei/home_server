@@ -29,7 +29,7 @@
             cursor: pointer;
         }
 
-        button {
+        #save {
             border: none;
             background-color: white;
             cursor: pointer;
@@ -66,7 +66,7 @@
     <div id="header">
         {{#editor}}
         <center id="title">GPX Editor</center>
-        <button id="save" onclick="save();">&#128190;</button>
+        <button id="save" type="button" onclick="save();">&#128190;</button>
         <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles(null, true).drop_least_important_tiles(null, false);">
             <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
             <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
@@ -91,7 +91,7 @@
         <label for="camera_interpolation">Projektion(3D.o.2D)</label>
         <input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">
         <label for="enable_parcell_map">Parzellkarte anzeigen</label>
-        <button onclick="request_full_screen();">Vollbild</button>
+        <button type="button" onclick="request_full_screen();">Vollbild</button>
         {{/editor}}
     </div>
     <div id="content">
@@ -117,6 +117,12 @@
     let map_drag_start = null;      // same as canvas drag start but stores the surface position // in global format
     let camera_state = {};  // contains all camera state for rendering
     let gl_context = null;
+    let tile_download_buffer = null;
+    let tile_download_data = null;
+    let depth_download_buffer = null;
+    let depth_download_data = null;
+    let depth_data_f32 = null;
+    let download_sync = null;
     let indices_render_objs = {}; // object containing render objects needed for index rendering
     let render_pipelines = null;
     let camera_center = null;
@@ -136,8 +142,6 @@
     let virtual_street_map = null;
     let virtual_overlay_map = null;
     let cur_gps_pos = null;
-    let depth_data = null;
-    let depth_data_f32 = null;
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     const get_map_drag_start = (x, y) => {
         const clip_x = (x - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
@@ -296,13 +300,31 @@
         return s.options[s.selectedIndex];
     };
 
-    // draws the scene with all loaded data
-    let data = null;
-    let in_flight = false;
+    let draw_requested = true;
+    let drawing_active = false;
+    let rendering_fences = [];
+    let last_detail_corner = null;
+    let cur_frame = 0;
     async function draw_scene() {
-        if (!gl_context || in_flight)
+        draw_requested |= camera_updated;
+        if (document.getElementById("enable_cam_follow").checked) {
+            const interp_factor = .05;
+            let pre_x = camera_center.x();
+            let pre_y = camera_center.y();
+            let f = get_forward_dir(camera_dir, camera_pitch);
+            f.entries[2] = Math.max(.1, f.z());
+            f.normalize();
+            f.mul(camera_center.z() / f.z());
+            camera_center.entries[0] = interp_factor * (cur_gps_pos.lat + f.x()) + (1 - interp_factor) * camera_center.x();
+            camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
+            draw_requested |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
+        }
+
+        if (!gl_context || drawing_active || !draw_requested)
             return;
-        in_flight = true;
+        drawing_active = true;
+        draw_requested = false;
+        camera_updated = false;
 
         // creating the view matrix -------------------------------------------
         const [view_projection, view, base_width, grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
@@ -458,42 +480,53 @@
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
-        console.log(`drawing took ${performance.now() - start} milli`);
-        start = performance.now();
-
-        // get needed tile indices
-        if (!update_tiles){
-            in_flight = false;
-            return;
-        }
+        
+        // copy to download gpu buffers
+        // tile buffer
         gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.fb);
-        const width = indices_render_objs.width;
-        const height = indices_render_objs.height;
-        if (!data || data.byteLength < width * height * 4) {
-            console.debug("Recreating data buffer");
-            data = new Uint8Array(width * height * 4);
-        }
-        await readPixelsAsync(gl_context, 0, 0, width, height, data);
+        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, tile_download_buffer);
+        gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
+        // depth buffer
+        gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.depth_fb);
+        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
+        gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
+        // final sync
+        rendering_fences.push(gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0));
+        last_detail_corner = detail_corner;
+        console.log(`drawing took ${performance.now() - start} milli`);
+        cur_frame++;
+        drawing_active = false;
+    }
+    let tile_processing_running = false;
+    let last_processed_frame = -1;
+    async function gpu_tile_processing() {
+        if (tile_processing_running || last_processed_frame == cur_frame || rendering_fences.length == 0)
+            return;
+        tile_processing_running = true;
+        last_processed_frame = cur_frame;
+
+        let start = performance.now();
+        let tile_processing_start = start;
+        // all fences except the last one are only of real use
+        for (let i = 0; i < rendering_fences.length - 1; ++i)
+            gl_context.deleteSync(rendering_fences[i]);
+        rendering_fences = [rendering_fences[rendering_fences.length - 1]];
+        await clientWaitAsync(gl_context, rendering_fences[0]);
+        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, tile_download_buffer);
+        gl_context.getBufferSubData(gl_context.PIXEL_PACK_BUFFER, 0, tile_download_data);
+
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
-        let depth_promise = null;
-        gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, indices_render_objs.depth_fb);
-        const w =  indices_render_objs.width;
-        const h =  indices_render_objs.height;
-        if (!depth_data || depth_data.length < w * h * 4) {
-            depth_data = new Uint8Array(w * h * 4);
-            depth_data_f32 = new Float32Array(depth_data.buffer);
-        }
-        depth_promise = readPixelsAsync(gl_context, 0, 0, w, h, depth_data);
+
         start = performance.now();
-        let indices = new Uint32Array(data.buffer);
+        let indices = new Uint32Array(tile_download_data.buffer);
         let needed_tiles = new Set(indices);
         needed_tiles.delete(0xffffffff);
         console.log(`checking tiles took ${performance.now() - start} milli`);
         let decoded_tiles = Util.int32_to_tile_id(needed_tiles);
-        decoded_tiles = decoded_tiles.map(e  => {; let tile = {
+        decoded_tiles = decoded_tiles.filter(e => !isNaN(e.x) && !isNaN(e.y)).map(e  => {; let tile = {
                 level: e.level,
-                x: (e.level >= 11 ? e.x + detail_corner.x * (1 << e.level) : e.x),
-                y: (e.level >= 11 ? e.y + detail_corner.y * (1 << e.level) : e.y)
+                x: (e.level >= 11 ? e.x + last_detail_corner.x * (1 << e.level) : e.x),
+                y: (e.level >= 11 ? e.y + last_detail_corner.y * (1 << e.level) : e.y)
             };
             const max = (1 << e.level) - 1;
             tile.x %= max;
@@ -537,42 +570,25 @@
         }
         console.log(decoded_tiles);
         
-        if (depth_promise) {
-            await depth_promise;
-        }
-        in_flight = false;
+        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
+        gl_context.getBufferSubData(gl_context.PIXEL_PACK_BUFFER, 0, depth_download_data);
+        console.log(`Full tile update took ${performance.now() - tile_processing_start} milli`);
+        tile_processing_running = false;
     }
-    let tex_update_locked = false;
-    function check_virtual_textures_update() {
-        if (tex_update_locked)
+    let tex_update_locked = {};
+    function check_virtual_textures_update(name, virtual_texture) {
+        if (tex_update_locked[name])
             return;
-        tex_update_locked = true;
+        tex_update_locked[name] = true;
         let start = performance.now();
-        virtual_height_map.upload_loaded_images();
-        virtual_street_map.upload_loaded_images();
-        virtual_overlay_map.upload_loaded_images();
-        if (document.getElementById("enable_cam_follow").checked) {
-            const interp_factor = .05;
-            let pre_x = camera_center.x();
-            let pre_y = camera_center.y();
-            let f = get_forward_dir(camera_dir, camera_pitch);
-            f.entries[2] = Math.max(.1, f.z());
-            f.normalize();
-            f.mul(camera_center.z() / f.z());
-            camera_center.entries[0] = interp_factor * (cur_gps_pos.lat + f.x()) + (1 - interp_factor) * camera_center.x();
-            camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
-            camera_updated |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
+        virtual_texture.upload_loaded_images();
+        if (virtual_texture.virtual_texture_rebuilt) {
+            virtual_texture.virtual_texture_rebuilt = false;
+            console.log(`updating virtual textures ${name} took ${performance.now() - start} milli`);
+            console.log(`Free spots virtual texture ${name} Detail: ${virtual_texture.free_tiles_detail.size}, Coarse: ${virtual_texture.free_tiles.size}`);
+            draw_requested = true;;
         }
-        if (virtual_height_map.virtual_texture_rebuilt || virtual_street_map.virtual_texture_rebuilt || virtual_overlay_map.virtual_texture_rebuilt || camera_updated) {
-            virtual_height_map.virtual_texture_rebuilt = false;
-            virtual_street_map.virtual_texture_rebuilt = false;
-            virtual_overlay_map.virtual_texture_rebuilt = false;
-            camera_updated = false;
-            console.log(`updating virtual textures took ${performance.now() - start} milli`);
-            console.log(`Free spots street map Detail: ${virtual_street_map.free_tiles_detail.size}, Coarse: ${virtual_street_map.free_tiles.size}`);
-            draw_scene();
-        }
-        tex_update_locked = false;
+        tex_update_locked[name] = false;
     }
     function updateGpsPosition(p) {
         let [lat, lon] = Util.wgs_84_to_uv(p.coords.latitude, p.coords.longitude);
@@ -829,7 +845,11 @@
         const w_overlay = 1 << 19;
         virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
-        setInterval(check_virtual_textures_update, 16);
+        setInterval(draw_scene, 16); // go for 60 fps
+        setInterval(() => check_virtual_textures_update("height", virtual_height_map), 20);
+        setInterval(() => check_virtual_textures_update("streetmap", virtual_street_map), 20);
+        setInterval(() => check_virtual_textures_update("overlay", virtual_overlay_map), 20);
+        setInterval(gpu_tile_processing, 20);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         
         try {
@@ -997,6 +1017,27 @@
                 fb.depth_fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.depth_fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.depth_texture, 0);
+                                   
+                // updating the download buffers
+                if (tile_download_buffer)
+                    gl.deleteBuffer(tile_download_buffer);
+                if (depth_download_buffer)
+                    gl.deleteBuffer(depth_download_buffer);
+                if (download_sync)
+                    gl.deleteSync(download_sync);              
+                const needed_bytes = fb.width * fb.height * 4;
+                if (!tile_download_data || tile_download_data.byteLength < needed_bytes)
+                    tile_download_data = new Uint8Array(needed_bytes);
+                if (!depth_download_data || depth_download_data.byteLength < needed_bytes) {
+                    depth_download_data = new Uint8Array(needed_bytes);
+                    depth_data_f32 = new Float32Array(depth_download_data.buffer);
+                }
+                tile_download_buffer = gl.createBuffer();
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, tile_download_buffer);
+                gl.bufferData(gl.PIXEL_PACK_BUFFER, needed_bytes, gl.STREAM_READ);
+                depth_download_buffer = gl.createBuffer();
+                gl.bindBuffer(gl.PIXEL_PACK_BUFFER, depth_download_buffer );
+                gl.bufferData(gl.PIXEL_PACK_BUFFER, needed_bytes, gl.STREAM_READ);
             }
         }
         return needResize;
