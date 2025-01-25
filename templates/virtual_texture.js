@@ -1146,21 +1146,3 @@ const clientWaitAsync = function (gl, sync, flags = 0, interval_ms = 10) {
         check();
     });
 };
-
-const readPixelsAsync = function (gl, x, y, width, height, buffer) {
-    const bufpak = gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bufpak);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, buffer.byteLength, gl.STREAM_READ);
-    gl.readPixels(x, y, width, height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-    var sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    if (!sync) return nullkk;
-    gl.flush();
-    return clientWaitAsync(gl, sync, 0, 10).then(function () {
-        gl.deleteSync(sync);
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, bufpak);
-        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, buffer);
-        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-        gl.deleteBuffer(bufpak);
-        return buffer;
-    });
-};
