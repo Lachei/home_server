@@ -204,7 +204,7 @@ const VirtualMap = () => {
                     continue;
                 }
                 if (tile_req.level > tile_width_bits) {
-                    console.warn("Too deep level for this virtual texture. Ignoring");
+                    console.error("Too deep level for this virtual texture. Ignoring");
                     continue;
                 }
                 let shift = tile_width_bits - tile_req.level;
@@ -221,6 +221,13 @@ const VirtualMap = () => {
                 let tiles_lookup = coarse ? this.tiles_lookup_table: this.tiles_lookup_table_detail;
                 let free_tiles = coarse ? this.free_tiles: this.free_tiles_detail;
                 let already_loaded = lookup_table_string in tiles_lookup;
+                if (already_loaded && tiles_storage[tiles_lookup[lookup_table_string]].images) {
+                    let tile = tiles_storage[tiles_lookup[lookup_table_string]];
+                    for(let i = 0; i < tile.images.length; ++i)
+                        if (tile.images[i].src != tile_req.url[i])
+                            already_loaded = false;
+                }
+
                 // make space for a new tile if tile cache full
                 if (!already_loaded && free_tiles.size == 0) {
                     this.drop_least_important_tiles(10, coarse);
@@ -423,17 +430,30 @@ const VirtualMap = () => {
                 // reverse loop to be able to drop frames without reiteration
                 for (let i = tiles_storage.length - 1; i >= 0; --i) {
                     let tile = tiles_storage[i];
-                    if (!tile.loaded || tile.data_uploaded_to_gpu || !tile.is_initialized())
+                    let all_loaded = tile.loaded;
+                    if (tile.images)
+                        all_loaded = tile.loaded.every(x => x);
+                    if (!all_loaded || tile.data_uploaded_to_gpu || !tile.is_initialized())
                         continue;
-                    if (tile.load_error) {
+                    let any_error = tile.load_error;
+                    if (tile.images)
+                        any_error = tile.load_error.some(x => x);
+                    if (any_error) {
                         this.drop_tile_at_index(i, coarse);
                         change = true;
                         continue;
                     }
-                    if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
-                        console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
-                    this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
-                    this.image_canvas_context.drawImage(tile.image, 0, 0);
+                    if (tile.images) {
+                        this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
+                        for (let image of tile.images) {
+                            this.image_canvas_context.drawImage(image, 0, 0);
+                        }
+                    } else {
+                        if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
+                            console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
+                        this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
+                        this.image_canvas_context.drawImage(tile.image, 0, 0);
+                    }
                     let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
                     this.tiles_storage_gpu.set_image_data(i, data, tile.coarse);
                     tile.data_uploaded_to_gpu = true;
@@ -592,6 +612,7 @@ const Tile = () => {
         last_use: 0,
         /** @type{Image} */
         image: null,
+        images: null,
         loaded: false,
         load_error: false,
         data_uploaded_to_gpu: false,
@@ -612,11 +633,28 @@ const Tile = () => {
             this.coarse = coarse;
             this.lookup_table_string = CoordinateMappings.coords_to_lookup_string(tile_x, tile_y, width);
             this.last_use = Date.now();
-            this.image = new Image();
-            this.image.crossOrigin = 'anonymous';
-            this.image.onload = () => {this.loaded = true};
-            this.image.onerror = () => {this.loaded = true; this.load_error = true;};
-            this.image.src = tile_url;
+            if (Array.isArray(tile_url)) {
+                this.images = [];
+                this.loaded = Array(tile_url.length).fill(false);
+                this.load_error = Array(tile_url.length).fill(false);
+                let i = 0;
+                for (let url of tile_url) {
+                    let img = new Image();
+                    img.crossOrigin = 'anonymous';
+                    let t = +i;
+                    img.onload = () => {this.loaded[t] = true};
+                    img.onerror = () => {this.loaded[t] = true; this.load_error[t] = false};
+                    img.src = url;
+                    this.images[i] = img;
+                    i++;
+                }
+            } else {
+                this.image = new Image();
+                this.image.crossOrigin = 'anonymous';
+                this.image.onload = () => {this.loaded = true};
+                this.image.onerror = () => {this.loaded = true; this.load_error = true;};
+                this.image.src = tile_url;
+            }
             return this;
         },
         /**
@@ -634,6 +672,13 @@ const Tile = () => {
             if (this.image) {
                 this.image.src = "";
                 delete this.image;
+            }
+            if (this.images) {
+                for (let i = 0; i < this.images.length; ++i) {
+                    this.images[i].src = "";
+                    delete this.images[i];
+                }
+                this.images = null;
             }
             this.loaded = false;
             this.load_error = false;

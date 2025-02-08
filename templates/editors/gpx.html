@@ -379,7 +379,7 @@
                 gl.uniform1i(program.uniform_locations.virtual_overlaymap, 8);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_overlaymap_infos, program.uniform_locations.virtual_overlaymap_infos);
             }
-            if (document.getElementById("enable_parcell_map").checked || docuemnt.getElementById("enable_street_name_overlay").checked) {
+            if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
             } else {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
@@ -575,17 +575,13 @@
         virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
         if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
             let requested_parcell_tiles = decoded_tiles.map(tile => {
-                let parcell = TileRequest().init(tile.x, tile.y, tile.level,
-                `https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`);
-                let names = TileRequest().init(tile.x, tile.y, tile.level,
-                `https://intergeo33.bayernwolke.de/betty/g_atkishybrid_webp/${tile.level}/${tile.x}/${tile.y}`);
-                let ret = [];
+                let urls = [];
                 if (document.getElementById("enable_parcell_map").checked)
-                    ret.push(parcell);
+                    urls.push(`https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`);
                 if (document.getElementById("enable_street_name_overlay").checked)
-                    ret.push(names);
-                return ret;
-            }).filter(e => e.level <= 19 && e.level >= 15);
+                    urls.push(`https://intergeo33.bayernwolke.de/betty/g_atkishybrid_webp/${tile.level}/${tile.x}/${tile.y}`);
+                return TileRequest().init(tile.x, tile.y, tile.level, urls);
+            }).filter(e => e.level <= 19);
             virtual_overlay_map.update_needed_tiles(requested_parcell_tiles, {x: camera_center.x(), y: camera_center.y()});
         }
         console.log(decoded_tiles);
