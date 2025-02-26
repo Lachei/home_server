@@ -11,7 +11,6 @@
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
-            font-size: min(2vw, .5cm);
         }
 
         body {
@@ -31,10 +30,6 @@
         textarea {
             font-family: Consolas, Monaco, Lucida Console, Liberation Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Courier New, monospace;
             resize: horizontal;
-        }
-
-        math {
-            display: inline-block;
         }
 
         #content {
@@ -188,7 +183,8 @@
         .katex-html {
             display: none;
         }
-        math * {
+        .katex-display {
+            display: inline-block;
             font-size: unset;
         }
         .katex-display > .katex > .katex-html > .tag {
@@ -243,7 +239,17 @@
         out_div.innerHTML = markdown(t);
 
         // starting to convert formulas with katex
-        renderMathInElement(out_div);
+        renderMathInElement(out_div, { delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '$', right: '$', display: true},
+              {left: "\\(", right: "\\)", display: false},
+              {left: "\\begin{equation}", right: "\\end{equation}", display: true},
+              {left: "\\begin{align}", right: "\\end{align}", display: true},
+              {left: "\\begin{alignat}", right: "\\end{alignat}", display: true},
+              {left: "\\begin{gather}", right: "\\end{gather}", display: true},
+              {left: "\\begin{CD}", right: "\\end{CD}", display: true},
+              {left: "\\[", right: "\\]", display: true}
+          ]});
 
         // add table of contents (toc) if requested
         document.querySelectorAll('toc').forEach((toc_e) => {

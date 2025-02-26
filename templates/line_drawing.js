@@ -34,7 +34,8 @@
 
 /** @brief Constants for the Lines library */
 const LINE_CONST = {
-    ARRAY_GROWTH_FAC: 1.5
+    ARRAY_GROWTH_FAC: 1.5,
+    CUR_ID: 0,
 };
 
 const Line = () => {return {
@@ -44,6 +45,12 @@ const Line = () => {return {
      * to get amortized linear runtime when doing a push of a vertex
      */
     length: 0,
+    /**
+     * @brief The version is used to check if a requested tile has to be updated from cache
+     * The id is incremented each time the data is changed. (This also means that external changes
+     * have to adapt the id to trigger a rerendering)
+     */
+    version: 0,
     /** 
      * @brief Contains the same as lines_gpu, kept to be able to 
      * quickly access the data on the cpu without readback of gpu 
@@ -59,7 +66,7 @@ const Line = () => {return {
      * @type {WebGLBuffer}
      */
     lines_gpu: null,
-    cpu_gpu_synced: false,
+    gpu_version: -1,
     lines_center: {x: 0, y: 0},
     /**
      * @brief Rendering context from which the lines_gpu buffer was created
@@ -95,7 +102,7 @@ const Line = () => {return {
      * @param [lat, lon] 
      */
     push: function(e) {
-        this.cpu_gpu_synced = false;
+        this.version++;
         const p = this.length++;
         if (this.length * 2 > this.lines_cpu.length) {
             const new_cap = Math.round(this.lines_cpu.length * LINE_CONST.ARRAY_GROWTH_FAC);
@@ -112,7 +119,7 @@ const Line = () => {return {
      * @param {Array<float>} a 
      */
     push_array: function (a) {
-        this.cpu_gpu_synced = false;
+        this.version++;
         const p = this.length;
         this.length += a.length / 2;
         if (this.length * 2 > this.lines_cpu.length) {
@@ -129,18 +136,20 @@ const Line = () => {return {
         }
     },
     set_point_coords: function(idx, lat, lon) {
-        this.cpu_gpu_synced = false;
+        this.version++;
         const [x, y] = this.lat_lon_to_xy(lat, lon);
         this.lines_cpu[idx * 2] = x;
         this.lines_cpu[idx * 2 + 1] = y;
     },
     remove_point: function(idx) {
-        this.cpu_gpu_synced = false;
+        this.version++;
         this.lines_cpu = this.lines_cpu.filter((_, i) => i != idx);
     },
     sync_with_gpu: function() {
-        if (this.cpu_gpu_synced)
+        if (this.version == this.version_gpu)
             return;
+        
+        this.version_gpu = version;
         
         // 2 way pass to 1. find mean, 2. calc offset positions
         let m_x = .0;
@@ -163,15 +172,30 @@ const Line = () => {return {
         this.gl.bufferData(this.gl.ARRAY_BUFFER, this.upload_buf, this.gl.DYNAMIC_DRAW);
         this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
         this.cpu_gpu_synced = true;
-    },
-    draw: function() {
-        // draw a box for each pair of coordinates (keep in mind that each vertex is only stored 
-        // once so each inner vertex of the line has to be drawn twice, can be achieved with the
-        // correct stride for the instanced rendering)
-        if (!this.cpu_gpu_synced) {
-            console.error("Line points not synced with gpu, skipping draw");
-            return;
-        }
-        let gl = this.gl;
     }
 }};
+
+// the line renderer provides drawing pipelines which render to an internal set of
+// html images which are used to cache all previously rendered images (used later to blend on top of the overlay layer)
+// To identify the line that was rendered before the rendered images are stored according to the id of the line
+const LineRenderer = () => {
+    return {
+        // variables
+        
+        gl: null,
+        line_cache:  {},
+
+        // functions
+        
+        init: function(gl_context) {
+            this.gl = gl_context;
+        },
+        // draw a line for the specified tile_reqests
+        draw_line: function(line, tile_reqs) {
+            if (this.gl != line.gl) {
+                console.error("Different webgl contexts are not allowed");
+                return;
+            }
+        }
+    };
+}
