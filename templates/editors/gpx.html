@@ -859,7 +859,7 @@
         const w_overlay = 1 << 19;
         virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
-        setInterval(draw_scene, 10); // go for 60 fps
+        setInterval(draw_scene, 20); 
         setInterval(() => check_virtual_textures_update("height", virtual_height_map), 20);
         setInterval(() => check_virtual_textures_update("streetmap", virtual_street_map), 20);
         setInterval(() => check_virtual_textures_update("overlay", virtual_overlay_map), 20);

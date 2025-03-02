@@ -133,6 +133,7 @@ const VirtualMap = () => {
             gl_context.bindFramebuffer(gl_context.FRAMEBUFFER, this.virtual_texture_detail_fb);
             gl_context.framebufferTexture2D(gl_context.FRAMEBUFFER, gl_context.COLOR_ATTACHMENT0, gl_context.TEXTURE_2D, this.virtual_texture_gpu_detail, 0);
             const pipeline = initShaderProgram(gl_context,
+                    /** Vertex Shader */
                     `#version 300 es
                     uniform ivec4 bounds; // contains in xy the min and max x, and in zw min and max y
                     uniform ivec2 image_size;
@@ -144,6 +145,7 @@ const VirtualMap = () => {
                                          .5, 1.);
                     }
                     `,
+                    /** fragment shader */
                     `#version 300 es
                     uniform uint index;
                     out uint buf_ind;
@@ -427,8 +429,9 @@ const VirtualMap = () => {
         upload_loaded_images: function () {
             const check_upload = (tiles_storage, coarse) => {
                 let change = false;
+                const max_upload = 5; // upload at max 10 images
                 // reverse loop to be able to drop frames without reiteration
-                for (let i = tiles_storage.length - 1; i >= 0; --i) {
+                for (let i = tiles_storage.length - 1, upload = 0; i >= 0 && upload < max_upload; --i) {
                     let tile = tiles_storage[i];
                     let all_loaded = tile.loaded;
                     if (tile.images)
@@ -458,9 +461,7 @@ const VirtualMap = () => {
                     this.tiles_storage_gpu.set_image_data(i, data, tile.coarse);
                     tile.data_uploaded_to_gpu = true;
                     change = true;
-                    // let r = await Util.check_virtual_texture(t);
-                    // if (!r)
-                    //     console.error(`Oh deary me ${tile.image.src}, ${i}`);
+                    upload += 1;
                 }
                 return change;
             };
@@ -883,7 +884,7 @@ const Util = {
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
-        return canvas.getContext(context_type);
+        return canvas.getContext(context_type, {willReadFrequently: true});
     },
     
     wgs_84_to_uv: function (lat, lon) {
