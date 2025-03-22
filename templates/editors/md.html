@@ -186,6 +186,7 @@
         .katex-display {
             display: inline-block;
             font-size: unset;
+            margin: 0;
         }
         .katex-display > .katex > .katex-html > .tag {
             right: auto;
@@ -238,19 +239,6 @@
         out_div.innerHTML = '';
         out_div.innerHTML = markdown(t);
 
-        // starting to convert formulas with katex
-        renderMathInElement(out_div, { delimiters: [
-              {left: '$$', right: '$$', display: true},
-              {left: '$', right: '$', display: true},
-              {left: "\\(", right: "\\)", display: false},
-              {left: "\\begin{equation}", right: "\\end{equation}", display: true},
-              {left: "\\begin{align}", right: "\\end{align}", display: true},
-              {left: "\\begin{alignat}", right: "\\end{alignat}", display: true},
-              {left: "\\begin{gather}", right: "\\end{gather}", display: true},
-              {left: "\\begin{CD}", right: "\\end{CD}", display: true},
-              {left: "\\[", right: "\\]", display: true}
-          ]});
-
         // add table of contents (toc) if requested
         document.querySelectorAll('toc').forEach((toc_e) => {
             // collect all headers following the toc
@@ -293,6 +281,19 @@
         scripts.map(
             s => reattach_script(s)
         );
+
+        // starting to convert formulas with katex
+        renderMathInElement(out_div, { delimiters: [
+              {left: '$$', right: '$$', display: true},
+              {left: '$', right: '$', display: true},
+              {left: "\\(", right: "\\)", display: false},
+              {left: "\\begin{equation}", right: "\\end{equation}", display: true},
+              {left: "\\begin{align}", right: "\\end{align}", display: true},
+              {left: "\\begin{alignat}", right: "\\end{alignat}", display: true},
+              {left: "\\begin{gather}", right: "\\end{gather}", display: true},
+              {left: "\\begin{CD}", right: "\\end{CD}", display: true},
+              {left: "\\[", right: "\\]", display: true}
+          ]});
 
         out_div.scroll(0, prev_scroll);
         if (!rescaled) {
