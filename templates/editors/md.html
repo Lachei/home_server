@@ -7,7 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta charset="utf-8">
     <title>Md Editor</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous">
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
@@ -181,19 +181,23 @@
         }
 
         .katex-display {
-            width:90%;
             display: inline-block;
             font-size: unset;
             margin: 0;
+        }
+
+        .katex-display > .katex > .katex-html > .tag {
+            right: unset;
         }
         
         .log_line:nth-child(even) {
             background-color: lightgrey;
         }
     </style>
-    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <!--<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>-->
     <script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
-    <script type="text/javascript" async src="{{&site_url}}/katex.js" onload="setup();"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js" integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"></script>
 </head>
 
 <body>
@@ -288,7 +292,7 @@
               {left: "\\begin{gather}", right: "\\end{gather}", display: true},
               {left: "\\begin{CD}", right: "\\end{CD}", display: true},
               {left: "\\[", right: "\\]", display: true}
-          ]});
+          ], throwOnError: false});
 
         out_div.scroll(0, prev_scroll);
         if (!rescaled) {
@@ -345,6 +349,7 @@
     window.onerror = (message, source, lineno, colno, error) => {
         console.error(message);
     };
+    window.onload = () => { setup(); };
 </script>
 
 </html>
