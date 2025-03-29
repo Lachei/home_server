@@ -8,6 +8,7 @@
     <meta charset="utf-8">
     <title>Md Editor</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@latest/build/styles/atom-one-light.min.css">
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
@@ -190,6 +191,11 @@
             right: unset;
         }
         
+        code > span,
+        code > span > span{
+            font-family: unset
+        }
+        
         .log_line:nth-child(even) {
             background-color: lightgrey;
         }
@@ -198,6 +204,7 @@
     <script type="text/javascript" src="{{&site_url}}/drawdown.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js" integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@latest/build/highlight.min.js"></script>
 </head>
 
 <body>

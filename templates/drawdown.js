@@ -34,7 +34,7 @@ function markdown(src) {
     var rx_listjoin = /<\/(ol|ul)>\n\n<\1>/g;
     var rx_highlight = /(^|[^A-Za-z\d\\])(([*_])|(~)|(\^)|(--)|(\+\+)|`)(\2?)([^<]*?)\2\8(?!\2)(?=\W|_|$)/g;
     var rx_math = /\n((```mathe|~~~mathe).*\n?([^]*?)\n?\2)/g;
-    var rx_code = /\n((```|~~~).*\n?([^]*?)\n?\2|((    .*?\n)+))/g;
+    var rx_code = /\n((```|~~~)(.*)\n?([^]*?)\n?\2|((    .*?\n)+))/g;
     var rx_script = /<script.*>([^]*?)<\/script>/g;
     var rx_style = /<style.*>([^]*?)<\/style>/g;
     var rx_svg = /<svg.*>([^]*?)<\/svg>/g;
@@ -118,8 +118,12 @@ function markdown(src) {
     });
 
     // code
-    replace(rx_code, function(all, p1, p2, p3, p4) {
-        stash[--si] = element('pre', element('code', p3||p4.replace(/^    /gm, '')));
+    replace(rx_code, function(all, p1, p2, lang, p3, p4) {
+        console.log(lang);
+        if (lang.length === 0)
+            stash[--si] = element('pre', element('code', p3||p4.replace(/^    /gm, '')));
+        else
+            stash[--si] = element('pre', element('code', hljs.highlight(p3||p4.replace(/^    /gm, ''), {language: lang}).value));
         return si + '\uf8ff';
     });
 
