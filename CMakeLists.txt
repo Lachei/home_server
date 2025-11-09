@@ -4,7 +4,6 @@ project(home_server)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
-
 file(GLOB SRC "src/*")
 message("${SRC}")
 if(WIN32)
@@ -13,7 +12,7 @@ else()
     add_compile_options(-fpermissive)
 endif()
 add_executable(home_server ${SRC})
-target_compile_definitions(home_server PUBLIC CROW_ENABLE_SSL BOOST_NETWORK_ENABLE_HTTPS)
+target_compile_definitions(home_server PUBLIC CROW_ENABLE_SSL CROW_USE_BOOST BOOST_NETWORK_ENABLE_HTTPS)
 
 if (${CMAKE_CXX_COMPILER} STREQUAL "/usr/bin/aarch64-linux-gnu-g++")
     message("Setting cpu capabilities for the raspberry pi")
