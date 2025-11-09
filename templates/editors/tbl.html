@@ -15,13 +15,15 @@
             width: 100%;
             height: 100%;
             margin: 0px;
+        {{#editor}}
             overflow: hidden;
+        {{/editor}}
         }
 
         body {
             display: table;
         }
-        
+
         #header, #table_filler {
             display: table-row;
         }
@@ -203,6 +205,12 @@
             display: none;
         }
         {{/editor}}
+
+        @media print{
+            ::-webkit-scrollbar {
+                display: none;
+            }
+        }
     </style>
 </head>
 
@@ -701,7 +709,7 @@
     const grad_zu_rad = (g) => { return g * PI / 180; }
     const rad_zu_grad = (r) => { return r * 180 / PI; }
     const runden = (n, s = 0) => { return +((+n).toFixed(s)); }
-    const zahl = (a) => { if(!(a.replace)) return a; return +(a.replace(',', '.').replace(/[^(\d|\.)].*/, '')); }
+    const zahl = (a) => { if(!(a.replace)) return a; return +(a.replace(',', '.')) || 0; }
     const hintergrundfarbe = (farbe) => { change_color("background-color", farbe in color_map ? { value: color_map[farbe] } : { value: farbe }); return null; }
     const hf = hintergrundfarbe;
     const PI = Math.PI
@@ -750,7 +758,7 @@
                 }
                 // adding the last part of the string
                 exec_string += c.substring(prev);
-                exec_string = "return " + exec_string;
+                exec_string = "return (" + exec_string + ") || 0";
 
                 unfinished_fields.delete(field);
                 // executing the line
