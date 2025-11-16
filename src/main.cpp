@@ -495,6 +495,8 @@ int main(int argc, const char** argv) {
     
     const std::string admin_css = crow::mustache::load_text("admin.css");
     CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
+    const std::string md_css = crow::mustache::load_text("editors/md_default.css");
+    CROW_ROUTE(app, "/md_default.css")([&md_css](){return md_css;});
     const std::string user_css = crow::mustache::load_text("user.css");
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
     const std::string sha_js = crow::mustache::load_text("sha256.js");
