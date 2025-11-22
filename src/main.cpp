@@ -8,6 +8,9 @@
 #include "data_util.hpp"
 #include "editor_util.hpp"
 #include "string_split.hpp"
+#include "git_util.hpp"
+
+#define TRY(expr) try { expr; } catch (const std::exception &e) { CROW_LOG_WARNING << e.what(); }
 
 struct AccessControlHeader{
     struct context{};
@@ -24,13 +27,24 @@ struct AccessControlHeader{
     }
 };
 
+
+struct default_groups{
+    static constexpr std::string_view unauthorized_user{"unautorisierte_benutzer"};
+    static constexpr std::string_view authorized_user{"autorisierte_benutzer"};
+};
+struct default_users{
+    static constexpr std::string_view unauthorized_user{"unautorisierter_benutzer"};
+    static constexpr std::string_view authorized_user{"autorisierter_benutzer"};
+};
+
 void print_help()
 {
     std::cout << "Home server can be called with the following command line arguments:\n";
     std::cout << "    ./home_server [OptionalArgs] --data data/path\n";
     std::cout << "RequiredArgs:\n";
-    std::cout << "    --data    : The directory where the data tab stores all data files\n";
-    std::cout << "    --cert    : The directory where the certificate files can be found\n";
+    std::cout << "    --data     : The directory where the data tab stores all data files\n";
+    std::cout << "    --databases: The directory where the databases are stored\n";
+    std::cout << "    --cert     : The directory where the certificate files can be found\n";
     std::cout << "OptionalArgs:\n";
     std::cout << "    --help    : Prints this help dialogue\n";
 }
@@ -52,18 +66,28 @@ int main(int argc, const char** argv) {
     std::span<const char*> args(argv, argc);
     bool show_help = std::ranges::contains(args, "--help"sv);
     
-    std::string_view data_base_folder = get_parameter(args, "--data");
+    std::string data_base_folder = std::string(get_parameter(args, "--data"));
     if (data_base_folder.empty()) {
-        std::cout << "[warning] Missing --data argument.\n";
+        CROW_LOG_WARNING << "Missing --data argument, setting it to 'daten/'.\n";
         show_help = true;
         data_base_folder = "daten/";
+    }
+    if (data_base_folder.back() != '/') {
+        CROW_LOG_WARNING << "Data folder missing slash at the and, adding it automatically";
+        data_base_folder += '/';
     }
 
     std::string_view certificates_folder = get_parameter(args, "--cert");
     if (certificates_folder.empty()) {
-        std::cout << "[warning] Missing --cert argument, defaulting to data/certificates/\n";
+        CROW_LOG_WARNING << "Missing --cert argument, defaulting to data/certificates/";
         show_help = true;
         certificates_folder = "data/certification/";
+    }
+
+    std::string_view databases_folder = get_parameter(args, "--databases");
+    if (databases_folder.empty()) {
+        CROW_LOG_WARNING << "Missing --databases argument, defaulting to 'data/'";
+        databases_folder = "data/";
     }
  
     if (show_help)
@@ -72,10 +96,11 @@ int main(int argc, const char** argv) {
     crow::App app{};
     
     Credentials credentials("credentials/cred.json");
-    Database database("data/events");
+    Database database(std::string(databases_folder) + "events");
     database_util::setup_event_table(database);
     database_util::setup_shift_tables(database);
     data_util::setup_data(data_base_folder);
+    TRY(git_util::init_git(data_base_folder));
     
     std::mutex invoice_file_mutex{};
 
@@ -316,7 +341,7 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
-        const auto res = data_util::write_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
+        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
         return res.dump();
     });
     CROW_ROUTE(app, "/create_folder")([&credentials, &data_base_folder](const crow::request &req) {
@@ -324,7 +349,7 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
-        const auto res = data_util::create_dir(data_base_folder.data() + req.headers.find("path")->second);
+        const auto res = data_util::create_dir(username, data_base_folder.data() + req.headers.find("path")->second);
         return res.dump();
     });
     CROW_ROUTE(app, "/create_file")([&credentials, &data_base_folder](const crow::request &req) {
@@ -332,7 +357,7 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second);
+        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second);
         return res.dump();
     });
     CROW_ROUTE(app, "/update_file").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
@@ -340,21 +365,21 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
+        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
         return res.dump();
     });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
         const auto move_infos = nlohmann::json::parse(req.body);
-        const auto res = data_util::move_files(data_base_folder, move_infos);
+        const auto res = data_util::move_files(username, data_base_folder, move_infos);
         return res.dump();
     });
     CROW_ROUTE(app, "/delete_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 
         const auto delete_files = nlohmann::json::parse(req.body);
-        const auto res = data_util::delete_files(data_base_folder, delete_files);
+        const auto res = data_util::delete_files(username, data_base_folder, delete_files);
         return res.dump();
     });
     
@@ -385,7 +410,7 @@ int main(int argc, const char** argv) {
         }
         const std::string file_data = invoice.dump();
 
-        const auto res = data_util::update_file(data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(file_data.data()), file_data.size()});
+        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(file_data.data()), file_data.size()});
         return res.dump();
     });
     

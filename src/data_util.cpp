@@ -1,12 +1,19 @@
 #include "data_util.hpp"
 #include "nlohmann/json.hpp"
 #include "util.hpp"
+#include "robin_hood/robin_hood.h"
+#include "git_util.hpp"
 
 #include <filesystem>
 #include <fstream>
 
 namespace data_util
 {
+    robin_hood::unordered_map<std::string, std::mutex>& get_file_locks() {
+        static robin_hood::unordered_map<std::string, std::mutex> locks{};
+        return locks;
+    }
+
     void setup_data(std::string_view dir)
     {
         if (!std::filesystem::exists(dir))
@@ -39,7 +46,8 @@ namespace data_util
         return ret;
     }
 
-    nlohmann::json create_dir(std::string_view dir)
+    // by default new directories are not added to the git index, thus for now user is not used
+    nlohmann::json create_dir(std::string_view, std::string_view dir)
     {
         // sanitize dir
         std::string final_dir{dir};
@@ -48,16 +56,30 @@ namespace data_util
         return nlohmann::json{{"success", "Directory was created successfully"}};
     }
 
-    nlohmann::json update_file(std::string_view file, std::span<const std::byte> data)
+    nlohmann::json update_file(std::string_view user, std::string_view file, std::span<const std::byte> data, std::string_view base_version)
     {
         std::string final_file{file};
         std::ranges::replace(final_file, ' ', '_');
-        std::ofstream f(final_file.data(), std::ios_base::binary);
+        std::scoped_lock lock(get_file_locks()[final_file]);
+        std::string hash = git_util::try_get_latest_commit_hash(final_file);
+        std::string merged_content{}; // needed to store the possibly merged file content
+        if (hash.size() && base_version.size()) { // the file is in the git index -> do merge check (in case of double edit)
+            if (hash != base_version) { // merge scenario
+                std::ifstream f(final_file.c_str(), std::ios_base::binary);
+                std::string cur_content{std::istream_iterator<char>{f}, std::istream_iterator<char>{}};
+                std::string base_content = git_util::get_file_at_version(final_file, base_version);
+                std::string_view new_content{reinterpret_cast<const char*>(data.data()), data.size()};
+                merged_content = git_util::merge_strings(base_content, cur_content, new_content);
+                data = std::span<const std::byte>(reinterpret_cast<const std::byte*>(merged_content.data()), merged_content.size());
+            }
+        }
+        std::ofstream f(final_file.c_str(), std::ios_base::binary);
         f.write(reinterpret_cast<const char*>(data.data()), data.size());
-        return {{"success", "Updated/created the file"}};
+        std::string new_version = git_util::try_commit_changes(user, final_file);
+        return {{"success", "Updated/created the file"}, {"revision", new_version}, {"merged_content", merged_content}};
     }
 
-    nlohmann::json delete_files(std::string_view base_dir, const nlohmann::json &files)
+    nlohmann::json delete_files(std::string_view user, std::string_view base_dir, const nlohmann::json &files)
     {
         if (!files.is_array())
             return {{"error", "Expected array for files to delete"}};
@@ -70,7 +92,7 @@ namespace data_util
         return nlohmann::json{{"success", "Removed the files/directories"}};
     }
 
-    nlohmann::json move_files(std::string_view base_dir, const nlohmann::json &move_infos)
+    nlohmann::json move_files(std::string_view user, std::string_view base_dir, const nlohmann::json &move_infos)
     {
         const bool copy = move_infos["copy"].get<bool>();
         const auto file_list = move_infos["files"];
@@ -112,15 +134,6 @@ namespace data_util
             }
         }
         return nlohmann::json{{"success", "copied/moved the files"}};
-    }
-
-    nlohmann::json write_file(std::string_view file, std::span<const std::byte> data)
-    {
-        std::string final_file{file};
-        std::ranges::replace(final_file, ' ', '_');
-        std::ofstream f(final_file.data(), std::ios_base::binary);
-        f.write(reinterpret_cast<const char*>(data.data()), data.size());
-        return nlohmann::json{{"success", "The file was successfully stored"}};
     }
 
     std::vector<std::byte> read_file(std::string_view file)

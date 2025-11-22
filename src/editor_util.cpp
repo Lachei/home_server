@@ -3,6 +3,7 @@
 #include <regex>
 #include "nlohmann/json.hpp"
 #include "robin_hood/robin_hood.h"
+#include "git_util.hpp"
 
 #define TRY_ADD_HEADER(c, h_name, req) if (req.headers.find(h_name) != req.headers.end()) {c[h_name] = req.headers.find(h_name)->second;}
 
@@ -45,6 +46,7 @@ namespace editor_util
         std::cout << "found credentials " << (req.headers.find("credentials") != req.headers.end()) << std::endl;
         TRY_ADD_HEADER(crow_context, "credentials", req);
         crow_context["file_data"] = d;
+        crow_context["file_revision"] = git_util::get_latest_commit_hash(data_path);
         crow_context["file_name"] = std::filesystem::path(data_path).filename().string();
         crow_context["file_path"] = std::string(path);
         TRY_ADD_HEADER(crow_context, "site_url", req);

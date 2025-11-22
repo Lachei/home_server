@@ -4,7 +4,7 @@ project(home_server)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
-file(GLOB SRC "src/*")
+file(GLOB SRC "src/*" "src/diff_match_patch/diff_match_patch.cpp")
 message("${SRC}")
 if(WIN32)
     add_compile_definitions(_WIN32_WINNT=0x0601)
