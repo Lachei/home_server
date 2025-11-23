@@ -63,10 +63,12 @@ namespace data_util
         std::scoped_lock lock(get_file_locks()[final_file]);
         std::string hash = git_util::try_get_latest_commit_hash(final_file);
         std::string merged_content{}; // needed to store the possibly merged file content
+        std::cout << "base_version " << base_version << std::endl;
+        std::cout << "hash " << hash << std::endl;
         if (hash.size() && base_version.size()) { // the file is in the git index -> do merge check (in case of double edit)
             if (hash != base_version) { // merge scenario
                 std::ifstream f(final_file.c_str(), std::ios_base::binary);
-                std::string cur_content{std::istream_iterator<char>{f}, std::istream_iterator<char>{}};
+                std::string cur_content{std::istreambuf_iterator<char>{f}, std::istreambuf_iterator<char>{}};
                 std::string base_content = git_util::get_file_at_version(final_file, base_version);
                 std::string_view new_content{reinterpret_cast<const char*>(data.data()), data.size()};
                 merged_content = git_util::merge_strings(base_content, cur_content, new_content);
@@ -75,6 +77,7 @@ namespace data_util
         }
         std::ofstream f(final_file.c_str(), std::ios_base::binary);
         f.write(reinterpret_cast<const char*>(data.data()), data.size());
+        f.flush();
         std::string new_version = git_util::try_commit_changes(user, final_file);
         return {{"success", "Updated/created the file"}, {"revision", new_version}, {"merged_content", merged_content}};
     }
@@ -89,6 +92,7 @@ namespace data_util
                 continue;
             std::filesystem::remove_all(file);
         }
+        git_util::try_commit_changes(user, base_dir);
         return nlohmann::json{{"success", "Removed the files/directories"}};
     }
 
@@ -133,6 +137,7 @@ namespace data_util
                     std::filesystem::rename(src, new_file);
             }
         }
+        git_util::try_commit_changes(user, base_dir);
         return nlohmann::json{{"success", "copied/moved the files"}};
     }
 

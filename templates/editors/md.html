@@ -228,11 +228,17 @@ ${document.getElementById("preview").innerHTML}
 
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
-            headers: { path: file_path },
+            headers: { path: file_path, revision: file_revision },
             method: "POST",
             body: document.getElementById("editor_text").value,
         });
         res = await res.json();
+        if (res.revision)
+            file_revision = res.revision;
+        if (res.merged_content && res.merged_content.length > 0)
+            document.getElementById("editor_text").value = res.merged_content;
+
+        delete res.merged_content;
         console.log(res);
     }
 

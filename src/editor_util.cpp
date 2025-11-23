@@ -35,9 +35,7 @@ namespace editor_util
 
         std::string data_path = std::string(data_base_folder) + path.data();
         std::ifstream data(data_path, std::ios_base::binary);
-        std::string d;
-        d.resize(std::filesystem::file_size(data_path));
-        data.read(d.data(), d.size());
+        std::string d{std::istreambuf_iterator<char>{data}, std::istreambuf_iterator<char>{}};
         d = std::regex_replace(d, std::regex("\\\\\""), "\\\\\"");
         d = std::regex_replace(d, std::regex("\\\'"), "\\\'");
         while (d.size() && d.back() == '\n')
@@ -47,6 +45,7 @@ namespace editor_util
         TRY_ADD_HEADER(crow_context, "credentials", req);
         crow_context["file_data"] = d;
         crow_context["file_revision"] = git_util::get_latest_commit_hash(data_path);
+        std::cout << git_util::get_latest_commit_hash(data_path) << ", " << data_path << std::endl;
         crow_context["file_name"] = std::filesystem::path(data_path).filename().string();
         crow_context["file_path"] = std::string(path);
         TRY_ADD_HEADER(crow_context, "site_url", req);

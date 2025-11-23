@@ -365,7 +365,10 @@ int main(int argc, const char** argv) {
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
+        std::string base_revision{};
+        if (req.headers.contains("revision"))
+            base_revision = req.headers.find("revision")->second;
+        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()}, base_revision);
         return res.dump();
     });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
