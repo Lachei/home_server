@@ -141,8 +141,23 @@ namespace data_util
         return nlohmann::json{{"success", "copied/moved the files"}};
     }
 
-    std::vector<std::byte> read_file(std::string_view file)
+    std::string read_file(std::string_view file)
     {
-        return {};
+        std::ifstream f(file.data(), std::ios_base::binary);
+        return std::string{std::istreambuf_iterator<char>{f}, std::istreambuf_iterator<char>{}};
+    }
+
+
+    std::string check_file_revision(std::string_view path, std::string_view client_revision) {
+        crow::mustache::template_t json_template{"{\"file_revision\":\"{{&file_revision}}\",\"file_data\":\"{{&file_data}}\"}"};
+        crow::mustache::context crow_context{};
+
+        std::string server_revision = git_util::get_latest_commit_hash(path);
+        if (server_revision != client_revision) {
+            crow_context["file_data"] = crow::json::escape(read_file(path));
+            crow_context["file_revision"] = server_revision;
+        }
+
+        return json_template.render_string(crow_context);
     }
 }

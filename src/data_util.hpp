@@ -13,5 +13,6 @@ namespace data_util{
     nlohmann::json update_file(std::string_view user, std::string_view file, std::span<const std::byte> data = {}, std::string_view base_version = {});
     nlohmann::json delete_files(std::string_view user, std::string_view base_dir, const nlohmann::json &files);
     nlohmann::json move_files(std::string_view user, std::string_view base_dir, const nlohmann::json &move_infos);
-    std::vector<std::byte> read_file(std::string_view file);
+    std::string read_file(std::string_view file);
+    std::string check_file_revision(std::string_view path, std::string_view revision);
 }

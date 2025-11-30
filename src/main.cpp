@@ -371,6 +371,19 @@ int main(int argc, const char** argv) {
         const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()}, base_revision);
         return res.dump();
     });
+    CROW_ROUTE(app, "/check_file_revision")([&credentials, &data_base_folder](const crow::request &req) {
+        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+
+        if (!req.headers.contains("path"))
+            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
+        if (!req.headers.contains("revision"))
+            return nlohmann::json{{"error", "The path revision field is missing in the reqeust"}}.dump();
+
+        std::string path{data_base_folder + req.headers.find("path")->second};
+        std::string client_revision{req.headers.find("revision")->second};
+        
+        return data_util::check_file_revision(path, client_revision);
+    });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
         EXTRACT_CHECK_CREDENTIALS(req, credentials);
 

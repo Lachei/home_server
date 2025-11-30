@@ -235,8 +235,10 @@ ${document.getElementById("preview").innerHTML}
         res = await res.json();
         if (res.revision)
             file_revision = res.revision;
-        if (res.merged_content && res.merged_content.length > 0)
+        if (res.merged_content && res.merged_content.length > 0) {
             document.getElementById("editor_text").value = res.merged_content;
+            recompile();
+        }
 
         delete res.merged_content;
         console.log(res);
@@ -251,6 +253,20 @@ ${document.getElementById("preview").innerHTML}
         }
     }, 5000);
     {{/editor}}
+
+    window.setInterval(async () => {
+        let res = await fetch(location.origin + "/check_file_revision", {
+            headers: { path: file_path, revision: file_revision },
+        });
+        res = await res.json();
+        if (res.file_revision && res.file_revision.length > 0)
+            file_revision = res.file_revision;
+        if (res.file_data && res.file_data.length > 0) {
+            document.getElementById("editor_text").value = res.file_data;
+            saved_md_data = res.file_data;
+            recompile();
+        }
+    }, 2000);
 
     let rescaled = false;
     function setup() {
