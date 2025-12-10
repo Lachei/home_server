@@ -315,7 +315,7 @@
 <script>
     const file_path = "{{&file_path}}";
     
-    let file_data = {{&file_data}};
+    var file_data = JSON.parse('{{&file_data}}');
     var file_revision = "{{&file_revision}}";
     let prev_data = structuredClone(file_data);
     /**
@@ -529,11 +529,21 @@
 
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
-            headers: { path: file_path },
+            headers: { path: file_path, revision: file_revision },
             method: "POST",
-            body: JSON.stringify(file_data)
+            body: JSON.stringify(file_data, null, "\t")
         });
         res = await res.json();
+        if (res.revision)
+            file_revision = res.revision;
+        if (res.merged_content && res.merged_content.length > 0) {
+            delete file_data;
+            file_data = JSON.parse(res.merged_content);
+            sync_view_to_json();
+        }
+
+        delete res.merged_content;
+        prev_data = structuredClone(file_data);
         console.log(res);
     }
 
@@ -553,6 +563,27 @@
         }
     }, 5000);
     {{/editor}}
+
+    window.setInterval(async () => {
+        let res = await fetch(location.origin + "/check_file_revision", {
+            headers: { path: file_path, revision: file_revision },
+        });
+        res = await res.json();
+        if (res.file_revision && res.file_revision.length > 0) {
+            if(res.file_data !== JSON.stringify(table_data, null, "\t")) {
+                await save();
+                return;
+            }
+            file_revision = res.file_revision;
+        }
+        if (res.file_data && res.file_data.length > 0) {
+            delete file_data;
+            delete prev_data;
+            file_data = JSON.parse(res.file_data);
+            prev_data = structuredClone(file_data);
+            sync_view_to_json();
+        }
+    }, 2000);
 </script>
 
 </html>

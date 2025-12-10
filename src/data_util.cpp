@@ -9,9 +9,11 @@
 
 namespace data_util
 {
-    robin_hood::unordered_map<std::string, std::mutex>& get_file_locks() {
+    std::scoped_lock<std::mutex> get_file_lock(const std::string &file) {
+        static std::mutex map_mutex;
         static robin_hood::unordered_map<std::string, std::mutex> locks{};
-        return locks;
+        std::scoped_lock map_loc{map_mutex};
+        return std::scoped_lock{locks[file]};
     }
 
     void setup_data(std::string_view dir)
@@ -60,11 +62,9 @@ namespace data_util
     {
         std::string final_file{file};
         std::ranges::replace(final_file, ' ', '_');
-        std::scoped_lock lock(get_file_locks()[final_file]);
+        std::scoped_lock lock = get_file_lock(final_file);
         std::string hash = git_util::try_get_latest_commit_hash(final_file);
         std::string merged_content{}; // needed to store the possibly merged file content
-        std::cout << "base_version " << base_version << std::endl;
-        std::cout << "hash " << hash << std::endl;
         if (hash.size() && base_version.size()) { // the file is in the git index -> do merge check (in case of double edit)
             if (hash != base_version) { // merge scenario
                 std::ifstream f(final_file.c_str(), std::ios_base::binary);

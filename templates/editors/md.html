@@ -240,6 +240,8 @@ ${document.getElementById("preview").innerHTML}
             recompile();
         }
 
+        delete saved_md_data;
+        saved_md_data = document.getElementById("editor_text").value;
         delete res.merged_content;
         console.log(res);
     }
@@ -249,7 +251,6 @@ ${document.getElementById("preview").innerHTML}
     window.setInterval(() => {
         if (saved_md_data != document.getElementById("editor_text").value) {
             save();
-            saved_md_data = document.getElementById("editor_text").value;
         }
     }, 5000);
     {{/editor}}
@@ -259,11 +260,15 @@ ${document.getElementById("preview").innerHTML}
             headers: { path: file_path, revision: file_revision },
         });
         res = await res.json();
-        if (res.file_revision && res.file_revision.length > 0)
+        if (res.file_revision && res.file_revision.length > 0) {
+            if (res.file_data !== saved_md_data) {
+                await save();
+                return;
+            }
             file_revision = res.file_revision;
+        }
         if (res.file_data && res.file_data.length > 0) {
             document.getElementById("editor_text").value = res.file_data;
-            saved_md_data = res.file_data;
             recompile();
         }
     }, 2000);

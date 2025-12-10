@@ -280,14 +280,7 @@
     const ballot_box = "&#9744;";
     const ballot_box_checked = "&#9745;";
 
-    var table_data = null;
-    try {
-        table_data = JSON.parse('{{&file_data}}');
-    }
-    catch (e) {
-        table_data = {};
-        console.log(e);
-    }
+    var table_data = JSON.parse('{{&file_data}}');
     var next_end = false;
 
     function create_cell(cell_pos, options = {}) {
@@ -787,6 +780,8 @@
             if (table_data[key].content.charAt(0) == "=")
                 try { executor.call({}, table_data, key, finished_fields, unfinished_fields); }
                 catch (e) { }
+            else
+                update_cell_div(table_data[key]);
         }
     }
 
@@ -827,11 +822,21 @@
 
     async function save() {
         let res = await fetch(location.origin + "/update_file", {
-            headers: { path: file_path },
+            headers: { path: file_path, revision: file_revision },
             method: "POST",
-            body: JSON.stringify(table_data),
+            body: JSON.stringify(table_data, null, "\t"),
         });
         res = await res.json();
+        if (res.revision)
+            file_revision = res.revision;
+        if (res.merged_content && res.merged_content.length > 0) {
+            delete table_data;
+            table_data = JSON.parse(res.merged_content);
+            update_functions();
+        }
+
+        delete res.merged_content;
+        console.log(res);
     }
 
     init_table();
@@ -855,9 +860,32 @@
     window.setInterval(() => {
         if (!deepEqual(saved_table_data, table_data)) {
             save();
+            delete saved_table_data;
             saved_table_data = structuredClone(table_data);
         }
     }, 5000);
+
+
+    window.setInterval(async () => {
+        let res = await fetch(location.origin + "/check_file_revision", {
+            headers: { path: file_path, revision: file_revision },
+        });
+        res = await res.json();
+        if (res.file_revision && res.file_revision.length > 0) {
+            if(res.file_data !== JSON.stringify(table_data, null, "\t")) {
+                await save();
+                return;
+            }
+            file_revision = res.file_revision;
+        }
+        if (res.file_data && res.file_data.length > 0) {
+            delete table_data;
+            delete saved_table_data;
+            table_data = JSON.parse(res.file_data);
+            saved_table_data = structuredClone(table_data);
+            update_functions();
+        }
+    }, 2000);
     
     window.onresize = () => {
         let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";

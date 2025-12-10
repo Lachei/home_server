@@ -44,7 +44,7 @@ void init_git(std::string_view path) {
 
 std::string get_file_at_version(std::string_view path, std::string_view version) {
     std::filesystem::path p{path};
-    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git --no-pager show " + std::string(version) + ':' + p.filename().string());
+    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git --no-pager show " + std::string(version) + ":./" + p.filename().string());
     if (status != EXIT_SUCCESS)
         throw std::runtime_error("Failed to get file " + std::string(path) + " with error: " + output);
     return output;
@@ -52,7 +52,7 @@ std::string get_file_at_version(std::string_view path, std::string_view version)
 
 std::string get_latest_commit_hash(std::string_view file) {
     std::filesystem::path p{file};
-    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git rev-list -1 HEAD -- " + p.filename().string());
+    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git rev-list -1 HEAD -- ./" + p.filename().string());
     if (status != EXIT_SUCCESS)
         throw std::runtime_error{"Getting latest commit failed with result string: " + output + " and exit code: " + std::to_string(status)};
     while (output.size() && output.back() == ' ' || output.back() == '\n')
