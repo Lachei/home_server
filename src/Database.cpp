@@ -7,7 +7,6 @@
 #include "util.hpp"
 #include "type_serialization.hpp"
 #include "string_split.hpp"
-#include "AdminCredentials.hpp"
 
 using src_loc = std::source_location;
 using Types = std::vector<uint32_t>;
@@ -57,7 +56,7 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
         GeneralHeader general_header{};
         data_file.read(reinterpret_cast<char *>(&general_header), sizeof(general_header));
         if (general_header.magic_num != DBTABLEMAGICNUM)
-            throw std::runtime_error{log_msg("Magic number for header mismatch")};
+            throw std::runtime_error{"Magic number for header mismatch"};
 
         // parse into the correct special header
         if (general_header.type == columnar_header_id)
@@ -87,7 +86,7 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             data_file.seekg(header.columns_offsets_lengths, data_file.beg).read(reinterpret_cast<char *>(offset_sizes.data()), header.num_columns * sizeof(offset_sizes[0]));
 
             if (column_infos && *column_infos != this->column_infos)
-                throw std::runtime_error{log_msg("Column mismatch for stored table and requested table format")};
+                throw std::runtime_error{"Column mismatch for stored table and requested table format"};
 
             // load data (can be loaded without seeking, as they are in the storage sequentially)
             loaded_data.resize(header.num_columns);
@@ -103,13 +102,13 @@ Database::Table::Table(std::string_view storage_location, const std::optional<Co
             return;
         }
         else
-            throw std::runtime_error{log_msg("Unknown header type")};
+            throw std::runtime_error{"Unknown header type"};
     }
 
     // validating the column name strings (no spaces allowed)
     for (const auto &n : column_infos->column_names)
         if (n.find(' ') != std::string::npos)
-            throw std::runtime_error{log_msg("The column names for a new table are not allowed to contain spaces.")};
+            throw std::runtime_error{"The column names for a new table are not allowed to contain spaces."};
     this->column_infos = *column_infos;
     this->loaded_data.resize(this->column_infos.column_names.size());
     for (auto i : i_range(_num_columns()))
@@ -206,13 +205,13 @@ inline Database::Date get_free_id_impl<Database::Date>(std::span<const Database:
 template <>
 inline std::string get_free_id_impl<std::string>(std::span<const std::string> v)
 {
-    throw std::runtime_error{log_msg("There is no next free id for string. Only numeric types can be queried for next id")};
+    throw std::runtime_error{"There is no next free id for string. Only numeric types can be queried for next id"};
     return {};
 }
 template <>
 inline std::vector<std::byte> get_free_id_impl<std::vector<std::byte>>(std::span<const std::vector<std::byte>> v)
 {
-    throw std::runtime_error{log_msg("There is no next free id for byte vectors. Only numeric types can be queried for next id")};
+    throw std::runtime_error{"There is no next free id for byte vectors. Only numeric types can be queried for next id"};
     return {};
 }
 Database::ElementType Database::Table::get_free_id() const
@@ -261,7 +260,7 @@ void Database::Table::insert_row(const std::span<ElementType> &data)
     {
         std::shared_lock lock(mutex);
         if (!same_data_layout(data, loaded_data))
-            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+            throw std::runtime_error("The data layout for inserting data into the table is different");
     }
 
     std::unique_lock lock(mutex);
@@ -283,7 +282,7 @@ void Database::Table::insert_rows(const std::span<ColumnType> &data)
     {
         std::shared_lock lock(mutex);
         if (!same_data_layout(data, loaded_data))
-            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+            throw std::runtime_error("The data layout for inserting data into the table is different");
     }
 
     std::unique_lock lock(mutex);
@@ -305,7 +304,7 @@ Database::ElementType Database::Table::insert_row_without_id(const std::span<Ele
     {
         std::shared_lock lock(mutex);
         if (!same_data_layout_without_id(data, loaded_data, column_infos.id_column))
-            throw std::runtime_error{log_msg("the data layout for inserting data into the table is different")};
+            throw std::runtime_error{"the data layout for inserting data into the table is different"};
     }
 
     std::unique_lock lock(mutex);
@@ -330,7 +329,7 @@ Database::ColumnType Database::Table::insert_rows_without_id(const std::span<Col
     {
         std::shared_lock lock(mutex);
         if (!same_data_layout_without_id(data, loaded_data, column_infos.id_column))
-            throw std::runtime_error(log_msg("The data layout for inserting data into the table is different"));
+            throw std::runtime_error("The data layout for inserting data into the table is different");
     }
 
     std::unique_lock lock(mutex);
@@ -367,7 +366,7 @@ void Database::Table::delete_row(const ElementType &id)
     {
         std::shared_lock lock(mutex);
         if (id.index() != loaded_data[column_infos.id_column].index())
-            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+            throw std::runtime_error{"The id value is not the same as in the table"};
     }
 
     std::unique_lock lock(mutex);
@@ -378,7 +377,7 @@ void Database::Table::delete_row(const ElementType &id)
                    auto &v = std::get<T>(this->loaded_data[this->column_infos.id_column]);
                    auto p = std::ranges::find(v, id);
                    if (p == v.end())
-                       throw std::runtime_error{log_msg("The id to delete is not in the table")};
+                       throw std::runtime_error{"The id to delete is not in the table"};
                    del_idx = p - v.begin();
                },
                id);
@@ -398,7 +397,7 @@ void Database::Table::delete_rows(const std::span<ElementType> &ids)
     {
         std::shared_lock lock(mutex);
         if (ids[0].index() != loaded_data[column_infos.id_column].index())
-            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+            throw std::runtime_error{"The id value is not the same as in the table"};
     }
 
     std::unique_lock lock(mutex);
@@ -415,9 +414,9 @@ void Database::Table::delete_rows(const std::span<ElementType> &ids)
                    id);
     }
     if (del_idx.empty())
-        throw std::runtime_error{log_msg("The ids to delete were not in the table")};
+        throw std::runtime_error{"The ids to delete were not in the table"};
     if (del_idx.size() != ids.size())
-        CROW_LOG_WARNING << log_msg("Not all ids to delete were found in the table");
+        CROW_LOG_WARNING << "Not all ids to delete were found in the table";
 
     for (auto &data : loaded_data)
     {
@@ -443,9 +442,9 @@ void Database::Table::update_row(const std::span<ElementType> row)
     {
         std::shared_lock lock(mutex);
         if (row.size() != _num_columns())
-            throw std::runtime_error{log_msg("The amount of elements does not coincide with the table")};
+            throw std::runtime_error{"The amount of elements does not coincide with the table"};
         if (row[column_infos.id_column].index() != loaded_data[column_infos.id_column].index())
-            throw std::runtime_error{log_msg("The id value is not the same as in the table")};
+            throw std::runtime_error{"The id value is not the same as in the table"};
     }
 
     std::unique_lock lock(mutex);
@@ -463,7 +462,7 @@ void Database::Table::update_row(const std::span<ElementType> row)
                        },
                        loaded_data[column_infos.id_column]);
     if (i >= _num_rows())
-        throw std::runtime_error{log_msg("The index for the row to update was not found")};
+        throw std::runtime_error{"The index for the row to update was not found"};
 
     for (auto j : i_range(_num_columns()))
     {
@@ -481,7 +480,7 @@ bool Database::Table::contains(const ElementType& id) const
     {
         std::shared_lock lock(mutex);
         if (id.index() != loaded_data[column_infos.id_column].index())
-            throw std::runtime_error{log_msg("The id value has nothte same type as the id column of the tabel")};
+            throw std::runtime_error{"The id value has nothte same type as the id column of the tabel"};
     }
     std::shared_lock lock(mutex);
     create_index();
@@ -531,7 +530,7 @@ void Database::create_table(std::string_view table_name, const Table::ColumnInfo
     if (_tables.contains(table_name_s))
     {
         if (column_infos != _tables.at(table_name_s)->column_infos)
-            throw std::runtime_error(log_msg("A table with the same name and different columns already exists"));
+            throw std::runtime_error("A table with the same name and different columns already exists");
     }
     else
     {
@@ -544,7 +543,7 @@ Database::ElementType Database::get_free_id(std::string_view table) const
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table for which the next id should be acquired does not exits")};
+        throw std::runtime_error{"The table for which the next id should be acquired does not exits"};
     return _tables.at(table_s)->get_free_id();
 }
 
@@ -553,7 +552,7 @@ Database::ReadReference Database::get_table_data(std::string_view table)
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error(log_msg("The table from which the data should be returned does not exist"));
+        throw std::runtime_error("The table from which the data should be returned does not exist");
     return ReadReference(_tables.at(table_s)->loaded_data, _mutex, _tables.at(table_s)->mutex);
 }
 
@@ -562,7 +561,7 @@ void Database::insert_rows(std::string_view table, const std::span<ColumnType> &
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+        throw std::runtime_error{"The table into which data should be inserted does not exist"};
     _tables.at(table_s)->insert_rows(data);
 }
 
@@ -571,7 +570,7 @@ void Database::insert_row(std::string_view table, const std::span<ElementType> &
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+        throw std::runtime_error{"The table into which data should be inserted does not exist"};
     _tables.at(table_s)->insert_row(data);
 }
 
@@ -580,7 +579,7 @@ Database::ElementType Database::insert_row_without_id(std::string_view table, co
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+        throw std::runtime_error{"The table into which data should be inserted does not exist"};
     return _tables.at(table_s)->insert_row_without_id(data);
 }
 
@@ -589,7 +588,7 @@ Database::ColumnType Database::insert_rows_without_id(std::string_view table, co
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table into which data should be inserted does not exist")};
+        throw std::runtime_error{"The table into which data should be inserted does not exist"};
     return _tables.at(table_s)->insert_rows_without_id(data);
 }
 
@@ -598,7 +597,7 @@ void Database::delete_row(std::string_view table, const ElementType &id)
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+        throw std::runtime_error{"The table from which ids should be deleted does not exist"};
     _tables.at(table_s)->delete_row(id);
 }
 
@@ -607,7 +606,7 @@ void Database::delete_rows(std::string_view table, const std::span<ElementType> 
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+        throw std::runtime_error{"The table from which ids should be deleted does not exist"};
     _tables.at(table_s)->delete_rows(ids);
 }
 
@@ -616,7 +615,7 @@ void Database::update_row(std::string_view table, const std::span<ElementType> r
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table from which ids should be deleted does not exist")};
+        throw std::runtime_error{"The table from which ids should be deleted does not exist"};
     _tables.at(table_s)->update_row(row);
 }
 
@@ -625,7 +624,7 @@ bool Database::contains(std::string_view table, const ElementType &id) const
     std::shared_lock lock(_mutex);
     const std::string table_s(table);
     if (!_tables.contains(table_s))
-        throw std::runtime_error{log_msg("The table on which contains should be called does not exist")};
+        throw std::runtime_error{"The table on which contains should be called does not exist"};
     return _tables.at(table_s)->contains(id);
 }
 
@@ -642,7 +641,7 @@ template <>
 std::vector<Database::ColumnType> Database::_query_database<database_internal::EventQuery>(const database_internal::EventQuery &query) const
 {
     if (!_tables.contains(query.event_table_name))
-        throw std::runtime_error{log_msg("The table for the event query does not exist")};
+        throw std::runtime_error{"The table for the event query does not exist"};
 
     const auto &table = *_tables.at(query.event_table_name);
     const auto &visibilities_col = std::distance(table.column_infos.column_names.begin(), std::ranges::find(table.column_infos.column_names, "visibility"));
@@ -688,18 +687,18 @@ template <>
 std::vector<Database::ColumnType> Database::_query_database<database_internal::IDQuery>(const database_internal::IDQuery &query) const
 {
     if (!_tables.contains(query.table_name))
-        throw std::runtime_error{log_msg("The table for the id query does not exist")};
+        throw std::runtime_error{"The table for the id query does not exist"};
 
     auto &table = *_tables.at(query.table_name);
     if (query.id.index() != table.loaded_data[table.column_infos.id_column].index())
-        throw std::runtime_error{log_msg("The table for the id query has a different id type than given in the qeury")};
+        throw std::runtime_error{"The table for the id query has a different id type than given in the qeury"};
 
     std::shared_lock lock(table.mutex);
     if (table.index.empty())
         table.create_index();
 
     if (!table.index.contains(query.id))
-        throw std::runtime_error{log_msg("The id searched for is not in the database")};
+        throw std::runtime_error{"The id searched for is not in the database"};
 
     auto row_idx = table.index.at(query.id);
     std::vector<ColumnType> res(table._num_columns());

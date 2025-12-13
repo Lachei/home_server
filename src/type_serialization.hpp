@@ -43,7 +43,7 @@ template<> void serialize_type<std::vector<std::vector<std::byte>>>(std::ofstrea
 template<typename T>
 std::vector<T> deserialize_type(std::ifstream& data_file, const std::pair<uint64_t, uint64_t>& offset_size, uint64_t num_rows = 0){
     if (data_file.tellg() != offset_size.first)
-        throw std::runtime_error{log_msg("The given data_file has its read pointer not at the offset value of offset_size")};
+        throw std::runtime_error{"The given data_file has its read pointer not at the offset value of offset_size"};
     std::vector<T> res(offset_size.second / sizeof(T));
     data_file.read(reinterpret_cast<char*>(res.data()), offset_size.second);
     return res;
@@ -58,7 +58,7 @@ template<> std::vector<std::string> deserialize_type<std::string>(std::ifstream&
         cur_offset += res[i].length() + 1;
     }
     if (cur_offset != chars.size())
-        throw std::runtime_error{log_msg("Error at deserializing strings")};
+        throw std::runtime_error{"Error at deserializing strings"};
     return res;
 }
 template<> std::vector<std::vector<std::byte>> deserialize_type<std::vector<std::byte>>(std::ifstream& data_file, const std::pair<uint64_t, uint64_t>& offset_size, uint64_t num_rows){
@@ -74,6 +74,6 @@ template<> std::vector<std::vector<std::byte>> deserialize_type<std::vector<std:
         cur_offset += cur_size;
     }
     if (cur_offset != bytes.size())
-        throw std::runtime_error{log_msg("Error at deserializing byte vectors")};
+        throw std::runtime_error{"Error at deserializing byte vectors"};
     return res;
 }

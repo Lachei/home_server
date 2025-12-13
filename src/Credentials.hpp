@@ -6,9 +6,9 @@
 #include <random>
 
 #include "crow/crow.h"
-#include "AdminCredentials.hpp"
-#include "util.hpp"
 #include "nlohmann/json.hpp"
+
+constexpr std::string_view admin_name{"admin"};
 
 // this class manages the credentials and keeps all credentials in memory and on harddisk to be quicker
 // at checking a credential
@@ -53,54 +53,10 @@ public:
         return users;
     }
 
-    // if user is not yet known generates a new entry in the map and a new salt
-    std::string get_or_create_user_salt(const std::string &name)
-    {
-        if (name == admin_name)
-            return std::string(admin_salt);
-
-        if (!_credentials.contains(name))
-        {
-            // create new credential salt
-            std::string new_salt(SALT_LENGTH, ' ');
-            std::mt19937 rng(_r());
-            for (auto i : i_range(SALT_LENGTH))
-            {
-                int n = _dist(rng);
-                if (n < 10)
-                    new_salt[i] = static_cast<char>('0' + n);
-                else
-                    new_salt[i] = static_cast<char>('a' + n - 10);
-            }
-            using op = std::pair<std::string const, crow::json::wvalue>;
-            _credentials[name] = nlohmann::json{{"salt", new_salt}, {"sha256", ""}};
-            CROW_LOG_INFO << "Added new user salt pair: " << name << ": " << new_salt;
-            safe_credentials();
-        }
-
-        return _credentials[name]["salt"].get<std::string>();
-    }
-
-    std::string get_user_salt(const std::string &name)
-    {
-        if (name == admin_name)
-            return std::string(admin_salt);
-
+    std::string get_credential(const std::string &name) const {
         if (!_credentials.contains(name))
             return {};
-
-        return _credentials[name]["salt"].get<std::string>();
-    }
-
-    bool check_credential(const std::string &name, std::string_view sha256) const
-    {
-        if (name == admin_name)
-            return sha256 == admin_sha256;
-        if (!_credentials.contains(name))
-            return false;
-
-        auto sha_user = _credentials[name]["sha256"].get<std::string>();
-        return sha_user == sha256;
+        return _credentials[name]["sha256"];
     }
 
     bool set_credential(const std::string &user, std::string_view sha256)

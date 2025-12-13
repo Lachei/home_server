@@ -1,5 +1,4 @@
 #include "database_util.hpp"
-#include "AdminCredentials.hpp"
 #include "string_split.hpp"
 #include "robin_hood/robin_hood.h"
 
@@ -8,7 +7,7 @@
     {                                               \
         return nlohmann::json{{"error", e.what()}}; \
     }                                               \
-    return nlohmann::json{{"error", log_msg("Got to end of function, not allowed")}};
+    return nlohmann::json{{"error", "Got to end of function, not allowed"}};
 
 template <typename T>
 static const std::string t = std::string(Database::column_type_name_v<T>);

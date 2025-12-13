@@ -8,24 +8,16 @@
 #include "crow/crow.h"
 #include "date.h"
 #include "string_view_stream.hpp"
+#include "Credentials.hpp"
 
-#define EXTRACT_CREDENTIALS_T(req, ret_type)            \
-    auto req_creds = extract_credentials_from_req(req); \
-    if (!req_creds)                                     \
-        return ret_type{"Credentials missing"};         \
-    auto [username, sha] = *req_creds;
+struct crow_status: public std::runtime_error {
+    using header_vec = std::vector<std::pair<std::string, std::string>>;
+    crow_status(crow::status st, const header_vec &headers, const std::string &what = {}): 
+        std::runtime_error(what), status{st}, headers{headers} {}
 
-#define EXTRACT_CREDENTIALS(req) EXTRACT_CREDENTIALS_T(req, std::string)
-
-#define EXTRACT_CHECK_CREDENTIALS_T(req, credentials, ret_type)    \
-    auto req_creds = extract_credentials_from_req(req);            \
-    if (!req_creds)                                                \
-        return ret_type("Credentials missing");                    \
-    auto [username, sha] = *req_creds;                             \
-    if (!credentials.check_credential(std::string(username), sha)) \
-        return ret_type("Credential check failed. Relogging might fix the issue.");
-
-#define EXTRACT_CHECK_CREDENTIALS(req, credentials) EXTRACT_CHECK_CREDENTIALS_T(req, credentials, std::string)
+    crow::status status{crow::status::OK};
+    header_vec headers{};
+};
 
 template <class... Ts>
 struct overloaded : Ts...
@@ -58,52 +50,10 @@ inline std::pair<std::string_view, std::string_view> extract_credentials(std::st
     return std::pair{username, sha};
 }
 
-inline std::optional<std::pair<std::string_view, std::string_view>> extract_credentials_from_req(const crow::request &req)
-{
-    if (std::filesystem::path(req.url).filename().string() == "overview")
-    {
-        auto body_view = std::string_view(req.body);
-        if (body_view.empty())
-            return {};
-        auto uname_start = body_view.find("uname=") + sizeof("uname");
-        auto uname_end = body_view.find('&', uname_start);
-        auto uname = body_view.substr(uname_start, uname_end - uname_start);
-        auto pwd = body_view.substr(body_view.find("psw=", uname_end) + sizeof("psw"));
-        return std::optional{std::pair{uname, pwd}};
-    }
-    else
-    {
-        // check for credentials header field
-        auto cred = req.headers.find("credentials");
-        if (cred != req.headers.end())
-        {
-            return std::optional{extract_credentials(cred->second)};
-        }
-        // check for Authorization field
-        cred = req.headers.find("Authorization");
-        if (cred != req.headers.end())
-        {
-            return std::optional{extract_credentials(cred->second)};
-        }
-        // check for authorization field in cookies
-        cred = req.headers.find("Cookie");
-        if (cred != req.headers.end())
-        {
-            size_t cred_offset = std::string_view(cred->second).find("credentials");
-            if (cred_offset != std::string_view::npos) {
-                cred_offset += 11; // add size of credentials
-                for (; cred_offset < cred->second.size() && (cred->second[cred_offset] == ' ' || cred->second[cred_offset] == '='); ++cred_offset);
-                return std::optional{extract_credentials(std::string_view(cred->second).substr(cred_offset))};
-            }
-        }
-    }
-    return {};
-}
-
-inline std::string log_msg(std::string_view message, const std::source_location &loc = std::source_location::current())
-{
-    return std::string(loc.file_name()) + ": " + std::to_string(loc.line()) + " | " + std::string(message);
-}
+bool valid_credential(const std::string &credential, const Credentials& credentials);
+std::string cookie_extract_credential(const std::string &cookie);
+bool valid_cookie_credential(const std::string &cookie, const Credentials& credentials);
+std::string get_authorized_username(const crow::request &req, const Credentials &credentials);
 
 #define DATE_FORMAT "%Y-%m-%d %T"
 constexpr std::string_view date_dump_format = "{:" DATE_FORMAT "}";

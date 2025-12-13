@@ -12,21 +12,47 @@
 
 #define TRY(expr) try { expr; } catch (const std::exception &e) { CROW_LOG_WARNING << e.what(); }
 
-struct AccessControlHeader{
-    struct context{};
-    
-    void before_handle(crow::request& req, crow::response& res, context& ctx){}
-    void after_handle(crow::request& req, crow::response& res, context& ctx){
-        // only add access control allow for login/main page
-        if(req.url.size() == 1) {
-            res.add_header("Access-Control-Allow-Origin", "*");
-            res.add_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            res.add_header("Access-Control-Allow-Headers", "Content-Type");
-            res.add_header("Access-Control-Allow-Credentials", "true");
+static Credentials &credentials_singleton() {
+    static Credentials credentials("credentials/cred.json");
+    return credentials;
+}
+
+struct AuthMiddleWare {
+    struct context {
+        std::string cookie_content{};
+    };
+
+    void before_handle(crow::request& req, crow::response& res, context& ctx) {
+        auto login = req.headers.find("login");
+        if (login != req.headers.end() && valid_credential(login->second, credentials_singleton())) {
+            req.add_header("credentials", login->second);
+            ctx.cookie_content = login->second;
+            return;
         }
+
+        auto cookie = req.headers.find("Cookie");
+        if (cookie != req.headers.end() && valid_cookie_credential(cookie->second, credentials_singleton())) { // if credentials field is present, all done
+            req.add_header("credentials", cookie_extract_credential(cookie->second));
+            return;
+        }
+
+        auto authorization = req.headers.find("Authorization");
+        if (authorization == req.headers.end()) // if no Authorization filed given, cannot convert to credentials
+            return;
+        try {
+            std::string username = get_authorized_username(req, credentials_singleton());
+            std::string sha = credentials_singleton().get_credential(username);
+            req.add_header("credentials", username + ":" + sha);
+            ctx.cookie_content = username + ":" + sha;
+            return;
+        } catch (...) {}
+    }
+
+    void after_handle(crow::request& req, crow::response& res, context& ctx) {
+        if(ctx.cookie_content.size())
+            res.add_header("Set-Cookie", "credentials=" + ctx.cookie_content + "; Max-Age=31536000; SameSite=Strict");
     }
 };
-
 
 struct default_groups{
     static constexpr std::string_view unauthorized_user{"unautorisierte_benutzer"};
@@ -62,7 +88,6 @@ std::string_view get_parameter(std::span<const char*> args, std::string_view par
 
 using namespace std::string_view_literals;
 int main(int argc, const char** argv) {
-    load_admin_credentials();
     std::span<const char*> args(argv, argc);
     bool show_help = std::ranges::contains(args, "--help"sv);
     
@@ -93,9 +118,22 @@ int main(int argc, const char** argv) {
     if (show_help)
         print_help();
 
-    crow::App app{};
+    crow::App<AuthMiddleWare> app{};
+    app.exception_handler([](crow::response &res)->void{
+        try { 
+            throw; // rethrow current exception
+        } catch (const crow_status &e) {
+            // special handle for unauthorized error
+            res = crow::response(e.status);
+            for (const auto &[key, val]: e.headers)
+                res.add_header(key, val);
+            CROW_LOG_ERROR << "Crow status error: " << e.what();
+        } catch (...) {
+            crow::Router::default_exception_handler(res);
+        }
+    });
     
-    Credentials credentials("credentials/cred.json");
+    Credentials &credentials = credentials_singleton(); 
     Database database(std::string(databases_folder) + "events");
     database_util::setup_event_table(database);
     database_util::setup_shift_tables(database);
@@ -109,20 +147,18 @@ int main(int argc, const char** argv) {
     // ------------------------------------------------------------------------------------------------
     const std::string main_page_text = crow::mustache::load_text("main.html");
     CROW_ROUTE(app, "/")([&main_page_text](){
+        // crow::response res(crow::status::UNAUTHORIZED, main_page_text);
+        // res.add_header("WWW-Authenticate", "Digest realm=\"logout\"");
         return main_page_text;
     });
     
-    CROW_ROUTE(app, "/get_salt/<string>")([&credentials](const std::string& user){
-        return credentials.get_user_salt(user);
-    });
-
-    CROW_ROUTE(app, "/get_create_salt/<string>")([&credentials](const std::string& user){
-        // TODO: should only be doable by the admin, maybe delete functionality
-        return credentials.get_or_create_user_salt(user);
+    CROW_ROUTE(app, "/login")([&credentials](const crow::request& req){
+        std::string username = get_authorized_username(req, credentials);
+        return "";
     });
     
     CROW_ROUTE(app, "/change_password/<string>")([&credentials](const crow::request& req, const std::string& user){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         auto new_pwd = req.headers.find("new_pwd");
         if (new_pwd == req.headers.end() || !credentials.contains(user))
@@ -140,7 +176,7 @@ int main(int argc, const char** argv) {
     });
     
     CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         bool success = credentials.delete_credential(user);
         if (success)
@@ -150,7 +186,7 @@ int main(int argc, const char** argv) {
     });
 
     CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         nlohmann::json ret = credentials.get_user_list();
         return ret.dump();
@@ -160,13 +196,13 @@ int main(int argc, const char** argv) {
     // Event creation, editing, deletion, querying
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         auto events = database_util::get_events(database, username);
         return events.dump();
     });
     CROW_ROUTE(app, "/get_event/<int>")([&credentials, &database](const crow::request& req, uint64_t event_id){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         auto event = database_util::get_event(database, username, event_id);
         return event.dump();
@@ -174,7 +210,7 @@ int main(int argc, const char** argv) {
     std::mutex update_cache_mutex;
     std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
     CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         try{
             const auto& event = nlohmann::json::parse(req.body);
@@ -195,7 +231,7 @@ int main(int argc, const char** argv) {
         return std::string{};
     });
     CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         const auto event = nlohmann::json::parse(req.body);
         const auto& creator = event["creator"].get<std::string>();
@@ -214,7 +250,7 @@ int main(int argc, const char** argv) {
         return result.dump();
     });
     CROW_ROUTE(app, "/get_updated_events")([&credentials, &update_cache, &update_cache_mutex](const crow::request& req){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         // removing old entries
         nlohmann::json ret{};
@@ -230,7 +266,7 @@ int main(int argc, const char** argv) {
         return ret.dump();
     });
     CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &database](const crow::request& req, uint64_t id){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         const auto result = database_util::delete_event(database, username, id);
         return result.dump();
@@ -240,7 +276,7 @@ int main(int argc, const char** argv) {
     // Shift editing
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not begin shift for another user, only admin can do that"}}.dump();
@@ -249,7 +285,7 @@ int main(int argc, const char** argv) {
         return result.dump();
     });
     CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not check shift for another user, only admin can do that"}}.dump();
@@ -258,7 +294,7 @@ int main(int argc, const char** argv) {
         return result.dump();
     });
     CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database](const crow::request& req, const std::string& user){
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
@@ -267,19 +303,19 @@ int main(int argc, const char** argv) {
         return result.dump();
     });
     CROW_ROUTE(app, "/get_shifts")([&credentials, &database](const crow::request& req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         const auto res = database_util::get_shifts_grouped(database);
         return res.dump();
     });
     CROW_ROUTE(app, "/get_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         const auto res = database_util::get_shift(database, shift_id);
         return res.dump();
     });
     CROW_ROUTE(app, "/update_shift").methods("POST"_method)([&credentials, &database](const crow::request& req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         const auto shift = nlohmann::json::parse(req.body);
         const auto& user = shift["user"].get<std::string>();
@@ -290,13 +326,13 @@ int main(int argc, const char** argv) {
         return result.dump();
     });
     CROW_ROUTE(app, "/delete_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         auto result = database_util::delete_shift(database, username, shift_id);
         return result.dump();
     });
     CROW_ROUTE(app, "/add_shift").methods("POST"_method)([&credentials, &database](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
         
         const auto shift = nlohmann::json::parse(req.body);
         if(shift["user"].get<std::string>() != username && username != admin_name)
@@ -310,12 +346,12 @@ int main(int argc, const char** argv) {
     // Data processing
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/daten/")([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         return data_util::get_dir_infos(data_base_folder, "").dump();
     });
     CROW_ROUTE(app, "/daten/<path>")([&credentials, &data_base_folder](const crow::request &req, const std::string& path) {
-        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        std::string username = get_authorized_username(req, credentials);
         
         // sanity check which avoids any .. in the path. This hinders users to get folders
         // outside of the data subfolder which would be a security violation
@@ -337,7 +373,7 @@ int main(int argc, const char** argv) {
         return res;
     });
     CROW_ROUTE(app, "/upload_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
@@ -345,7 +381,7 @@ int main(int argc, const char** argv) {
         return res.dump();
     });
     CROW_ROUTE(app, "/create_folder")([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
@@ -353,7 +389,7 @@ int main(int argc, const char** argv) {
         return res.dump();
     });
     CROW_ROUTE(app, "/create_file")([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
@@ -361,7 +397,7 @@ int main(int argc, const char** argv) {
         return res.dump();
     });
     CROW_ROUTE(app, "/update_file").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
@@ -372,7 +408,7 @@ int main(int argc, const char** argv) {
         return res.dump();
     });
     CROW_ROUTE(app, "/check_file_revision")([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (!req.headers.contains("path"))
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
@@ -385,14 +421,14 @@ int main(int argc, const char** argv) {
         return data_util::check_file_revision(path, client_revision);
     });
     CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         const auto move_infos = nlohmann::json::parse(req.body);
         const auto res = data_util::move_files(username, data_base_folder, move_infos);
         return res.dump();
     });
     CROW_ROUTE(app, "/delete_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         const auto delete_files = nlohmann::json::parse(req.body);
         const auto res = data_util::delete_files(username, data_base_folder, delete_files);
@@ -400,7 +436,7 @@ int main(int argc, const char** argv) {
     });
     
     CROW_ROUTE(app, "/create_rech")([&credentials, &data_base_folder, &invoice_file_mutex](const crow::request &req) {
-        EXTRACT_CHECK_CREDENTIALS(req, credentials);
+        std::string username = get_authorized_username(req, credentials);
 
         if (req.headers.find("path") == req.headers.end())
             return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
@@ -475,22 +511,22 @@ int main(int argc, const char** argv) {
     // File editing
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/edit_tbl/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        std::string username = get_authorized_username(req, credentials);
 
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
     CROW_ROUTE(app, "/edit_md/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        std::string username = get_authorized_username(req, credentials);
         
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
     CROW_ROUTE(app, "/edit_rech/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        std::string username = get_authorized_username(req, credentials);
         
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
     CROW_ROUTE(app, "/edit_gpx/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
+        std::string username = get_authorized_username(req, credentials);
         
         return editor_util::get_editor(true, req, path, data_base_folder);
     });
@@ -504,33 +540,20 @@ int main(int argc, const char** argv) {
     // General page loading
     // ------------------------------------------------------------------------------------------------
     const auto overview_page = crow::mustache::load("overview.html");
-    CROW_ROUTE(app, "/overview").methods("POST"_method, "GET"_method)([&credentials, &main_page_text, &overview_page](const crow::request& req){
-        EXTRACT_CREDENTIALS_T(req, crow::response);
-        
-        crow::response res;
-        if (!credentials.check_credential(std::string(username), sha)){
-            CROW_LOG_INFO << "Credential check failed for username " << username << ':' << sha;
-            res.body = main_page_text;
-            return res;
-        }
-
-        // the cookie is valid for 1 year
-        res.add_header("Set-Cookie", "credentials=" + std::string(username) + ':' + std::string(sha) + "; Max-Age=31536000; SameSite=Strict");
+    CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
+        std::string username = get_authorized_username(req, credentials);
 
         bool is_admin = username == admin_name;
-        using op = std::pair<std::string const, crow::json::wvalue>;
         crow::mustache::context crow_context{};
         if (is_admin) {
             crow_context["benutzername"] = "admin";
             crow_context["user_specific_css"] = "admin.css";
-            res.body = overview_page.render_string(crow_context);
-            return res;
+            return overview_page.render_string(crow_context);
         }
         else {
             crow_context["benutzername"] = std::string(username);
             crow_context["user_specific_css"] = "user.css";
-            res.body = overview_page.render_string(crow_context);
-            return res;
+            return overview_page.render_string(crow_context);
         }
     });
     
@@ -540,8 +563,6 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/md_default.css")([&md_css](){return md_css;});
     const std::string user_css = crow::mustache::load_text("user.css");
     CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
-    const std::string sha_js = crow::mustache::load_text("sha256.js");
-    CROW_ROUTE(app, "/sha256.js")([&sha_js](){crow::response r(sha_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
     CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string katex_js = crow::mustache::load_text("katex.js");
@@ -580,8 +601,8 @@ int main(int argc, const char** argv) {
     }
 #endif
     
-    if (admin_salt.empty() || admin_sha256.empty()){
-        std::cout << "[error] Missing admin salt or credentials\n";
+    if (!credentials.contains(std::string{admin_name})){
+        std::cout << "[error] Missing admin credentials, add with the set_password.sh script\n";
         return -1;
     }
 
