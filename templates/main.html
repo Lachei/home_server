@@ -44,19 +44,16 @@
       margin: auto;
       max-width: 500px;
     }
-
-    .errors {
-      color: red;
-    }
     </style>
   </head>
 
   <body>
     <h1>Wilkommen auf Lacheis minifuziserver</h1>
     <div class="container">
-      <label for="username">Benutzername</label><input id="username" type="text">
-      <label for="password">Passwort</label><input id="password" type="password">
-        <button onclick="login();">Anmelden</button>
+      <label for="username">Benutzername</label><input id="username" type="text" onkeydown="if (event.key === 'Enter') login();">
+      <label for="password">Passwort</label><input id="password" type="password" onkeydown="if (event.key === 'Enter') login();">
+      <button onclick="login();">Anmelden</button>
+      <div id="error" style="display:none;color: red;">Benutzername oder passwort falsch</div>
     </div>
   </body>
   <script>
@@ -67,8 +64,12 @@
     let hash = await window.crypto.subtle.digest("SHA-256", encoder.encode(`${u}:user@minifuziserver.duckdns.org:${p}`));
     hash = new Uint8Array(hash).toHex();
     let v = await fetch("login", {headers:{login:`${u}:${hash}`}});
-    if (v.ok)
+    if (v.ok) {
       window.location.href = window.location.origin + '/overview';
+    } else {
+      document.getElementById("error").style.display = "block";
+      setTimeout(()=>{document.getElementById("error").style.display = "none";}, 5000);
+    }
   }
   </script>
 </html>

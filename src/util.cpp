@@ -59,6 +59,10 @@ std::string get_authorized_username(const crow::request &req, const Credentials 
         return cred->second.substr(0, cred->second.find_first_of(':'));
     }
 
+    auto login = req.headers.find("login");
+    if (login != req.headers.end())
+        throw crow_status{crow::status::FORBIDDEN, {}, "Login auth failed"};
+
     auto auth = req.headers.find("Authorization");
     if (auth == req.headers.end())
         throw unauthorized_err("Missing authorization, header");

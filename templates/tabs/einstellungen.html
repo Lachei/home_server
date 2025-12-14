@@ -1,43 +1,29 @@
 <script>
-    function change_pwd(){
+    async function change_pwd(){
         let username = document.getElementById("uname").value;
         if (!username || username.length === 0)
             username = "{{benutzername}}";
         let password = document.getElementById("password").value;
-        if (password.length === 0) {
-            // TODO
+        let passwordw = document.getElementById("passwordw").value;
+        if (password.length === 0 || passwordw !== password) {
+            document.getElementById("errorpwd").style.display = "block";
+            setTimeout(()=>{document.getElementById("errorpwd").style.display = "none";}, 5000);
+            return;
         }
-
-        fetch(window.location.origin + "/get_create_salt/" + username).then((response => {
-            response.text().then(text => {
-                if (text.length === 0) {
-                    console.log("Error at getting the salt");
-                }
-                else {
-                    let sha = sha256(password + text);
-                    fetch(location.origin + "/change_password/" + username, {
-                        headers: { "new_pwd": sha }
-                    })
-                        .then(response => {
-                            response.text().then(res => {
-                                console.log(res);
-                                if (username == "{{benutzername}}") {
-                                    window.location = window.location.pathname + "?credentials={{benutzername}}:" + sha;
-                                }
-                            });
-                        });
-                }
-            })
-        }));
+        const encoder = new TextEncoder();
+        let hash = await window.crypto.subtle.digest("SHA-256", encoder.encode(`${username}:user@minifuziserver.duckdns.org:${password}`));
+        hash = new Uint8Array(hash).toHex();
+        let res = await fetch("/change_password/" + username, {
+            headers: { new_pwd: hash }
+        });
+        res = await res.text();
+        console.log(res);
     }
     
-    function delete_user(uname) {
-        fetch(window.location.origin + "/delete_user/" + uname)
-        .then(response => {
-            response.text().then(text => {
-                console.log(text);
-            })
-        });
+    async function delete_user(uname) {
+        let res = await fetch(window.location.origin + "/delete_user/" + uname)
+        res = await res.text();
+        console.log(res);
     }
 </script>
 <p><b>Passwort &auml;ndern:</b><p>
@@ -49,6 +35,9 @@
 
     <label for="psw"><b>Passwort</b></label>
     <input id="password" type="password" placeholder="Passwort" name="psw" required>
+    <label for="psww"><b>Passwort wiederholen</b></label>
+    <input id="passwordw" type="password" placeholder="Passwort wiederholen" name="psww" required>
+    <div id="errorpwd" style="color:red;display:none">Passwörter stimmen nicht überein</div>
 
     <button onclick="change_pwd()">Passwort &Auml;ndern</button>
 

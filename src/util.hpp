@@ -12,7 +12,7 @@
 
 struct crow_status: public std::runtime_error {
     using header_vec = std::vector<std::pair<std::string, std::string>>;
-    crow_status(crow::status st, const header_vec &headers, const std::string &what = {}): 
+    crow_status(crow::status st, const header_vec &headers = {}, const std::string &what = {}): 
         std::runtime_error(what), status{st}, headers{headers} {}
 
     crow::status status{crow::status::OK};

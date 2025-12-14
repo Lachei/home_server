@@ -24,9 +24,10 @@ struct AuthMiddleWare {
 
     void before_handle(crow::request& req, crow::response& res, context& ctx) {
         auto login = req.headers.find("login");
-        if (login != req.headers.end() && valid_credential(login->second, credentials_singleton())) {
+        if (login != req.headers.end()) {
             req.add_header("credentials", login->second);
-            ctx.cookie_content = login->second;
+            if (valid_credential(login->second, credentials_singleton()))
+                ctx.cookie_content = login->second;
             return;
         }
 
@@ -50,7 +51,7 @@ struct AuthMiddleWare {
 
     void after_handle(crow::request& req, crow::response& res, context& ctx) {
         if(ctx.cookie_content.size())
-            res.add_header("Set-Cookie", "credentials=" + ctx.cookie_content + "; Max-Age=31536000; SameSite=Strict");
+            res.add_header("Set-Cookie", "credentials=" + ctx.cookie_content + "; Max-Age=31536000; SameSite=Strict; Path=/");
     }
 };
 
@@ -161,28 +162,36 @@ int main(int argc, const char** argv) {
         std::string username = get_authorized_username(req, credentials);
 
         auto new_pwd = req.headers.find("new_pwd");
-        if (new_pwd == req.headers.end() || !credentials.contains(user))
-            return std::string("Missing new_pwd in header infos or user is not available");
-        
-        if(username != user && username != admin_name) {
-            return std::string("Only admin can change password of other users");
-        }
-            
+        if (new_pwd == req.headers.end())
+            return crow::response{"Missing new_pwd in header infos"};
+
+        if(username != user && username != admin_name)
+            return crow::response{"Only admin can change password of other users"};
+
+        crow::response res{crow::status::OK};
+
         bool success = credentials.set_credential(user, new_pwd->second);
-        if (success)
-            return std::string("success");
-        else 
-            return std::string("failed");
+        if (success) {
+            res.body = "success";
+            if (user == username) // only if the password for the issuer is changed the cookie has to be reset
+                res.add_header("Set-Cookie", "credentials=" + user + ':' + new_pwd->second + "; Max-Age=31536000; SameSite=Strict; Path=/");
+        } else {
+            res.body = "failed";
+        }
+        return res;
     });
-    
+
     CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user){
         std::string username = get_authorized_username(req, credentials);
-        
+
+        if (user == admin_name)
+            return crow::response{crow::status::FORBIDDEN};
+
         bool success = credentials.delete_credential(user);
         if (success)
-            return std::string("success");
+            return crow::response{"success"};
         else
-            return std::string("error");
+            return crow::response{"error"};
     });
 
     CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req){

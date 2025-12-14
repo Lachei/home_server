@@ -61,8 +61,6 @@ public:
 
     bool set_credential(const std::string &user, std::string_view sha256)
     {
-        if (!_credentials.contains(user))
-            return false;
         _credentials[user]["sha256"] = std::string(sha256);
         safe_credentials();
         return true;
