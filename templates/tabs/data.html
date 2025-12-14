@@ -230,6 +230,12 @@
         background-color: white;
     }
 
+    .qr {
+        height:35px;
+        float:right;
+        cursor: pointer;
+    }
+
     #search_input {
         width: auto;
         margin-left: 20px;
@@ -378,6 +384,7 @@
         return (n.toFixed(n < 10 && l > 0 ? 1 : 0) + ' ' + units[l]);
     }
 
+    const qr="https://api.qrserver.com/v1/create-qr-code/";
     function edit_icon(data_extension, data_path, data_type) {
         let final="";
         const edit_icon = "✍";
@@ -386,6 +393,8 @@
             case "tbl": 
             case "gpx": 
             case "rech": final = `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>&nbsp;`;
+            let editor_path = window.location.origin + `/edit_${data_extension}/${data_path}`;
+            final += "<img class='qr' src='" + qr + "?size=150x150&data=" + editor_path + "&format=svg&qzone=1' onclick='window.open(this.src);'>"
         }
         if (data_type != "d")
             final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
@@ -409,8 +418,10 @@
             list.innerHTML += "<div class='le_div'>" + get_icon(element.type, element.extension) + "</div>";
             if (element.type === "d")
                 list.innerHTML += "<div class='le_div'><a onclick='cur_directory=\"" + element.full_path + "\"; reload_cur_directory();'>" + element.name + "</a></div>";
-            else
-                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a></div>";
+            else {
+                let filepath = window.location.origin + "/daten/" + element.full_path;
+                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a><img class='qr' src='" + qr + "?size=150x150&data=" + filepath + "&format=svg&qzone=1' onclick='window.open(this.src);'></div>";
+            }
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
             list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path, element.type) + "</div>";
             list.innerHTML += "<div class='le_div'>" + data_pretty_date(element.change_date) + "</div>";
