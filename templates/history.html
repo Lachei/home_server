@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset="utf-8">
+    <style>
+        html {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: min(2vw, .5cm);
+        }
+        h1 {
+            font-size: 40px;
+            text-align: center;
+        }
+        .h {
+            cursor: pointer;
+            text-decoration: underline;
+            color: blue;
+        }
+        .d {
+            color: green;
+        }
+        .t {
+            display:inline-grid;
+        }
+        .s {
+            overflow:scroll;
+            height: fit-content;
+            max-height: 100%;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@latest/build/styles/atom-one-light.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@latest/build/highlight.min.js"></script>
+  </head>
+
+  <body>
+    <div style="display:grid; grid-template-columns:50% 50%; grid-template-rows:50px auto; width: 100%; height: 95vh;">
+      <div class="t"><h1>History of: {{file_name}}</h1></div>
+      <div class="t"></div>
+      <div id="history" class="t s"></div>
+      <div id="details" class="t s"></div>
+    </div>
+  </body>
+  <script>
+  const history={{&history}};
+  window.onload=()=>{
+    let overview_html="";
+    for (let line of history.split('\n')) {
+      let parts = line.split(": ");
+      overview_html += "<div><tt class='d'>" + parts[0] + "</tt>: ";
+      parts = parts[1].split(" ");
+      hash = parts[0];
+      overview_html += "<tt class='h' onclick='set_detail_view(\"" + hash + "\");'>" + hash + "</tt> ";
+      overview_html += "<tt>" + parts.slice(1).join(" ") + "</tt>";
+      overview_html += "</div>";
+    }
+    document.getElementById("history").innerHTML = overview_html;
+  }
+
+  async function set_detail_view(commit_sha) {
+    let details = await fetch("/git_commit", { headers: { file_path:"{{&file_path}}", git_hash:commit_sha }});
+    details = await details.text();
+    document.getElementById("details").innerHTML = hljs.highlight(details, {language: 'diff'}).value.replaceAll("\n","<br>");
+  }
+  
+  </script>
+</html>

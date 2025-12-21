@@ -424,7 +424,7 @@
             }
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
             list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path, element.type) + "</div>";
-            list.innerHTML += "<div class='le_div'>" + data_pretty_date(element.change_date) + "</div>";
+            list.innerHTML += "<div class='le_div'><a href='/git_history/" + element.full_path + "'>" + data_pretty_date(element.change_date) + "</a></div>";
         }
     }
 

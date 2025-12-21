@@ -181,7 +181,7 @@ int main(int argc, const char** argv) {
         return res;
     });
 
-    CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user){
+    CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user) -> crow::response{
         std::string username = get_authorized_username(req, credentials);
 
         if (user == admin_name)
@@ -194,23 +194,45 @@ int main(int argc, const char** argv) {
             return crow::response{"error"};
     });
 
-    CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req){
+    CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req) -> std::string {
         std::string username = get_authorized_username(req, credentials);
 
         nlohmann::json ret = credentials.get_user_list();
         return ret.dump();
     });
+
+    // ------------------------------------------------------------------------------------------------
+    // Git information
+    // ------------------------------------------------------------------------------------------------
+    CROW_ROUTE(app, "/git_history/<path>")([&credentials, &data_base_folder](const crow::request& req, std::string path) -> std::string {
+        std::string username = get_authorized_username(req, credentials);
+
+        return git_util::get_history_response(data_base_folder + path);
+    });
+    CROW_ROUTE(app, "/git_commit")([&credentials, &data_base_folder](const crow::request& req) -> std::string{
+        std::string username = get_authorized_username(req, credentials);
+
+        auto file_path = req.headers.find("file_path");
+        if (file_path == req.headers.end())
+            return "missing file_path";
+        auto git_hash = req.headers.find("git_hash");
+        if (git_hash == req.headers.end())
+            return "missing git_hash";
+
+        return git_util::get_commit(file_path->second, git_hash->second);
+    });
+
     
     // ------------------------------------------------------------------------------------------------
     // Event creation, editing, deletion, querying
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req){
+    CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req) -> std::string {
         std::string username = get_authorized_username(req, credentials);
 
         auto events = database_util::get_events(database, username);
         return events.dump();
     });
-    CROW_ROUTE(app, "/get_event/<int>")([&credentials, &database](const crow::request& req, uint64_t event_id){
+    CROW_ROUTE(app, "/get_event/<int>")([&credentials, &database](const crow::request& req, uint64_t event_id) ->std::string {
         std::string username = get_authorized_username(req, credentials);
 
         auto event = database_util::get_event(database, username, event_id);
@@ -218,7 +240,7 @@ int main(int argc, const char** argv) {
     });
     std::mutex update_cache_mutex;
     std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
-    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
+    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req) -> std::string {
         std::string username = get_authorized_username(req, credentials);
         
         try{

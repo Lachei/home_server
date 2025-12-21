@@ -4,6 +4,7 @@
 #include <utility>
 #include <filesystem>
 #include <fstream>
+#include "crow/crow.h"
 
 #include <iostream>
 
@@ -89,6 +90,35 @@ std::string merge_strings(std::string_view base_version, std::string_view a, std
     auto base_to_a = dmp.patch_make(str{base_version}, str{a});
     auto [result, applied_patches] = dmp.patch_apply(base_to_a, str{b});
     return result;
+}
+
+std::string get_history_response(std::string_view path) {
+    static const crow::mustache::template_t history_template{crow::mustache::load("history.html")};
+
+    std::string history = get_history(path);
+
+    crow::mustache::context crow_context{};
+    crow_context["history"] = '"' + crow::json::escape(history) + '"';
+    crow_context["file_path"] = std::string(path);
+    crow_context["file_name"] = std::filesystem::path(path).stem();
+    return history_template.render_string(crow_context);
+}
+
+std::string get_history(std::string_view path) {
+    std::filesystem::path p{path};
+    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git --no-pager log --graph --abbrev-commit --decorate --format=format:'%C(bold green)(%as)%C(reset): %C(bold blue)%h%C(reset) - %C(white)%s%C(reset) %C(dim white)- %an%C(reset)%C(auto)%d%C(reset)' --all -- " + p.filename().string());
+    if (status != EXIT_SUCCESS)
+        throw std::runtime_error{"Getting the history failed with output: " + output + " and exit code: " + std::to_string(status)};
+    return output;
+}
+
+
+std::string get_commit(std::string_view path, std::string_view hash) {
+    std::filesystem::path p{path};
+    auto [status, output] = run_command("cd " + p.parent_path().string() + " && git --no-pager show " + std::string(hash) + " -- " + p.filename().string());
+    if (status != EXIT_SUCCESS)
+        throw std::runtime_error{"Getting the diff failed with output: " + output + " and exit code: " + std::to_string(status)};
+    return output;
 }
 
 }

@@ -18,5 +18,7 @@ add_test(NAME test_Dataset COMMAND test_Dataset)
 
 file(GLOB DIFF_MATCH_PATCH_SRC "test_diff_match_patch.cpp" "../src/git_util.cpp")
 add_executable(test_diff_match_patch ${DIFF_MATCH_PATCH_SRC})
+target_link_libraries(test_diff_match_patch PRIVATE ${Boost_LIBRARIES})
+target_compile_definitions(test_diff_match_patch PUBLIC CROW_USE_BOOST)
 target_include_directories(test_diff_match_patch PRIVATE ../src)
 add_test(NAME test_diff_match_patch COMMAND test_diff_match_patch)

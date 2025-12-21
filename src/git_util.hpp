@@ -11,4 +11,7 @@ namespace git_util {
     std::string commit_changes(std::string_view user);
     std::string try_commit_changes(std::string_view user, std::string_view path);
     std::string merge_strings(std::string_view base_version, std::string_view a, std::string_view b);
+    std::string get_history_response(std::string_view path);
+    std::string get_history(std::string_view path);
+    std::string get_commit(std::string_view path, std::string_view hash);
 }
