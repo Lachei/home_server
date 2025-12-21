@@ -24,6 +24,17 @@
             display: table;
         }
 
+        input[type="color"],
+        input[type="date"],
+        input[type="datetime"],
+        input[type="tel"],
+        input[type="text"],
+        input[type="time"],
+        select:focus,
+        textarea {
+          font-size: 16px;
+        }
+
         #header, #table_filler {
             display: table-row;
         }
@@ -45,6 +56,21 @@
         input {
             border-style: solid;
             border-color: lightgray;
+        }
+
+        .row_add {
+            background-color: #04AA6D;
+            color: white;
+            padding: 14px 20px;
+            border: none;
+            cursor: pointer;
+        }
+
+        .inplace_edit {
+            width:100%;
+            height:100%;
+            border:none;
+            background-color:transparent;
         }
 
         .tool_bar {
@@ -282,6 +308,7 @@
 
     var table_data = JSON.parse('{{&file_data}}');
     var next_end = false;
+    var table_rows = 200;
 
     function create_cell(cell_pos, options = {}) {
         return {
@@ -322,6 +349,10 @@
                 resize_row([{ target: { id: cell.cell_pos }, contentRect: { height: cell.height } }]);
                 break;
         }
+    }
+    function split_col_row(row_col) {
+        let split = row_col.search(/[0-9]/);
+        return {col: row_col.slice(0, split), row: +row_col.slice(split)};
     }
     function font_size_changed() {
         let font_size = (document.getElementById("font_size_input").value);
@@ -422,7 +453,7 @@
 
     function init_table() {
         const col_range = ["A".charCodeAt(0), "Z".charCodeAt(0)];
-        const row_range = [1, 200];
+        const row_range = [1, table_rows];
         const num_cols = col_range[1] - col_range[0] + 1;
         const num_rows = row_range[1] - row_range[0] + 1;
         let table_div = document.getElementById("table");
@@ -447,9 +478,10 @@
                     inner_rows += `<div id="${row}:${row}" class="table_row_header row_height row_${row}" draggable="true" onclick="select_cell(this);" ondragstart="select_cell(this);" ondragover="select_end_cell(this);">${row}</div>`;
             }
         }
+        inner += "<button class='row_add' onclick='table_rows *= 2;init_table();'>Reihen * 2</button>";
         table_div.innerHTML = inner;
         column_labels.innerHTML = inner_cols;
-        row_labels.innerHTML = inner_rows;
+        row_labels.innerHTML = inner_rows + "<div class='table_col_header col_width' style='height:40px'></div>";
         {{#editor}}
         for (let r = 0; r < num_rows; r++) {
             let id = `${r + row_range[0]}:${r + row_range[0]}`;
@@ -529,7 +561,24 @@
             next_end = false;
         }
         else {
-            document.getElementById("cell_selection").value = cell.id;
+            let cs = get_start_cell_str();
+            if (cs !== "" && !table_data[cs])
+                document.getElementById(cs).innerHTML = "";
+            if (drag_start_cell !== cell.id && cs !== "" && table_data[cs]){
+                update_cell_div(table_data[cs]);   // this also deselects the previous one
+                update_functions();
+            }
+            cell_selection.value = cell.id;
+            let cell_div = document.getElementById(cell.id);
+            if (cell_div.classList.contains("table_field") && drag_start_cell !== cell.id) {
+                cell_div.innerHTML = "<input class='inplace_edit' type='text' value='" + (cell.id in table_data ? table_data[cell.id].content: "") + "' onchange='if (!(\"" + cell.id + "\" in table_data)) table_data." + cell.id + " = create_cell(\"" + cell.id + "\"); table_data." + cell.id + ".content = this.value;'/>";
+                cell_div.children.item(0).focus();
+                cell_div.children.item(0).setSelectionRange(10000, 10000);
+            }
+            if (cell.id)
+                cell_div.setAttribute("draggable", "false")
+            if (drag_start_cell !== cell.id && drag_start_cell)
+                document.getElementById(drag_start_cell).setAttribute("draggable", "true");
             drag_start_cell = cell.id;
             update_selected();
         }
@@ -565,6 +614,10 @@
         document.getElementById("cell_selection").value = String.fromCharCode(a_code + sca) + sra + ":" + String.fromCharCode(a_code + eca) + era;
         update_selected();
         select_cell_function_input();
+    }
+    function get_start_cell_str() {
+        let [sra, era, sca, eca] = get_start_end_cell(cell_selection.value);
+        return String.fromCharCode(a_code + sca) + sra;
     }
     function select_cell_function_input() {
         if (!insert_cells_text)
@@ -703,7 +756,7 @@
     const grad_zu_rad = (g) => { return g * PI / 180; }
     const rad_zu_grad = (r) => { return r * 180 / PI; }
     const runden = (n, s = 0) => { return +((+n).toFixed(s)); }
-    const zahl = (a) => { if(!(a.replace)) return a; return +(a.replace(',', '.')) || 0; }
+    const zahl = (a) => { if(!(a.replace)) return a; return parseFloat(a.replace(',', '.')) || 0; }
     const hintergrundfarbe = (farbe) => { change_color("background-color", farbe in color_map ? { value: color_map[farbe] } : { value: farbe }); return null; }
     const hf = hintergrundfarbe;
     const PI = Math.PI
@@ -821,6 +874,12 @@
 
 
     async function save() {
+        // pruning empty cells
+        for (let [id, cel] of Object.entries(table_data)) {
+            if (cel.content !== null && cel.content.length === 0 &&
+                cel.style !== null && Object.keys(cel.style).length === 0)
+                delete table_data[id];
+        }
         let res = await fetch(location.origin + "/update_file", {
             headers: { path: file_path, revision: file_revision },
             method: "POST",
@@ -839,6 +898,8 @@
         console.log(res);
     }
 
+    for (let [id, cell] of Object.entries(table_data))
+        table_rows = Math.max(table_rows, split_col_row(id).row + 10);
     init_table();
     setTimeout(() => {
         for (let [id, e] of Object.entries(table_data)) {
