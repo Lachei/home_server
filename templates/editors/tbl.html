@@ -876,8 +876,8 @@
     async function save() {
         // pruning empty cells
         for (let [id, cel] of Object.entries(table_data)) {
-            if (cel.content !== null && cel.content.length === 0 &&
-                cel.style !== null && Object.keys(cel.style).length === 0)
+            if ("content" in cel && cel.content.length === 0 &&
+                "style" in cel && Object.keys(cel.style).length === 0)
                 delete table_data[id];
         }
         let res = await fetch(location.origin + "/update_file", {
@@ -899,7 +899,8 @@
     }
 
     for (let [id, cell] of Object.entries(table_data))
-        table_rows = Math.max(table_rows, split_col_row(id).row + 10);
+        if (!id.includes(":"))
+            table_rows = Math.max(table_rows, split_col_row(id).row + 10);
     init_table();
     setTimeout(() => {
         for (let [id, e] of Object.entries(table_data)) {
