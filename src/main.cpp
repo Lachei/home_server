@@ -604,6 +604,8 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/virtual_texture.js")([&virtual_texture_js](){crow::response r(virtual_texture_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string proj4_js = crow::mustache::load_text("proj4.js");
     CROW_ROUTE(app, "/pro4.js")([&proj4_js](){crow::response r(proj4_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string qr_js = crow::mustache::load_text("qrcode.min.js");
+    CROW_ROUTE(app, "/qrcode.min.js")([&qr_js](){crow::response r(qr_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
     CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
     const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
