@@ -1,3 +1,4 @@
+<script src="/qrcode.min.js"></script>
 <style>
     object {
         width: 100%;
@@ -235,8 +236,9 @@
         float:right;
         cursor: pointer;
     }
-    .qr > img {
-        height:100%;
+    .qr > svg {
+        height:35px;
+        width:35px;
     }
 
     #search_input {
@@ -273,7 +275,6 @@
         font-size: 20px;
     }
 </style>
-<script src="/qrcode.min.js"></script>
 
 <div id="file_explorer">
     <div id="tree_search">Here comes the search and tree</div>
@@ -397,7 +398,7 @@
             case "gpx": 
             case "rech": final = `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>&nbsp;`;
             let editor_path = window.location.origin + `/edit_${data_extension}/${data_path}`;
-                final += "<div class='qr' url='" + editor_path + "' onclick='window.open(this.children.item(1).src);'></div>"
+                final += "<div class='qr' url='" + editor_path + "'></div>"
         }
         if (data_type != "d")
             final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
@@ -423,7 +424,7 @@
                 list.innerHTML += "<div class='le_div'><a onclick='cur_directory=\"" + element.full_path + "\"; reload_cur_directory();'>" + element.name + "</a></div>";
             else {
                 let filepath = window.location.origin + "/daten/" + element.full_path;
-                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a><div class='qr' url='" + filepath + "' onclick='window.open(this.children.item(1).src);'></div>";
+                list.innerHTML += "<div class='le_div'><a onclick='open_data(\"/daten/" + element.full_path + "\", \"" + element.extension + "\");'>" + element.name + "</a><div class='qr' url='" + filepath + "'></div>";
             }
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
             list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path, element.type) + "</div>";
@@ -432,7 +433,14 @@
         for (let el of document.getElementsByClassName("qr")) {
             if (el.children.length !== 0)
                 continue;
-            new QRCode(el, el.getAttribute("url"));
+
+            let qr = qrcode(0, 'H'); qr.addData(el.getAttribute("url")); qr.make();
+            qr = qr.createSvgTag();
+            el.innerHTML = qr;
+            el.onclick = ()=>{ 
+                const blob = new Blob([qr.replaceAll('90px', '50%')], { type: "image/svg+xml" });
+                window.open(URL.createObjectURL(blob), "_blank");
+            };
         }
     }
 
