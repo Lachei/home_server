@@ -106,6 +106,11 @@ inline std::string_view json_array_to_comma_list(std::string_view arr)
     return arr;
 }
 
+template<typename T>
+inline std::span<const std::byte> to_bin_span(const T &data) {
+    return std::span<const std::byte>(reinterpret_cast<const std::byte*>(data.data()), data.size() * sizeof(*data.data()));
+}
+
 namespace std::ranges
 {
     template <typename T, typename E>

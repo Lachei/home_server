@@ -26,7 +26,7 @@ namespace database_util
     nlohmann::json delete_event(Database &db, std::string_view person, uint64_t id);
 
     void setup_shift_tables(Database &database);
-    nlohmann::json start_shift(Database &db, std::string_view person);
+    nlohmann::json start_shift(Database &db, std::string_view person, std::string_view comment = {});
     nlohmann::json check_active_shift(const Database &db, std::string_view person);
     nlohmann::json end_shift(Database &db, std::string_view person);
     // returns the shifts in a json object which contains for each user a list of shifts that user

@@ -311,8 +311,13 @@ int main(int argc, const char** argv) {
 
         if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not begin shift for another user, only admin can do that"}}.dump();
-        
-        auto result = database_util::start_shift(database, user);
+
+        std::string_view comment{};
+        auto comment_hdr = req.headers.find("comment");
+        if (comment_hdr != req.headers.end())
+            comment = comment_hdr->second;
+
+        auto result = database_util::start_shift(database, user, comment);
         return result.dump();
     });
     CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
@@ -324,13 +329,14 @@ int main(int argc, const char** argv) {
         auto result = database_util::check_active_shift(database, user);
         return result.dump();
     });
-    CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database](const crow::request& req, const std::string& user){
+    CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database, &data_base_folder](const crow::request& req, const std::string& user){
         std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
             return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
         
         const auto result = database_util::end_shift(database, user);
+        data_util::try_add_shift_to_rech(username, data_base_folder, std::chrono::minutes(result["shift_length"].get<int>()), result["comment"].get<std::string>());
         return result.dump();
     });
     CROW_ROUTE(app, "/get_shifts")([&credentials, &database](const crow::request& req) {
@@ -554,7 +560,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/edit_rech/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
         std::string username = get_authorized_username(req, credentials);
         
-        return editor_util::get_editor(true, req, path, data_base_folder);
+        return editor_util::get_editor(true, req, path, data_base_folder, username);
     });
     CROW_ROUTE(app, "/edit_gpx/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
         std::string username = get_authorized_username(req, credentials);

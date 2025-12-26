@@ -108,6 +108,14 @@
             background-color: white;
             grid-template-columns: min-content auto;
         }
+        #start_shift{
+            background-color: #04AA6D;
+            color: white;
+            padding: 14px 20px;
+            margin: 8px 0;
+            border: none;
+            cursor: pointer;
+        }
         
         .header {
             border-top: solid 2px black;
@@ -225,6 +233,7 @@
         <div id="editor_header">
             <p style="font-size:200%; text-align: center;">{{file_name}}</p>
             <button id="save" onclick="save();">&#128190;</button>
+            <button id="start_shift" onclick="start_shift();">Start shift</button>
             <hr>
         </div>
         <div id="logo"></div>
@@ -318,6 +327,7 @@
     var file_data = JSON.parse('{{&file_data}}');
     var file_revision = "{{&file_revision}}";
     let prev_data = structuredClone(file_data);
+    const username = "{{username}}";
     /**
      * Structure of file data:
      * id: number,
@@ -339,6 +349,12 @@
      *     total_enable: bool
      * }
      */
+
+    async function start_shift() {
+        let res = await fetch("/start_shift/" + username, { headers: { comment: "[RNr:" + file_data.id + "]" } });
+        res = await res.json();
+        console.log(res);
+    }
     
     function setup() {
         const address_tag = document.getElementById("templates").querySelector("address");
@@ -570,10 +586,10 @@
         });
         res = await res.json();
         if (res.file_revision && res.file_revision.length > 0) {
-            if(res.file_data !== JSON.stringify(table_data, null, "\t")) {
-                await save();
-                return;
-            }
+            // if(res.file_data !== JSON.stringify(file_data, null, "\t")) {
+            //     await save();
+            //     return;
+            // }
             file_revision = res.file_revision;
         }
         if (res.file_data && res.file_data.length > 0) {

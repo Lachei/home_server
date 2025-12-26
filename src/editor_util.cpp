@@ -30,7 +30,7 @@ namespace editor_util
         return extension_editors.contains(ext);
     }
 
-    crow::response get_editor(bool editor, const crow::request &req, std::string_view path, std::string_view data_base_folder)
+    crow::response get_editor(bool editor, const crow::request &req, std::string_view path, std::string_view data_base_folder, std::string_view username)
     {
         std::string ext = std::filesystem::path(path).extension().string();
         if (!extension_editors.contains(ext))
@@ -54,6 +54,7 @@ namespace editor_util
         crow_context["file_path"] = std::string(path);
         TRY_ADD_HEADER(crow_context, "site_url", req);
         crow_context["editor"] = editor;
+        crow_context["username"] = std::string(username);
         crow::response r(extension_loaded_editors.at(ext).render_string(crow_context));
         r.add_header("Content-Type", crow::mime_types.at("html"));
         return r;
