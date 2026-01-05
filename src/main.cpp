@@ -388,15 +388,22 @@ int main(int argc, const char** argv) {
         return data_util::get_dir_infos(data_base_folder, "").dump();
     });
     CROW_ROUTE(app, "/daten/<path>")([&credentials, &data_base_folder](const crow::request &req, const std::string& path) {
-        std::string username = get_authorized_username(req, credentials);
-        
         // sanity check which avoids any .. in the path. This hinders users to get folders
         // outside of the data subfolder which would be a security violation
         if (path.find("..") != std::string::npos)
             return crow::response{"{error: \".. is not allowed in the path.\"}"};
 
+        // fast allowed return for applications
         crow::response res;
         std::filesystem::path file_path = data_base_folder.data() + path;
+        if (path.starts_with("Anwendungen/")) {
+            CROW_LOG_INFO << "No user check for file " << file_path;
+            res.set_static_file_info(file_path.string());
+            return res;
+        }
+
+        std::string username = get_authorized_username(req, credentials);
+
         if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path)) {
             std::string ext = file_path.extension().string();
             if (editor_util::is_extension_editor(ext))
