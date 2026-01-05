@@ -398,7 +398,10 @@ int main(int argc, const char** argv) {
         std::filesystem::path file_path = data_base_folder.data() + path;
         if (path.starts_with("Anwendungen/")) {
             CROW_LOG_INFO << "No user check for file " << file_path;
-            res.set_static_file_info(file_path.string());
+            if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path))
+                res.set_static_file_info(file_path.string());
+            else
+                res.body = data_util::get_dir_infos(data_base_folder, path).dump();
             return res;
         }
 
