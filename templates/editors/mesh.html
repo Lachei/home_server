@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+
+<html>
+    <head>
+        <meta charset="utf-8">
+        <title>Mesh Viewer</title>
+    </head>
+    <style>
+body  {
+    height: 100%;
+    width: 100%;
+}
+    </style>
+    <body>
+        <div id="view"></div>
+    </body>
+    <script>
+    const file_path="/daten/{{&file_path}}";
+    function render() {
+        new StlViewer(view, { models: [ {id:0, filename:file_path}] });
+    }
+    </script>
+    <script src="/stl_viewer.min.js" onload="render();"></script>
+</html>

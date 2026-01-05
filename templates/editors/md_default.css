@@ -143,6 +143,10 @@ ol li.decimal::marker{
     right: unset;
 }
 
+.mesh {
+    height: 50%;
+}
+
 code > span,
 code > span > span{
     font-family: unset

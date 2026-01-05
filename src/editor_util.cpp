@@ -13,12 +13,14 @@ static robin_hood::unordered_map<std::string, std::string> extension_editors{
     {".tbl", "editors/tbl.html"},
     {".gpx", "editors/gpx.html"},
     {".rech", "editors/invoice.html"},
+    {".stl", "editors/mesh.html"},
 };
 static robin_hood::unordered_map<std::string, bool> extension_escape{
     {".md", false},
     {".tbl", true},
     {".gpx", true},
     {".rech", true},
+    {".stl", true},
 };
 // cached and already loaded editors
 static robin_hood::unordered_map<std::string, crow::mustache::template_t> extension_loaded_editors{};

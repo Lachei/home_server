@@ -884,7 +884,7 @@ const Util = {
         const canvas = document.createElement('canvas');
         canvas.width = width;
         canvas.height = height;
-        return canvas.getContext(context_type, {willReadFrequently: true});
+        return canvas.getContext(context_type, {willReadFrequently: true, antialias: true});
     },
     
     wgs_84_to_uv: function (lat, lon) {
