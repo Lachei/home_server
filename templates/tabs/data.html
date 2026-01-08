@@ -397,7 +397,7 @@
             case "tbl": 
             case "gpx": 
             case "rech": final = `<a style='font-size:150%;' onclick='open_editor("${data_path}", "${data_extension}");'> ${edit_icon} </a>&nbsp;`;
-            let editor_path = window.location.origin + `/edit_${data_extension}/${data_path}`;
+            let editor_path = window.location.origin + `/daten/${data_path}?edit=true`;
                 final += "<div class='qr' url='" + editor_path + "'></div>"
         }
         if (data_type != "d")
@@ -428,7 +428,7 @@
             }
             list.innerHTML += "<div class='le_div'>" + (element.size == 0 ? "" : niceBytes(element.size)) + "</div>";
             list.innerHTML += "<div class='le_div' style='font-aling'>" + edit_icon(element.extension, element.full_path, element.type) + "</div>";
-            list.innerHTML += "<div class='le_div'><a href='/git_history/" + element.full_path + "'>" + data_pretty_date(element.change_date) + "</a></div>";
+            list.innerHTML += "<div class='le_div'><a onclick='window.open(\"/git_history/" + element.full_path + "\");'>" + data_pretty_date(element.change_date) + "</a></div>";
         }
         for (let el of document.getElementsByClassName("qr")) {
             if (el.children.length !== 0)
@@ -641,7 +641,7 @@
     async function open_editor(file_path, file_extension) {
         // opening the editor works by retrieving the editor page with credentials
         // and then opening a new window with the retrieved body as blob in new window
-        let url = `/edit_${file_extension}/${file_path}`;
+        let url = `/daten/${file_path}?edit=true`;
         window.open(url);
     }
 

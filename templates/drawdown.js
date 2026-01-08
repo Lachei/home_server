@@ -38,7 +38,7 @@ function markdown(src) {
     var rx_script = /<script(.*)>([^]*?)<\/script>/g;
     var rx_style = /<style(.*)>([^]*?)<\/style>/g;
     var rx_svg = /<svg(.*)>([^]*?)<\/svg>/g;
-    var rx_link = /((!?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;
+    var rx_link = /(([!|#]?)\[(.*?)\]\((.*?)( ".*")?\)|\\([\\`*_{}\[\]()#+\-.!~]))/g;
     var rx_table = /\n(( *\|.*?\| *\n)+)/g;
     var rx_thead = /^.*\n( *\|( *\:?-+\:?-+\:? *\|)* *\n|)/;
     var rx_row = /.*\n/g;
@@ -148,9 +148,9 @@ function markdown(src) {
     // link or image
     replace(rx_link, function(all, p1, p2, p3, p4, p5, p6) {
         stash[--si] = p4
-            ? p2
-                ? '<img src="' + p4 + '" alt="' + p3 + '"/>'
-                : '<a href="' + p4 + '">' + unesc(highlight(p3)) + '</a>'
+            ? p2 == "!" ? '<img src="' + p4 + '" alt="' + p3 + '"/>'
+              : p2 == "#" ? '<iframe src="' + p4 + '" title="' + p3 + '"></iframe>'
+              : '<a href="' + p4 + '">' + unesc(highlight(p3)) + '</a>'
             : p6;
         return si + '\uf8ff';
     });

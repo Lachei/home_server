@@ -233,7 +233,7 @@
         <div id="editor_header">
             <p style="font-size:200%; text-align: center;">{{file_name}}</p>
             <button id="save" onclick="save();">&#128190;</button>
-            <button id="start_shift" onclick="start_shift();">Start shift</button>
+            <button id="start_shift" onclick="start_shift();">Schicht starten</button>
             <hr>
         </div>
         <div id="logo"></div>
@@ -324,7 +324,8 @@
 <script>
     const file_path = "{{&file_path}}";
     
-    var file_data = JSON.parse('{{&file_data}}');
+    var file_data = {};
+    try {file_data = JSON.parse('{{&file_data}}');} catch {}
     var file_revision = "{{&file_revision}}";
     let prev_data = structuredClone(file_data);
     const username = "{{username}}";

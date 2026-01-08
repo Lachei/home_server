@@ -10,18 +10,25 @@
 namespace git_util {
 
 void init_git(std::string_view path) {
-    // install gitignore
-    std::filesystem::path gitignore_path = std::filesystem::path(path) / ".gitignore";
-    std::filesystem::path git_path = std::filesystem::path(path) / ".git";
-    if (!std::filesystem::exists(gitignore_path)) {
-        std::ofstream gitignore(gitignore_path);
-        gitignore << R"(*
+    std::string_view gitignore_content = R"(*
 !*/
 !*.json
+!*.js
+!*.html
+!*.css
+!*.txt
 !*.md
 !*.rech
 !*.tbl
 !*.gpx)";
+    // install gitignore
+    std::filesystem::path gitignore_path = std::filesystem::path(path) / ".gitignore";
+    std::filesystem::path git_path = std::filesystem::path(path) / ".git";
+    std::ifstream gitignore_file{gitignore_path};
+    std::string gitignore{std::istreambuf_iterator<char>{gitignore_file}, std::istreambuf_iterator<char>{}};
+    if (gitignore.find(gitignore_content) == std::string::npos) {
+        std::ofstream gitignore(gitignore_path);
+        gitignore << gitignore_content;
     }
     if (!std::filesystem::exists(git_path)) {
         auto [status, output] = run_command("cd " + std::string(path) + " && git init");

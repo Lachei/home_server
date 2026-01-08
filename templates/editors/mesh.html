@@ -6,9 +6,10 @@
         <title>Mesh Viewer</title>
     </head>
     <style>
-body  {
+body,html,#view  {
     height: 100%;
     width: 100%;
+    margin: 0;
 }
     </style>
     <body>
@@ -17,7 +18,7 @@ body  {
     <script>
     const file_path="/daten/{{&file_path}}";
     function render() {
-        new StlViewer(view, { models: [ {id:0, filename:file_path}] });
+        new StlViewer(view, { models: [ {id:0, filename:file_path + "?raw=true"}] });
     }
     </script>
     <script src="/stl_viewer.min.js" onload="render();"></script>

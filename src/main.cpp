@@ -17,6 +17,8 @@ static Credentials &credentials_singleton() {
     return credentials;
 }
 
+inline std::string_view safe_string_view(const char *c) { return c ? std::string_view{c}: std::string_view{}; }
+
 struct AuthMiddleWare {
     struct context {
         std::string cookie_content{};
@@ -408,9 +410,11 @@ int main(int argc, const char** argv) {
         std::string username = get_authorized_username(req, credentials);
 
         if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path)) {
+            bool raw = safe_string_view(req.url_params.get("raw")) == "true";
+            bool edit = safe_string_view(req.url_params.get("edit")) == "true";
             std::string ext = file_path.extension().string();
-            if (editor_util::is_extension_editor(ext))
-                res = editor_util::get_editor(false, req, path, data_base_folder);
+            if (!raw && editor_util::is_extension_editor(ext))
+                res = editor_util::get_editor(edit, req, path, data_base_folder);
             else
                 res.set_static_file_info(file_path.string());
         }
