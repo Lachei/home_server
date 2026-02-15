@@ -401,7 +401,7 @@
                 final += "<div class='qr' url='" + editor_path + "'></div>"
         }
         if (data_type != "d")
-            final += "<a href='/daten/" + data_path + "' download>\u21E9</a>"
+            final += "<a href='/daten/" + data_path + "?raw=true' download>\u21E9</a>"
         return final;
     }
 

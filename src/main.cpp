@@ -308,7 +308,7 @@ int main(int argc, const char** argv) {
     // ------------------------------------------------------------------------------------------------
     // Shift editing
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
+    CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string &user){
         std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
@@ -322,7 +322,18 @@ int main(int argc, const char** argv) {
         auto result = database_util::start_shift(database, user, comment);
         return result.dump();
     });
-    CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string user){
+    CROW_ROUTE(app, "/start_shift")([&credentials, &database](const crow::request& req){
+        std::string username = get_authorized_username(req, credentials);
+
+        std::string_view comment{};
+        auto comment_hdr = req.headers.find("comment");
+        if (comment_hdr != req.headers.end())
+            comment = comment_hdr->second;
+
+        auto result = database_util::start_shift(database, username, comment);
+        return result.dump();
+    });
+    CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string &user){
         std::string username = get_authorized_username(req, credentials);
 
         if (username != user && username != admin_name)
@@ -338,6 +349,13 @@ int main(int argc, const char** argv) {
             return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
         
         const auto result = database_util::end_shift(database, user);
+        data_util::try_add_shift_to_rech(username, data_base_folder, std::chrono::minutes(result["shift_length"].get<int>()), result["comment"].get<std::string>());
+        return result.dump();
+    });
+    CROW_ROUTE(app, "/end_shift")([&credentials, &database, &data_base_folder](const crow::request& req){
+        std::string username = get_authorized_username(req, credentials);
+
+        const auto result = database_util::end_shift(database, username);
         data_util::try_add_shift_to_rech(username, data_base_folder, std::chrono::minutes(result["shift_length"].get<int>()), result["comment"].get<std::string>());
         return result.dump();
     });
