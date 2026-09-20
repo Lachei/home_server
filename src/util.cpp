@@ -64,7 +64,7 @@ void change_system_user(const std::string &username) {
 	} else {
 		struct passwd* pwd = getpwnam(username.c_str());
 		if (!pwd) {
-			run_command("useradd -m -s /bin/bash " + username);
+			run_command("useradd -m -s /bin/bash '" + username + '\'');
 			pwd = getpwnam(username.c_str());
 			if (!pwd)
 				throw unauthorized_err("Failed to create the user for usage");

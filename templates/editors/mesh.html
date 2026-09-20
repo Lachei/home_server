@@ -1,25 +1,402 @@
 <!DOCTYPE html>
 
-<html>
-    <head>
-        <meta charset="utf-8">
-        <title>Mesh Viewer</title>
-    </head>
-    <style>
-body,html,#view  {
-    height: 100%;
-    width: 100%;
-    margin: 0;
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Binary STL Viewer</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#181a1f;color:#ddd;font:14px system-ui,sans-serif}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #info{position:fixed;left:12px;top:10px;padding:7px 10px;background:#0009;border-radius:5px;pointer-events:none}
+  #error{position:fixed;inset:0;display:none;place-items:center;color:#f88;font-size:16px}
+</style>
+</head>
+<body>
+<canvas id="view"></canvas>
+<div id="info">Loading STL…</div>
+<div id="error"></div>
+
+<script>
+"use strict";
+
+/* Server-side template injection */
+const file_path="/daten/{{&file_path}}?raw=true";
+
+const canvas=document.getElementById("view");
+const gl=canvas.getContext("webgl2",{antialias:true}) ||
+         canvas.getContext("webgl",{antialias:true});
+const info=document.getElementById("info");
+const errorBox=document.getElementById("error");
+
+if(!gl){
+  errorBox.textContent="WebGL is not available.";
+  errorBox.style.display="grid";
+  throw new Error("WebGL unavailable");
 }
-    </style>
-    <body>
-        <div id="view"></div>
-    </body>
-    <script>
-    const file_path="/daten/{{&file_path}}";
-    function render() {
-        new StlViewer(view, { models: [ {id:0, filename:file_path + "?raw=true"}] });
+
+/* ---------- Matrix helpers ---------- */
+
+function perspective(fovy,aspect,near,far){
+  const f=1/Math.tan(fovy/2), nf=1/(near-far);
+  return new Float32Array([
+    f/aspect,0,0,0,
+    0,f,0,0,
+    0,0,(far+near)*nf,-1,
+    0,0,2*far*near*nf,0
+  ]);
+}
+
+function mul(a,b){
+  const o=new Float32Array(16);
+  for(let c=0;c<4;c++)
+    for(let r=0;r<4;r++)
+      o[c*4+r]=
+        a[r]*b[c*4]+a[4+r]*b[c*4+1]+
+        a[8+r]*b[c*4+2]+a[12+r]*b[c*4+3];
+  return o;
+}
+
+function translate(x,y,z){
+  return new Float32Array([
+    1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1
+  ]);
+}
+
+function rotateX(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Float32Array([
+    1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1
+  ]);
+}
+
+function rotateY(a){
+  const c=Math.cos(a),s=Math.sin(a);
+  return new Float32Array([
+    c,0,-s,0, 0,1,0,0, s,0,c,0, 0,0,0,1
+  ]);
+}
+
+/* ---------- Shaders ---------- */
+
+const vs=`
+attribute vec3 position;
+attribute vec3 normal;
+uniform mat4 matrix;
+uniform mat4 model;
+varying vec3 vNormal;
+varying vec3 vPos;
+
+void main(){
+  vec4 p=model*vec4(position,1.0);
+  vPos=p.xyz;
+  vNormal=mat3(model)*normal;
+  gl_Position=matrix*p;
+}`;
+
+const fs=`
+precision mediump float;
+varying vec3 vNormal;
+varying vec3 vPos;
+
+void main(){
+  vec3 n=normalize(vNormal);
+
+  vec3 light1=normalize(vec3(0.5,0.8,1.0));
+  vec3 light2=normalize(vec3(-0.7,-0.3,0.5));
+
+  float d1=max(dot(n,light1),0.0);
+  float d2=max(dot(n,light2),0.0);
+
+  vec3 base=vec3(0.72,0.76,0.82);
+  vec3 color=base*(0.18+0.72*d1+0.20*d2);
+
+  gl_FragColor=vec4(color,1.0);
+}`;
+
+function shader(type,source){
+  const s=gl.createShader(type);
+  gl.shaderSource(s,source);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
+    throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+
+const program=gl.createProgram();
+gl.attachShader(program,shader(gl.VERTEX_SHADER,vs));
+gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fs));
+gl.linkProgram(program);
+
+if(!gl.getProgramParameter(program,gl.LINK_STATUS))
+  throw new Error(gl.getProgramInfoLog(program));
+
+const positionLoc=gl.getAttribLocation(program,"position");
+const normalLoc=gl.getAttribLocation(program,"normal");
+const matrixLoc=gl.getUniformLocation(program,"matrix");
+const modelLoc=gl.getUniformLocation(program,"model");
+
+const positionBuffer=gl.createBuffer();
+const normalBuffer=gl.createBuffer();
+
+let vertexCount=0;
+let center=[0,0,0];
+let scale=1;
+
+/* ---------- STL parser ---------- */
+
+function parseBinarySTL(buf){
+  if(buf.byteLength<84)
+    throw new Error("File is too small to be a binary STL.");
+
+  const dv=new DataView(buf);
+  const triangles=dv.getUint32(80,true);
+
+  if(84+triangles*50>buf.byteLength)
+    throw new Error("Invalid binary STL: triangle count exceeds file size.");
+
+  const positions=new Float32Array(triangles*9);
+  const normals=new Float32Array(triangles*9);
+
+  let minX=Infinity,minY=Infinity,minZ=Infinity;
+  let maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+
+  let po=0,no=0;
+
+  for(let i=0;i<triangles;i++){
+    const off=84+i*50;
+
+    const nx=dv.getFloat32(off,true);
+    const ny=dv.getFloat32(off+4,true);
+    const nz=dv.getFloat32(off+8,true);
+
+    for(let v=0;v<3;v++){
+      const p=off+12+v*12;
+      const x=dv.getFloat32(p,true);
+      const y=dv.getFloat32(p+4,true);
+      const z=dv.getFloat32(p+8,true);
+
+      positions[po++]=x;
+      positions[po++]=y;
+      positions[po++]=z;
+
+      normals[no++]=nx;
+      normals[no++]=ny;
+      normals[no++]=nz;
+
+      minX=Math.min(minX,x); minY=Math.min(minY,y); minZ=Math.min(minZ,z);
+      maxX=Math.max(maxX,x); maxY=Math.max(maxY,y); maxZ=Math.max(maxZ,z);
     }
-    </script>
-    <script src="/stl_viewer.min.js" onload="render();"></script>
+  }
+
+  center=[
+    (minX+maxX)/2,
+    (minY+maxY)/2,
+    (minZ+maxZ)/2
+  ];
+
+  const size=Math.max(maxX-minX,maxY-minY,maxZ-minZ);
+  scale=size>0 ? 2/size : 1;
+
+  for(let i=0;i<positions.length;i+=3){
+    positions[i]=(positions[i]-center[0])*scale;
+    positions[i+1]=(positions[i+1]-center[1])*scale;
+    positions[i+2]=(positions[i+2]-center[2])*scale;
+  }
+
+  vertexCount=positions.length/3;
+
+  gl.bindBuffer(gl.ARRAY_BUFFER,positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER,positions,gl.STATIC_DRAW);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER,normalBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER,normals,gl.STATIC_DRAW);
+
+  info.textContent=
+    `${triangles.toLocaleString()} triangles · ${formatBytes(buf.byteLength)}`;
+}
+
+function formatBytes(n){
+  if(n<1024) return n+" B";
+  if(n<1024*1024) return (n/1024).toFixed(1)+" KiB";
+  return (n/1024/1024).toFixed(1)+" MiB";
+}
+
+/* ---------- Camera ---------- */
+
+let rotX=-0.45;
+let rotY=0.65;
+let distance=4;
+let panX=0;
+let panY=0;
+
+function render(){
+  resize();
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.enable(gl.CULL_FACE);
+  gl.clearColor(0.055,0.06,0.075,1);
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  if(!vertexCount){
+    requestAnimationFrame(render);
+    return;
+  }
+
+  gl.useProgram(program);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER,positionBuffer);
+  gl.enableVertexAttribArray(positionLoc);
+  gl.vertexAttribPointer(positionLoc,3,gl.FLOAT,false,0,0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER,normalBuffer);
+  gl.enableVertexAttribArray(normalLoc);
+  gl.vertexAttribPointer(normalLoc,3,gl.FLOAT,false,0,0);
+
+  const aspect=canvas.width/canvas.height;
+  const proj=perspective(Math.PI/4,aspect,0.01,100);
+
+  const camera=translate(panX,panY,-distance);
+  const rotation=mul(rotateY(rotY),rotateX(rotX));
+  const model=rotation;
+
+  const matrix=mul(proj,camera);
+
+  gl.uniformMatrix4fv(matrixLoc,false,matrix);
+  gl.uniformMatrix4fv(modelLoc,false,model);
+
+  gl.drawArrays(gl.TRIANGLES,0,vertexCount);
+
+  requestAnimationFrame(render);
+}
+
+function resize(){
+  const dpr=Math.min(devicePixelRatio||1,2);
+  const w=Math.round(canvas.clientWidth*dpr);
+  const h=Math.round(canvas.clientHeight*dpr);
+
+  if(canvas.width!==w||canvas.height!==h){
+    canvas.width=w;
+    canvas.height=h;
+    gl.viewport(0,0,w,h);
+  }
+}
+
+/* ---------- Mouse / touch controls ---------- */
+
+let drag=false;
+let mode="rotate";
+let lastX=0,lastY=0;
+let pinchDistance=0;
+
+canvas.addEventListener("contextmenu",e=>e.preventDefault());
+
+canvas.addEventListener("pointerdown",e=>{
+  canvas.setPointerCapture(e.pointerId);
+  drag=true;
+  mode=e.button===2 ? "pan" : "rotate";
+  lastX=e.clientX;
+  lastY=e.clientY;
+});
+
+canvas.addEventListener("pointermove",e=>{
+  if(!drag)return;
+
+  const dx=e.clientX-lastX;
+  const dy=e.clientY-lastY;
+  lastX=e.clientX;
+  lastY=e.clientY;
+
+  if(mode==="rotate"){
+    rotY+=dx*0.008;
+    rotX+=dy*0.008;
+  }else{
+    panX+=dx*0.006*distance/4;
+    panY-=dy*0.006*distance/4;
+  }
+});
+
+canvas.addEventListener("pointerup",e=>{
+  drag=false;
+  canvas.releasePointerCapture(e.pointerId);
+});
+
+canvas.addEventListener("pointercancel",()=>drag=false);
+
+canvas.addEventListener("wheel",e=>{
+  e.preventDefault();
+  distance*=Math.exp(e.deltaY*0.001);
+  distance=Math.max(0.2,Math.min(30,distance));
+},{passive:false});
+
+/* Two-finger touch: orbit + pinch zoom */
+const touches=new Map();
+
+canvas.addEventListener("touchstart",e=>{
+  for(const t of e.changedTouches)
+    touches.set(t.identifier,t);
+
+  if(touches.size===2){
+    const a=[...touches.values()];
+    pinchDistance=Math.hypot(a[0].clientX-a[1].clientX,
+                             a[0].clientY-a[1].clientY);
+  }
+},{passive:false});
+
+canvas.addEventListener("touchmove",e=>{
+  e.preventDefault();
+
+  for(const t of e.changedTouches)
+    touches.set(t.identifier,t);
+
+  if(touches.size===2){
+    const a=[...touches.values()];
+    const d=Math.hypot(a[0].clientX-a[1].clientX,
+                       a[0].clientY-a[1].clientY);
+
+    if(pinchDistance){
+      distance*=pinchDistance/d;
+      distance=Math.max(0.2,Math.min(30,distance));
+    }
+
+    pinchDistance=d;
+  }
+},{passive:false});
+
+canvas.addEventListener("touchend",e=>{
+  for(const t of e.changedTouches)
+    touches.delete(t.identifier);
+  if(touches.size<2)pinchDistance=0;
+});
+
+/* Double click resets camera */
+canvas.addEventListener("dblclick",()=>{
+  rotX=-0.45;
+  rotY=0.65;
+  distance=4;
+  panX=panY=0;
+});
+
+/* ---------- Load ---------- */
+
+async function load(){
+  try{
+    const response=await fetch(file_path,{cache:"no-store"});
+    if(!response.ok)
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+    const buffer=await response.arrayBuffer();
+    parseBinarySTL(buffer);
+  }catch(e){
+    console.error(e);
+    errorBox.textContent="Unable to load STL: "+e.message;
+    errorBox.style.display="grid";
+    info.style.display="none";
+  }
+}
+
+load();
+render();
+</script>
+</body>
 </html>
