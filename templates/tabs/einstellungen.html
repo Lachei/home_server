@@ -25,29 +25,62 @@
         res = await res.text();
         console.log(res);
     }
+
+async function get_groups() {
+	groups_div.innerHTML = ""; // first clear
+	let res = await fetch("groups");
+	let groups = await res.json();
+	let table=""
+	for (let g of groups) {
+		let s = g.split(':');
+		table += "<tr><td>" + s[0] + "</td><td>" + s[3] + "</td></tr>"
+	}
+	groups_div.innerHTML = "<table><tr><th>Gruppe</th><th>Benutzer</th></tr>" + table +  "</table>"
+}
+
+async function create_group(groupname) {
+	let res = await fetch("add_group", {method: "POST", headers:{groupname:groupname}});
+	res = await res.text();
+	get_groups();
+}
+
+async function delete_group(groupname) {
+	let res = await fetch("delete_group", {method: "POST", headers:{groupname:groupname}});
+	res = await res.text();
+	get_groups();
+}
+
+window.onload = get_groups();
 </script>
 <p><b>Passwort &auml;ndern:</b><p>
 <div class="inset">
-    <div class="admin">
-        <label for="uname"><b>Benutzername</b></label>
-        <input id="uname" type="text" placeholder="Benutzername" name="uname">
-    </div>
+	<div class="admin">
+		<label for="uname"><b>Benutzername</b></label>
+		<input id="uname" type="text" placeholder="Benutzername" name="uname">
+	</div>
 
-    <label for="psw"><b>Passwort</b></label>
-    <input id="password" type="password" placeholder="Passwort" name="psw" required>
-    <label for="psww"><b>Passwort wiederholen</b></label>
-    <input id="passwordw" type="password" placeholder="Passwort wiederholen" name="psww" required>
-    <div id="errorpwd" style="color:red;display:none">Passwörter stimmen nicht überein</div>
+	<label for="psw"><b>Passwort</b></label>
+	<input id="password" type="password" placeholder="Passwort" name="psw" required>
+	<label for="psww"><b>Passwort wiederholen</b></label>
+	<input id="passwordw" type="password" placeholder="Passwort wiederholen" name="psww" required>
+	<div id="errorpwd" style="color:red;display:none">Passwörter stimmen nicht überein</div>
 
-    <button onclick="change_pwd()">Passwort &Auml;ndern</button>
-
+	<button onclick="change_pwd()">Passwort &Auml;ndern</button>
+</div>
+<p><b>Gruppen:</b><p>
+<div class="inset">
+	<div id="groups_div"></div>
+	<b>Gruppe modifizieren:</b>
+	<input id="groupname" type="text" placeholder="Gruppenname" required>
+	<button onclick="create_group(groupname.value);">Grupp erstellen</button>
+	<button onclick="delete_group(groupname.value);">Grupp löschen</button>
 </div>
 <div class="admin">
-    <p><b>Benutzer l&ouml;schen:</b></p>
-    <div class="inset">
-        <label for="deletename"><b>Benutzername</b></label>
-        <input id="deleteuname" type="text" placeholder="Benuztername" name="deletename">
-        
-        <button onclick="delete_user(getElementById('deleteuname').value)">Benutzer l&ouml;schen</button>
-    </div>
+	<p><b>Benutzer l&ouml;schen:</b></p>
+	<div class="inset">
+		<label for="deletename"><b>Benutzername</b></label>
+		<input id="deleteuname" type="text" placeholder="Benuztername" name="deletename">
+
+		<button onclick="delete_user(getElementById('deleteuname').value)">Benutzer l&ouml;schen</button>
+	</div>
 </div>

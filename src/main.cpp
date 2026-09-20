@@ -9,6 +9,7 @@
 #include "editor_util.hpp"
 #include "string_split.hpp"
 #include "git_util.hpp"
+#include "system_util.hpp"
 
 #define TRY(expr) try { expr; } catch (const std::exception &e) { CROW_LOG_WARNING << e.what(); }
 
@@ -201,6 +202,37 @@ int main(int argc, const char** argv) {
 
         nlohmann::json ret = credentials.get_user_list();
         return ret.dump();
+    });
+
+
+    // ------------------------------------------------------------------------------------------------
+    // Group and file access changes
+    // ------------------------------------------------------------------------------------------------
+    CROW_ROUTE(app, "/groups")([&credentials](const crow::request &req) {
+        std::string username = get_authorized_username(req, credentials);
+        if (username != admin_name)
+            return crow::response{crow::status::FORBIDDEN};
+        return crow::response{get_groups().dump()};
+    });
+    CROW_ROUTE(app, "/add_group").methods("POST"_method)([&credentials](const crow::request &req) {
+        std::string username = get_authorized_username(req, credentials);
+        if (username != admin_name)
+            return crow::response{crow::status::FORBIDDEN};
+        auto group = req.headers.find("groupname");
+        if (group == req.headers.end())
+            throw std::runtime_error{"Missing groupname header"};
+        add_group(group->second);
+        return crow::response{};
+    });
+    CROW_ROUTE(app, "/delete_group").methods("POST"_method)([&credentials](const crow::request &req) {
+        std::string username = get_authorized_username(req, credentials);
+        if (username != admin_name)
+            return crow::response{crow::status::FORBIDDEN};
+        auto group = req.headers.find("groupname");
+        if (group == req.headers.end())
+            throw std::runtime_error{"Missing groupname header"};
+        delete_group(group->second);
+        return crow::response{};
     });
 
     // ------------------------------------------------------------------------------------------------
