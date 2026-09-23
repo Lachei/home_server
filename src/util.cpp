@@ -69,8 +69,8 @@ void change_system_user(const std::string &username) {
 			if (!pwd)
 				throw unauthorized_err("Failed to create the user for usage");
 		}
-		if (seteuid(pwd->pw_uid) != 0)
-			throw unauthorized_err("Could not set the user");
+		// if (seteuid(pwd->pw_uid) != 0)
+		// 	throw unauthorized_err("Could not set the user");
 	}
 }
 std::string get_authorized_username(const crow::request &req, const Credentials &credentials) {
