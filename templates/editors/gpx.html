@@ -830,7 +830,6 @@
             }).filter(e => e.level <= 19);
             virtual_overlay_map.update_needed_tiles(requested_parcell_tiles, {x: camera_center.x(), y: camera_center.y()});
         }
-        console.log(decoded_tiles);
         
         console.log(`Full tile update took ${performance.now() - tile_processing_start} milli`);
         tile_processing_running = false;
@@ -1750,7 +1749,7 @@
             // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
-            float max_del = min(dot(dx, dx), dot(dy, dy));
+            float max_del = get_footprint(dx, dy);
             vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
             if (surface_col == vec4(0))
                 surface_col = vec4(.85);
