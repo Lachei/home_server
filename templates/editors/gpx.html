@@ -67,12 +67,12 @@
         {{#editor}}
         <center id="title">GPX Editor</center>
         <button id="save" type="button" onclick="save();">&#128190;</button>
-        <select id="layer_select" onchange="virtual_street_map.drop_least_important_tiles(null, true).drop_least_important_tiles(null, false);">
+        <select id="layer_select" onchange="virtual_street_map.drop_all_tiles();">
             <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
             <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
             <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
-            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" detail_switch_level="22">Satellit</option>
+            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" ending="?blankTile=false" detail_switch_level="22">Satellit</option>
             <option base_url="intergeo33.bayernwolke.de/betty/atkis/" ending="" detail_switch_level="18">Straßen bayern</option>
             <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern 3d</option>
             <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18" col_corr_b=".85">Satellit bayern</option>
@@ -167,9 +167,19 @@
                               dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
                               type: e.touches.length == 1 ? "move": "rot_or_zoom"};
                               map_drag_start = get_map_drag_start(x, y)});
+    // user camera movements are rejected if they would end below the terrain, the camera then stays where it is
+    const save_camera = () => { return {center: [...camera_center.entries], dir: camera_dir, pitch: camera_pitch}; };
+    const restore_camera_if_below_terrain = (saved) => {
+        if (!camera_below_terrain())
+            return;
+        camera_center.entries = saved.center;
+        camera_dir = saved.dir;
+        camera_pitch = saved.pitch;
+    };
     const move_camera = (cur_move) => {
         if (!canvas_drag_start) 
             return;
+        const saved_camera = save_camera();
         let xDel = canvas_drag_start.x - cur_move.x;
         let yDel = canvas_drag_start.y - cur_move.y;
         let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
@@ -201,13 +211,14 @@
             break;
         case "rotate":
             const yaw = xDel * cam_rot_speed * 2;
-            const pitch = yDel * cam_rot_speed * 2;
             camera_dir -= yaw;
             if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
             if (camera_dir < 0) camera_dir += 2 * Math.PI;
-            camera_pitch += pitch;
+            const prev_pitch = camera_pitch;
+            camera_pitch += yDel * cam_rot_speed * 2;
             if (camera_pitch > Math.PI / 2) camera_pitch = Math.PI / 2;
             if (camera_pitch < -Math.PI / 2) camera_pitch = -Math.PI / 2;
+            const pitch = camera_pitch - prev_pitch; // only orbit by the pitch that was applied after clamping
             if (map_drag_start && !isNaN(map_drag_start.x()) && !document.getElementById('enable_fpv_cam').checked) {
                 // following are the needed transformations:
                 //  1. center projected map_drag_start pos
@@ -228,6 +239,8 @@
             break;
         default: console.error("Unknown move type " + canvas_drag_start.type);
         }
+        // the drag movement is consumed even if rejected to avoid a jump when moving away from the terrain again
+        restore_camera_if_below_terrain(saved_camera);
         if (clear_move) {
             canvas_drag_start = cur_move;
             camera_updated = true;
@@ -257,13 +270,15 @@
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", (e) => {
         map_drag_start = get_map_drag_start(e.pageX, e.pageY);
+        const saved_camera = save_camera();
         if (!map_drag_start || isNaN(map_drag_start.entries[0])) {
             let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
             camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         }
         else {
-            camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 20000 * -e.deltaY));
+            camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 80000 * -e.deltaY));
         }
+        restore_camera_if_below_terrain(saved_camera);
         camera_updated = true;
     });
     let pressed_keys = {};
@@ -278,6 +293,7 @@
             key = key.toLowerCase();
             speed *= 100;
         }
+        const saved_camera = save_camera();
         if (key === "w")
             camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-speed));
         if (key === "a")
@@ -290,6 +306,7 @@
             camera_center.add(up_dir.multiply(-speed));
         if (key === "e")
             camera_center.add(up_dir.multiply(speed));
+        restore_camera_if_below_terrain(saved_camera);
         camera_updated = true;
     });
 
@@ -302,11 +319,145 @@
         return s.options[s.selectedIndex];
     };
 
+    // mesh tiles -------------------------------------------------------------------------
+    // The terrain is drawn as a quadtree of tiles aligned with the map tiles. Every tile is a grid of
+    // mesh_res x mesh_res quads whose vertices are generated in the vertex shader from gl_VertexID,
+    // the tile itself is selected by gl_InstanceID from the mesh_tiles uniform buffer
+    const mesh_res = 64;                        // quads per tile side
+    const mesh_res_log2 = Math.log2(mesh_res);
+    const mesh_skirt_fac = .05;                 // skirt depth relative to the tile width, hides cracks between tiles of different levels
+    const mesh_tiles_binding = 8;               // uniform buffer binding point, above the block indices used by the virtual textures
+    const heightmap_tile_res_log2 = 8;          // heightmap tiles are 256 x 256
+    // one strip per quad row (2 vertices per column incl. skirt columns) + 2 degenerate vertices to connect the rows
+    const mesh_tile_vertex_count = (mesh_res + 2) * (2 * (mesh_res + 3) + 2);
+    let max_mesh_tiles = 1024;                  // limited by the max uniform block size, set in init
+    let mesh_tiles_buffer = null;
+    let mesh_tiles_cpu = null;
+
+    /**
+     * @brief selects the quadtree tiles to render such that a quad covers roughly
+     * canvas_height / triangle_resolution pixels on screen
+     * @returns {{data: Float32Array, count: int}} per tile [x, y relative to grid_offset_pos, width, level], sorted front to back
+     */
+    const select_mesh_tiles = (view_projection, grid_offset_pos, triangle_resolution) => {
+        const e = view_projection.entries;
+        const cam_x = camera_center.x(), cam_y = camera_center.y(), cam_z = camera_center.z();
+        // a tile is refined while its vertex spacing projects to more than canvas_height / triangle_resolution pixels
+        // .866 = 1 / (2 tan(fov / 2)) for the 60deg fov
+        const lod_factor = triangle_resolution / mesh_res * .866;
+        // deeper levels would only add vertices between heightmap texels
+        const max_level = virtual_height_map.max_level + heightmap_tile_res_log2 - mesh_res_log2;
+        const z_pad = Util.m_to_wgs_84_uv(50); // margin for heights sampled from coarser levels
+        const in_frustum = (x0, y0, w, z0, z1) => {
+            // the box is outside if all 8 corners are outside of the same clip plane
+            let all_out = 63;
+            for (let c = 0; c < 8 && all_out; ++c) {
+                const x = x0 + (c & 1) * w, y = y0 + ((c >> 1) & 1) * w, z = c & 4 ? z1 : z0;
+                const cx = e[0] * x + e[4] * y + e[8]  * z + e[12];
+                const cy = e[1] * x + e[5] * y + e[9]  * z + e[13];
+                const cz = e[2] * x + e[6] * y + e[10] * z + e[14];
+                const cw = e[3] * x + e[7] * y + e[11] * z + e[15];
+                all_out &= (cx < -cw) | (cx > cw) << 1 | (cy < -cw) << 2 | (cy > cw) << 3 | (cz < -cw) << 4 | (cz > cw) << 5;
+            }
+            return all_out == 0;
+        };
+
+        let selected = [];
+        let queue = [{level: 0, x: 0, y: 0, range: [-500, 9000], data_level: -1}];
+        for (let qi = 0; qi < queue.length; ++qi) {
+            let n = queue[qi];
+            const w = 1 / (1 << n.level);
+            const height_tile = virtual_height_map.get_uploaded_tile(n.level, n.x, n.y);
+            if (height_tile && height_tile.height_range) {
+                n.range = height_tile.height_range;
+                n.data_level = n.level;
+            }
+            const x0 = n.x * w, y0 = n.y * w;
+            const z0 = Util.m_to_wgs_84_uv(n.range[0]) * 1.4 - w * mesh_skirt_fac - z_pad;
+            const z1 = Util.m_to_wgs_84_uv(n.range[1]) * 1.4 + z_pad;
+            if (!in_frustum(x0 - grid_offset_pos.lat, y0 - grid_offset_pos.lon, w, z0, z1))
+                continue;
+            const dx = Math.max(x0 - cam_x, 0, cam_x - x0 - w);
+            const dy = Math.max(y0 - cam_y, 0, cam_y - y0 - w);
+            const dz = Math.max(z0 - cam_z, 0, cam_z - z1);
+            n.dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            // children sample the heightmap at level + 1 + mesh_res_log2 - heightmap_tile_res_log2, only refine if that data is there
+            const child_data_available = n.data_level >= n.level + 1 + mesh_res_log2 - heightmap_tile_res_log2;
+            // refining replaces 1 tile by 4, the remaining queue entries are an upper bound for their final tile count
+            const in_budget = selected.length + (queue.length - qi) + 3 <= max_mesh_tiles;
+            if (n.level < max_level && w * lod_factor > n.dist && child_data_available && in_budget) {
+                for (let c = 0; c < 4; ++c)
+                    queue.push({level: n.level + 1, x: 2 * n.x + (c & 1), y: 2 * n.y + (c >> 1), range: n.range, data_level: n.data_level});
+                continue;
+            }
+            selected.push(n);
+        }
+
+        selected.sort((a, b) => a.dist - b.dist); // front to back for early depth rejection
+        selected.forEach((n, i) => {
+            const w = 1 / (1 << n.level);
+            mesh_tiles_cpu[i * 4]     = n.x * w - grid_offset_pos.lat;
+            mesh_tiles_cpu[i * 4 + 1] = n.y * w - grid_offset_pos.lon;
+            mesh_tiles_cpu[i * 4 + 2] = w;
+            mesh_tiles_cpu[i * 4 + 3] = n.level;
+        });
+        return {data: mesh_tiles_cpu, count: selected.length};
+    };
+
+    // camera terrain collision ------------------------------------------------------------
+    const height_grid_shift = 2;                // height grid cells are 4x4 heightmap texels
+    const height_grid_res = 256 >> height_grid_shift;
+    const min_cam_height_m = 2;                 // min distance between camera and terrain
+    /**
+     * @brief conservative terrain height at the given uv position from the deepest loaded heightmap tile
+     * @returns {float} height in meters which is >= the rendered terrain height, null if no height data is loaded
+     */
+    const terrain_height_at = (x, y) => {
+        for (let level = virtual_height_map.max_level; level >= 0; --level) {
+            const n = 1 << level;
+            const tile = virtual_height_map.get_uploaded_tile(level, Math.floor(x * n), Math.floor(y * n));
+            if (!tile || !tile.height_grid)
+                continue;
+            // the shader interpolates between texel floor(p) and floor(p) + 1, take the max of all grid cells containing them
+            const px = Math.min(Math.floor((x * n - Math.floor(x * n)) * 256), 255);
+            const py = Math.min(Math.floor((y * n - Math.floor(y * n)) * 256), 255);
+            let h = -Infinity;
+            for (let gy = py >> height_grid_shift; gy <= Math.min(py + 1, 255) >> height_grid_shift; ++gy)
+                for (let gx = px >> height_grid_shift; gx <= Math.min(px + 1, 255) >> height_grid_shift; ++gx)
+                    h = Math.max(h, tile.height_grid[gy * height_grid_res + gx]);
+            return h;
+        }
+        return null;
+    };
+    /** @returns {float} min camera z at the current camera position, null if no height data is loaded */
+    const min_camera_z = () => {
+        const h = terrain_height_at(camera_center.x(), camera_center.y());
+        if (h === null)
+            return null;
+        return Util.m_to_wgs_84_uv(h + min_cam_height_m) * 1.4; // * 1.4 same as the height scaling in the vertex shader
+    };
+    const camera_below_terrain = () => {
+        const min_z = min_camera_z();
+        return min_z !== null && camera_center.z() < min_z;
+    };
+    /** 
+     * @brief lifts the camera above the terrain, only needed if the terrain changed below the camera (finer data loaded, gps follow)
+     * as user movements below the terrain are rejected
+     * @returns {bool} true if the camera had to be moved up
+     */
+    const clamp_camera_above_terrain = () => {
+        if (!camera_below_terrain())
+            return false;
+        camera_center.entries[2] = min_camera_z();
+        return true;
+    };
+
     let draw_requested = true;
     let drawing_active = false;
-    let rendering_fences = [];
-    let last_detail_corner = null;
-    let cur_frame = 0;
+    // only one readback of the tile id and depth buffers is in flight at a time, otherwise the download buffers would be
+    // written again by newer frames before the fenced data is read (causes pipeline stalls on getBufferSubData)
+    let pending_readback = null;    // {fence, grid_offset_pos, tile_buffer, depth_buffer}
+    let readback_skipped = false;   // a frame was drawn without readback, has to be redrawn after the pending readback is done
     async function draw_scene() {
         draw_requested |= camera_updated;
         if (document.getElementById("enable_cam_follow").checked) {
@@ -321,6 +472,8 @@
             camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
             draw_requested |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
         }
+        // checked every tick as finer height data might have been loaded below the camera
+        draw_requested |= clamp_camera_above_terrain();
 
         if (!gl_context || drawing_active || !draw_requested)
             return;
@@ -332,10 +485,6 @@
         const [view_projection, view, base_width, grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
 
         // drawing the tiles --------------------------------------------------
-        const overlap_width = (1 << 22) / virtual_height_map.v_tex_width;
-        const half_overlap = overlap_width >> 1;
-        let detail_corner = {x: Math.floor(camera_center.x() * virtual_height_map.v_tex_coarse_width - half_overlap) / virtual_height_map.v_tex_coarse_width, 
-                             y: Math.floor(camera_center.y() * virtual_height_map.v_tex_coarse_height - half_overlap) / virtual_height_map.v_tex_coarse_height};
         const draw_tiles = (gl, fb_size, program, framebuffer) => {
             gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
             gl.viewport(0, 0, fb_size.width, fb_size.height);
@@ -349,7 +498,6 @@
             gl.useProgram(program.program);
             gl.uniformMatrix4fv(program.uniform_locations.view, false, view.entries);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
-            gl.uniform2f(program.uniform_locations.detail_corner, detail_corner.x, detail_corner.y);
             if (program.uniform_locations.color_correction) { 
                 let selected_layer = get_selected_layer();
                 let b = 1.;
@@ -360,23 +508,20 @@
             }
             
             // binding the virtual textures
-            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, gl.TEXTURE2, program.uniform_locations.virtual_heightmap_infos);
+            virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, program.uniform_locations.virtual_heightmap_infos);
             gl.uniform1i(program.uniform_locations.virtual_heightmap_index, 0);
-            gl.uniform1i(program.uniform_locations.virtual_heightmap_index_detail, 1);
-            gl.uniform1i(program.uniform_locations.virtual_heightmap, 2);
+            gl.uniform1i(program.uniform_locations.virtual_heightmap, 1);
             gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_heightmap_infos, program.uniform_locations.virtual_heightmap_infos);
             if (program.uniform_locations.virtual_streetmap_infos < 10) {
-                virtual_street_map.bind_to_shader(gl.TEXTURE3, gl.TEXTURE4, gl.TEXTURE5, program.uniform_locations.virtual_streetmap_infos);
-                gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 3);
-                gl.uniform1i(program.uniform_locations.virtual_streetmap_index_detail, 4);
-                gl.uniform1i(program.uniform_locations.virtual_streetmap, 5);
+                virtual_street_map.bind_to_shader(gl.TEXTURE2, gl.TEXTURE3, program.uniform_locations.virtual_streetmap_infos);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap_index, 2);
+                gl.uniform1i(program.uniform_locations.virtual_streetmap, 3);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_streetmap_infos, program.uniform_locations.virtual_streetmap_infos);
             }
             if (program.uniform_locations.virtual_overlaymap_infos < 20) {
-                virtual_overlay_map.bind_to_shader(gl.TEXTURE6, gl.TEXTURE7, gl.TEXTURE8, program.uniform_locations.virtual_overlaymap_infos);
-                gl.uniform1i(program.uniform_locations.virtual_overlaymap_index, 6);
-                gl.uniform1i(program.uniform_locations.virtual_overlaymap_index_detail, 7);
-                gl.uniform1i(program.uniform_locations.virtual_overlaymap, 8);
+                virtual_overlay_map.bind_to_shader(gl.TEXTURE4, gl.TEXTURE5, program.uniform_locations.virtual_overlaymap_infos);
+                gl.uniform1i(program.uniform_locations.virtual_overlaymap_index, 4);
+                gl.uniform1i(program.uniform_locations.virtual_overlaymap, 5);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_overlaymap_infos, program.uniform_locations.virtual_overlaymap_infos);
             }
             if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
@@ -384,140 +529,78 @@
             } else {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
             }
-            // drawing the hq center triangles
-            const triangle_resolution = + document.getElementById("triangle_resolution").value;
-            gl.uniform1i(program.uniform_locations.tile_width, 100);
-            gl.uniform1i(program.uniform_locations.geo_res, triangle_resolution);
+            // drawing all mesh tiles with a single instanced draw call
+            gl.bindBufferBase(gl.UNIFORM_BUFFER, mesh_tiles_binding, mesh_tiles_buffer);
+            gl.uniformBlockBinding(program.program, program.uniform_locations.mesh_tiles, mesh_tiles_binding);
+            gl.uniform1i(program.uniform_locations.mesh_res, mesh_res);
             if (cur_gps_pos)
                 gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, cur_gps_pos.lat - grid_offset_pos.lat, cur_gps_pos.lon - grid_offset_pos.lon);
             else
                 gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, -1e10, -1e10);
-            gl.uniform2f(program.uniform_locations.tile_width_uv, base_width, 1.);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
-            gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, 0, 0);
-            gl.uniform2f(program.uniform_locations.cam_off, camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon);
             if (!framebuffer)
                 gl.drawBuffers([gl.BACK]);
             else
                 gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-            gl.drawArrays(gl.TRIANGLES, 0, 6 * 100 * 100);
-
-            // drawing the surrounding lower quality triangles
-            const radius = 7;
-            let cur_d = base_width;
-            const center_triangles_per_width = 100 / base_width;
-            let cur_base_pos = Pos(grid_offset_pos.lat - cur_d, grid_offset_pos.lon - cur_d);
-            const inside_view = (base_pos, width) => {
-                const x = base_pos.lat;
-                const y = base_pos.lon;
-                const z = Util.m_to_wgs_84_uv(5000 * 1.4);
-                let p1 = view_projection.multiply(Vec4(x, y));
-                let p2 = view_projection.multiply(Vec4(x + width, y));
-                let p3 = view_projection.multiply(Vec4(x, y + width));
-                let p4 = view_projection.multiply(Vec4(x + width, y + width));
-                let p1u = view_projection.multiply(Vec4(x, y, z));
-                let p2u = view_projection.multiply(Vec4(x + width, y, z));
-                let p3u = view_projection.multiply(Vec4(x, y + width, z));
-                let p4u = view_projection.multiply(Vec4(x + width, y + width), z);
-                p1.mul(1 / p1.w());
-                p2.mul(1 / p2.w());
-                p3.mul(1 / p3.w());
-                p4.mul(1 / p4.w());
-                p1u.mul(1 / p1u.w());
-                p2u.mul(1 / p2u.w());
-                p3u.mul(1 / p3u.w());
-                p4u.mul(1 / p4u.w());
-                if (p1.z() < 0 && p2.z() < 0 && p3.z() < 0 && p4.z() < 0) return false;
-                if (p1.z() > 1 && p2.z() > 1 && p3.z() > 1 && p4.z() > 1) return false;
-
-                if (p1.x() < -1 && p2.x() < -1 && p3.x() < -1 && p4.x() < -1) return false;
-                if (p1.x() > 1 && p2.x() > 1 && p3.x() > 1 && p4.x() > 1) return false;
-
-                // if (p1.y() < -1 && p2.y() < -1 && p3.y() < -1 && p4.y() < -1) return false;
-                // if (p1u.y() > 1 && p2u.y() > 1 && p3u.y() > 1 && p4u.y() > 1) return false;
-                return true;
-            };
-            let i = inside_view({lat: 0, lon: 0}, base_width);
-            let draw_count = 0;
-            const draw_patch = (cam, cur_base_pos, tile_width_uv) => {
-                const cur_base_pos_rel = Pos(cur_base_pos.lat - grid_offset_pos.lat, cur_base_pos.lon - grid_offset_pos.lon);
-                if (false && !inside_view(cur_base_pos_rel, tile_width_uv))
-                    return;
-                ++draw_count;
-                const cur_triangles = Math.round(Math.min(center_triangles_per_width, triangle_resolution / tile_width_uv) * tile_width_uv);
-                gl.uniform1i(program.uniform_locations.tile_width, cur_triangles);
-                gl.uniform2f(program.uniform_locations.tile_width_uv, tile_width_uv, 1.);
-                gl.uniform2f(program.uniform_locations.grid_offset_pos_rel, cur_base_pos_rel.lat, cur_base_pos_rel.lon);
-                if (!framebuffer)
-                    gl.drawBuffers([gl.BACK]);
-                else
-                    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-                gl.drawArrays(gl.TRIANGLES, 0, 6 * cur_triangles * cur_triangles);
-            };
-            for (let i = 0; i < radius; ++i, cur_d *= 3, cur_base_pos.lat -= cur_d, cur_base_pos.lon -= cur_d) { // cur d has to be tripled as the block currently rendered has 3 * the cur_d width
-                gl.uniform2i(program.uniform_locations.tile_p, -1, -1);
-                draw_patch(camera_center, cur_base_pos, cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, 0, -1);
-                draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, 1, -1);
-                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, -1, 0);
-                draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + cur_d), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, 1, 0);
-                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + cur_d), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, -1, 1);
-                draw_patch(camera_center, Pos(cur_base_pos.lat, cur_base_pos.lon + 2 * cur_d), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, 0, 1);
-                draw_patch(camera_center, Pos(cur_base_pos.lat + cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
-                gl.uniform2i(program.uniform_locations.tile_p, 0, 1);
-                draw_patch(camera_center, Pos(cur_base_pos.lat + 2 * cur_d, cur_base_pos.lon + 2 * cur_d), cur_d);
-            }
-            console.log("Drew " + draw_count + "tiles");
+            gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, mesh_tile_vertex_count, mesh_tiles.count);
         }
         const update_tiles = document.getElementById("enable_tile_update").checked;
         let start = performance.now();
+        // select and upload the mesh tiles once, they are shared by both passes
+        const mesh_tiles = select_mesh_tiles(view_projection, grid_offset_pos, + document.getElementById("triangle_resolution").value);
+        gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, mesh_tiles_buffer);
+        gl_context.bufferSubData(gl_context.UNIFORM_BUFFER, 0, mesh_tiles.data, 0, mesh_tiles.count * 4);
+        gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, null);
+        console.log(`Selected ${mesh_tiles.count} mesh tiles in ${performance.now() - start} milli`);
+        const do_readback = !pending_readback;
+        readback_skipped = !do_readback;
         // draw tile ids ---------------------------------------
-        if (update_tiles)
+        if (update_tiles && do_readback)
             draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
         
         // copy to download gpu buffers
-        // tile buffer
-        gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.fb);
-        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, tile_download_buffer);
-        gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
-        // depth buffer
-        gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.depth_fb);
-        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
-        gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
-        // final sync
-        rendering_fences.push(gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0));
-        last_detail_corner = detail_corner;
+        if (do_readback) {
+            // tile buffer
+            gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.fb);
+            gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, tile_download_buffer);
+            gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
+            // depth buffer
+            gl_context.bindFramebuffer(gl_context.READ_FRAMEBUFFER, indices_render_objs.depth_fb);
+            gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
+            gl_context.readPixels(0, 0, indices_render_objs.width, indices_render_objs.height, gl_context.RGBA, gl_context.UNSIGNED_BYTE, 0);
+            gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, null);
+            // final sync
+            pending_readback = {
+                fence: gl_context.fenceSync(gl_context.SYNC_GPU_COMMANDS_COMPLETE, 0),
+                grid_offset_pos: {x: grid_offset_pos.lat, y: grid_offset_pos.lon},  // needed to decode the tile ids
+                tile_buffer: tile_download_buffer,
+                depth_buffer: depth_download_buffer,
+            };
+            gl_context.flush(); // makes sure the fence is submitted and can be signaled
+        }
         console.log(`drawing took ${performance.now() - start} milli`);
-        cur_frame++;
         drawing_active = false;
     }
     let tile_processing_running = false;
-    let last_processed_frame = -1;
     async function gpu_tile_processing() {
-        if (tile_processing_running || last_processed_frame == cur_frame || rendering_fences.length == 0)
+        if (tile_processing_running || !pending_readback)
             return;
         tile_processing_running = true;
-        last_processed_frame = cur_frame;
 
         let start = performance.now();
         let tile_processing_start = start;
-        // all fences except the last one are only of real use
-        for (let i = 0; i < rendering_fences.length - 1; ++i)
-            gl_context.deleteSync(rendering_fences[i]);
-        rendering_fences = [rendering_fences[rendering_fences.length - 1]];
-        await clientWaitAsync(gl_context, rendering_fences[0]);
-        if (tile_download_data.byteLength != indices_render_objs.width * indices_render_objs.height * 4) {
-            console.log(`Tile bytes: ${tile_download_data.byteLength} vs buffer size ${indices_render_objs.width * indices_render_objs.height * 4}`);
+        const readback = pending_readback;
+        await clientWaitAsync(gl_context, readback.fence);
+        gl_context.deleteSync(readback.fence);
+        pending_readback = null;
+        if (readback_skipped)
+            draw_requested = true;
+        // the download buffers were recreated by a resize in the meantime, the readback is invalid
+        if (readback.tile_buffer !== tile_download_buffer || readback.depth_buffer !== depth_download_buffer) {
             tile_processing_running = false;
-            last_processed_frame -= 1;
             return;
         }
         gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, tile_download_buffer);
@@ -525,6 +608,7 @@
 
         gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
         gl_context.getBufferSubData(gl_context.PIXEL_PACK_BUFFER, 0, depth_download_data);
+        gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, null);
 
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
 
@@ -533,18 +617,7 @@
         let needed_tiles = new Set(indices);
         needed_tiles.delete(0xffffffff);
         console.log(`checking tiles took ${performance.now() - start} milli`);
-        let decoded_tiles = Util.int32_to_tile_id(needed_tiles);
-        decoded_tiles = decoded_tiles.map(e  => {; let tile = {
-                level: e.level,
-                x: (e.level >= 11 ? e.x + last_detail_corner.x * (1 << e.level) : e.x),
-                y: (e.level >= 11 ? e.y + last_detail_corner.y * (1 << e.level) : e.y)
-            };
-            const max = (1 << e.level) - 1;
-            tile.x %= max;
-            tile.y %= max;
-            return tile;
-        }
-        ).filter(e => !isNaN(e.x) && !isNaN(e.y));
+        let decoded_tiles = Util.int32_to_tile_id(needed_tiles, readback.grid_offset_pos);
         Util.add_missing_parent_tiles(decoded_tiles);
         // max level for height is tile 15 
         const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
@@ -599,7 +672,7 @@
         if (virtual_texture.virtual_texture_rebuilt) {
             virtual_texture.virtual_texture_rebuilt = false;
             console.log(`updating virtual textures ${name} took ${performance.now() - start} milli`);
-            console.log(`Free spots virtual texture ${name} Detail: ${virtual_texture.free_tiles_detail.size}, Coarse: ${virtual_texture.free_tiles.size}`);
+            console.log(`Free spots virtual texture ${name} per cascade: ${virtual_texture.cascades.map(c => c.free_tiles.size).join(', ')}`);
             draw_requested = true;;
         }
         tex_update_locked[name] = false;
@@ -624,22 +697,62 @@
             return;
         }
 
+        max_mesh_tiles = Math.min(max_mesh_tiles, Math.floor(gl_context.getParameter(gl_context.MAX_UNIFORM_BLOCK_SIZE) / 16));
+        mesh_tiles_cpu = new Float32Array(max_mesh_tiles * 4);
+        mesh_tiles_buffer = gl_context.createBuffer();
+        gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, mesh_tiles_buffer);
+        gl_context.bufferData(gl_context.UNIFORM_BUFFER, mesh_tiles_cpu.byteLength, gl_context.DYNAMIC_DRAW);
+        gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, null);
+
+        let c = Util.wgs_84_to_uv(47.80177, 12.89798);
+        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700 * 1.4));
+
+        // linalg_tests();
+        const is_mobile = 'ontouchstart' in document.documentElement;
+        if (is_mobile)
+            document.getElementById("triangle_resolution").value = 80;
+        // the virtual maps have to exist before the shaders are created as their uniform sizes depend on them
+        const max_depth = 18;
+        const v_width = 1 << max_depth;
+        virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        // the height range of each tile is needed for culling and lod selection of the mesh tiles
+        // the max pooled height grid is used to keep the camera above the terrain
+        virtual_height_map.tile_data_callback = (tile, data) => {
+            let min = Infinity, max = -Infinity;
+            let grid = new Float32Array(height_grid_res * height_grid_res).fill(-Infinity);
+            for (let i = 0; i < data.length; i += 4) {
+                // same decoding as decode_height() in the shader, empty pixels are decoded to 0
+                const h = data[i] | data[i + 1] | data[i + 2] | data[i + 3] ? data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 : 0;
+                min = Math.min(min, h);
+                max = Math.max(max, h);
+                const p = i >> 2;
+                const g = ((p >> 8) >> height_grid_shift) * height_grid_res + ((p & 255) >> height_grid_shift);
+                grid[g] = Math.max(grid[g], h);
+            }
+            tile.height_range = [min, max];
+            tile.height_grid = grid;
+        };
+        const w_street = 1 << Util.max_tile_level;   // deep enough for the most detailed map layers
+        virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        const w_overlay = 1 << 19;
+        virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+
         const vs = `#version 300 es
         #define PI 3.1415926535897932384626433832795
         precision highp int;
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
+        precision highp usampler2DArray;
 
-        uniform int tile_width;             // tile width in vertex count, always equals the tile height
-        uniform int geo_res;
-        uniform vec2 tile_width_uv;         // tile width in uvs
+        uniform int mesh_res;               // quads per tile side
         uniform vec2 grid_offset_pos;
-        uniform vec2 grid_offset_pos_rel;   // is the relative offset position which is relative to the viewer position
-        uniform vec2 cam_off;               // cam off needed to convert the loc_pos to loc_pos_cam (camera at the center)
         uniform mat4 view;
         uniform mat4 view_proj;
-        ${Util.glsl_virtual_texture_uniforms("heightmap")}
+        ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
+        layout(std140) uniform MeshTiles {
+            vec4 mesh_tiles[${max_mesh_tiles}];  // xy: tile origin relative to grid_offset_pos, z: tile width in uv, w: quadtree level
+        };
 
         // out variables
         out vec2 loc_pos;
@@ -652,26 +765,28 @@
         ${Util.glsl_wgs_84_m_to_uv()}
         
         void main(void) {
-            int quad_idx = gl_VertexID % 6 / 3;
-            int triangle_idx = gl_VertexID % 3;
-            int pos_off_x = gl_VertexID / 6 % tile_width;
-            int pos_off_y = gl_VertexID / 6 / tile_width;
-            int x_offset = int(triangle_idx == 1) ^ quad_idx;
-            int y_offset = int(triangle_idx == 2) ^ quad_idx;
-            float x = float(pos_off_x + x_offset) / float(tile_width - 1) * tile_width_uv.x;
-            float y = float(pos_off_y + y_offset) / float(tile_width - 1) * tile_width_uv.x;
-            
-            loc_pos = vec2(x, y) + grid_offset_pos_rel;
+            // each tile is one triangle strip, every quad row is a strip which is connected to the next row
+            // via degenerate triangles. The grid has an additional vertex ring around the tile which forms the skirt
+            vec4 tile = mesh_tiles[gl_InstanceID];
+            int cols = mesh_res + 3;
+            int row = gl_VertexID / (2 * cols + 2);
+            int k = clamp(gl_VertexID % (2 * cols + 2) - 1, 0, 2 * cols - 1);
+            ivec2 grid = ivec2(k >> 1, row + (k & 1)) - 1;
+            ivec2 grid_c = clamp(grid, ivec2(0), ivec2(mesh_res));
+            bool skirt = grid != grid_c;
 
-            // get height vertex height
-            float du = length(loc_pos - cam_off) * .05 * (100. / float(geo_res));
-            du *= du;
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, get_level(du)); // int(get_level(pow(du, 3.))));
+            loc_pos = tile.xy + vec2(grid_c) / float(mesh_res) * tile.z;
+
+            // sample the heightmap at the level where the texel spacing equals the vertex spacing
+            float level = max(tile.w + log2(float(mesh_res)) - ${heightmap_tile_res_log2}., 0.);
+            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, level);
             height_m = d_info.x;
             n_dot_l = (max(0., dot(vec3(0, .7, .7), d_info.yzw)) * .5 + .5) + .05;
-            float height = wgs_84_m_to_uv(height_m);
+            float height = wgs_84_m_to_uv(height_m) * 1.4; // * sqrt(2) due to 1 / cos(45deg)
+            if (skirt)
+                height -= tile.z * ${mesh_skirt_fac};
 
-            vec4 pos_cam_rel = vec4(loc_pos, height * 1.4, 1.); // * sqrt(2) due to 1 / cos(45deg)
+            vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
 
             gl_Position = view_proj * pos_cam_rel;
             depth = -(view * pos_cam_rel).z; // has to be inverted as the depth is in -z direction;
@@ -683,18 +798,18 @@
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
+        precision highp usampler2DArray;
 
         in vec2 loc_pos;
         in float height_m;
         in float n_dot_l;
         uniform vec2 grid_offset_pos;
-        uniform vec2 detail_corner;
         uniform vec4 color_correction;
         uniform vec2 cur_gps_pos_loc; // gps position in local pos
         uniform int parcell_map_enabled; // 0->disabled, enabled else
-        ${Util.glsl_virtual_texture_uniforms("streetmap")}
-        ${Util.glsl_virtual_texture_uniforms("heightmap")}
-        ${Util.glsl_virtual_texture_uniforms("overlaymap")}
+        ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
+        ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
+        ${Util.glsl_virtual_texture_uniforms("overlaymap", virtual_overlay_map)}
 
         ${Util.glsl_wgs_84_to_uv()}
         ${Util.glsl_virtual_texture_load("streetmap")}
@@ -705,9 +820,6 @@
 
         layout (location = 0) out vec4 out_col;
         void main(void) {
-            if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
-                discard;
-
             // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
             //     out_col = vec4(1., 0., 0., 1.);
             // else
@@ -778,27 +890,22 @@
         precision highp float;
         precision highp sampler2DArray;
         precision highp usampler2D;
+        precision highp usampler2DArray;
 
         in vec2 loc_pos;
         in float depth;
 
         uniform vec2 grid_offset_pos;
-        uniform vec2 detail_corner;
 
         ${Util.glsl_calc_level()}
-        ${Util.glsl_get_tile_index("heightmap")}
+        ${Util.glsl_get_tile_index()}
 
         layout (location = 0) out vec4 out_col;
         layout (location = 1) out vec4 out_depth;
         void main(void) {
-            if (clamp(loc_pos, vec2(-.5), vec2(.5)) != loc_pos)
-                discard;
-            ivec3 tile_id = get_tile_index();
+            uint tile_id = get_tile_index();
             float div = float((1 << 8) - 1);
-            out_col = vec4(float(tile_id.y & 0xff) / div,
-                           float(((tile_id.x & 0xf) << 4) | ((tile_id.y >> 8) & 0xf)) / div,
-                           float((tile_id.x >> 4) & 0xff) / div, 
-                           float(tile_id.z) / div);
+            out_col = vec4(uvec4(tile_id, tile_id >> 8, tile_id >> 16, tile_id >> 24) & 0xffu) / div;   // little endian for the Uint32Array readout
             uint depth_bits = floatBitsToUint(depth);   // writing linear depth to allow later for correct reconstruction with perspective and othographic projection
             out_depth = vec4(float( depth_bits         & 0xffU) / div,
                              float((depth_bits >> 8u)  & 0xffU) / div,
@@ -812,28 +919,21 @@
             return {
                 program: pipeline,
                 uniform_locations: {
-                    tile_width: gl_context.getUniformLocation(pipeline, 'tile_width'),
-                    geo_res: gl_context.getUniformLocation(pipeline, 'geo_res'),
-                    tile_width_uv: gl_context.getUniformLocation(pipeline, 'tile_width_uv'),
+                    mesh_res: gl_context.getUniformLocation(pipeline, 'mesh_res'),
+                    mesh_tiles: gl_context.getUniformBlockIndex(pipeline, 'MeshTiles'),
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
-                    grid_offset_pos_rel: gl_context.getUniformLocation(pipeline, 'grid_offset_pos_rel'),
-                    cam_off: gl_context.getUniformLocation(pipeline, 'cam_off'),
                     view: gl_context.getUniformLocation(pipeline, 'view'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
-                    detail_corner: gl_context.getUniformLocation(pipeline, 'detail_corner'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
                     cur_gps_pos_loc: gl_context.getUniformLocation(pipeline, 'cur_gps_pos_loc'),
                     parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
-                    virtual_heightmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index_detail'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
                     virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
                     virtual_streetmap_index: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index'),
-                    virtual_streetmap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index_detail'),
                     virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
                     virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
                     virtual_overlaymap_index: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap_index'),
-                    virtual_overlaymap_index_detail: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap_index_detail'),
                     virtual_overlaymap: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap'),
                     virtual_overlaymap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_overlaymap"),
                 }
@@ -844,20 +944,6 @@
             idx: create_pipeline(gl_context, vs, fs_id),
         };
 
-        let c = Util.wgs_84_to_uv(47.80177, 12.89798);
-        camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700 * 1.4));
-
-        // linalg_tests();
-        const is_mobile = 'ontouchstart' in document.documentElement;
-        if (is_mobile)
-            document.getElementById("triangle_resolution").value = 80;
-        const max_depth = 18;
-        const v_width = 1 << max_depth;
-        virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
-        const w_street = 1 << 19;
-        virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
-        const w_overlay = 1 << 19;
-        virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
         // starting the endless loop for updating the image cache
         setInterval(draw_scene, 20); 
         setInterval(() => check_virtual_textures_update("height", virtual_height_map), 20);
