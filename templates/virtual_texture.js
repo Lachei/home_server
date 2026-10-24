@@ -1104,15 +1104,21 @@ const Util = {
     }
 };
 
-const clientWaitAsync = function (gl, sync, flags = 0, interval_ms = 10) {
+/** @brief resolves when the sync is signaled, rejects on failure or if it is not signaled within timeout_ms */
+const clientWaitAsync = function (gl, sync, flags = 0, interval_ms = 10, timeout_ms = 2000) {
+    const start = performance.now();
     return new Promise(function (resolve, reject) {
         var check = function () {
             var res = gl.clientWaitSync(sync, flags, 0);
             if (res == gl.WAIT_FAILED) {
-                reject();
+                reject(new Error("clientWaitSync failed"));
                 return;
             }
             if (res == gl.TIMEOUT_EXPIRED) {
+                if (performance.now() - start > timeout_ms) {
+                    reject(new Error("sync not signaled in time"));
+                    return;
+                }
                 setTimeout(check, interval_ms);
                 return;
             }

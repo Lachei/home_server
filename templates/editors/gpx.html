@@ -264,8 +264,8 @@
     const get_map_drag_start = (x, y) => {
         const clip_x = (x - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
         const clip_y = (y - canvas3d.getBoundingClientRect().y) / canvas3d.getBoundingClientRect().height * -2 + 1;
-        const depth_x = Math.floor((clip_x * .5 + .5) * indices_render_objs.width + .5);
-        const depth_y = Math.floor((clip_y * .5 + .5) * indices_render_objs.height + .5);
+        const depth_x = Math.min(Math.max(Math.floor((clip_x * .5 + .5) * indices_render_objs.width), 0), indices_render_objs.width - 1);
+        const depth_y = Math.min(Math.max(Math.floor((clip_y * .5 + .5) * indices_render_objs.height), 0), indices_render_objs.height - 1);
         const linear_z = depth_data_f32[depth_y * indices_render_objs.width + depth_x];
         let p = clip_space_to_world(clip_x, clip_y, linear_z, camera_center, canvas3d);
         console.log(p.entries);
@@ -732,11 +732,22 @@
         let start = performance.now();
         let tile_processing_start = start;
         const readback = pending_readback;
-        await clientWaitAsync(gl_context, readback.fence);
+        let fence_signaled = true;
+        try {
+            await clientWaitAsync(gl_context, readback.fence);
+        } catch (e) {
+            // a lost fence must not stop the readbacks forever, the next frame issues a new one
+            console.log(`gpu_tile_processing: dropping readback, ${e.message}`);
+            fence_signaled = false;
+        }
         gl_context.deleteSync(readback.fence);
         pending_readback = null;
-        if (readback_skipped)
+        if (readback_skipped || !fence_signaled)
             draw_requested = true;
+        if (!fence_signaled) {
+            tile_processing_running = false;
+            return;
+        }
         // the download buffers were recreated by a resize in the meantime, the readback is invalid
         if (readback.tile_buffer !== tile_download_buffer || readback.depth_buffer !== depth_download_buffer) {
             tile_processing_running = false;
@@ -1883,7 +1894,11 @@
         let end_pos = inv_view_proj.multiply(Vec4(clip_x, clip_y, 1));
         for (let i = 0; i < 4; ++i) start_pos.entries[i] /= start_pos.entries[3];
         for (let i = 0; i < 4; ++i) end_pos.entries[i] /= end_pos.entries[3];
-        start_pos.add(end_pos.sub(start_pos).normalize().multiply(linear_z - near));
+        // linear_z is the view space depth as written by the shader (not the distance along the ray), it changes linearly
+        // along the ray for every projection, so the point is found by interpolating between the near and far plane points
+        const depth = (p) => -view.multiply(p).z();
+        const start_depth = depth(start_pos);
+        start_pos.add(end_pos.sub(start_pos).mul((linear_z - start_depth) / (depth(end_pos) - start_depth)));
         start_pos.entries[0] += grid_offset_pos.lat;
         start_pos.entries[1] += grid_offset_pos.lon;
         return start_pos;
