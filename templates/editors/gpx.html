@@ -251,9 +251,6 @@
     const pre_draw_buffer_size_fact = 1 / 4;
     let camera_dir = 0;     // given in radians, 0 means dead north
     let camera_pitch = 0;   // given in radians, 0 means straight ahead, pi straight up -pi straight down
-    let camera_perspective = null;
-    let camera_orthographic = null;
-    let camera_interpolation = 0; // interpolation value between orthographic and projection mapping (0 means full projection, 1 means full orthographic)
     let heightmap_meta_data = null;
     /** @type {VirtualHeightMap} */
     let virtual_height_map = null;
@@ -454,16 +451,17 @@
     /** @returns {float} vertical field of view of the perspective camera in degrees, adjustable in the follow mode */
     const camera_fov_deg = () => gpx_mode == "follow" ? gpx_follow.fov_deg : default_fov_deg;
     // a tile is refined while its vertex spacing projects to more than canvas_height / triangle_resolution pixels
-    const mesh_lod_factor = (triangle_resolution) => triangle_resolution / mesh_res / (2 * Math.tan(camera_fov_deg() / 2 * Math.PI / 180));
+    const mesh_lod_factor = (triangle_resolution, fov_deg) => triangle_resolution / mesh_res / (2 * Math.tan(fov_deg / 2 * Math.PI / 180));
     /**
      * @brief selects the quadtree tiles to render such that a quad covers roughly
      * canvas_height / triangle_resolution pixels on screen
      * @returns {Object} data: Float32Array, count: int with per tile [x, y relative to grid_offset_pos, width, level], sorted front to back
      */
-    const select_mesh_tiles = (view_projection, grid_offset_pos, triangle_resolution) => {
+    const select_mesh_tiles = (view_projection, grid_offset_pos, triangle_resolution, eye) => {
         const e = view_projection.entries;
-        const cam_x = camera_center.x(), cam_y = camera_center.y(), cam_z = camera_center.z();
-        const lod_factor = mesh_lod_factor(triangle_resolution);
+        // distances are measured from the effective eye of the projection (moved back for the transition to 2d)
+        const cam_x = eye.x, cam_y = eye.y, cam_z = eye.z;
+        const lod_factor = mesh_lod_factor(triangle_resolution, eye.fov_deg);
         // deeper levels would only add vertices between heightmap texels
         const max_level = virtual_height_map.max_level + heightmap_tile_res_log2 - mesh_res_log2;
         const z_pad = Util.m_to_wgs_84_uv(50); // margin for heights sampled from coarser levels
@@ -620,7 +618,7 @@
         camera_updated = false;
 
         // creating the view matrix -------------------------------------------
-        const [view_projection, view, base_width, grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
+        const [view_projection, view, base_width, grid_offset_pos, , , eye] = get_projection_mat(camera_center, canvas3d);
 
         // drawing the tiles --------------------------------------------------
         const draw_tiles = (gl, fb_size, program, framebuffer) => {
@@ -636,6 +634,7 @@
             gl.useProgram(program.program);
             gl.uniformMatrix4fv(program.uniform_locations.view, false, view.entries);
             gl.uniformMatrix4fv(program.uniform_locations.view_proj, false, view_projection.entries);
+            gl.uniform1f(program.uniform_locations.depth_offset, eye.offset);
             if (program.uniform_locations.color_correction) { 
                 let selected_layer = get_selected_layer();
                 let b = 1.;
@@ -671,10 +670,6 @@
             gl.bindBufferBase(gl.UNIFORM_BUFFER, mesh_tiles_binding, mesh_tiles_buffer);
             gl.uniformBlockBinding(program.program, program.uniform_locations.mesh_tiles, mesh_tiles_binding);
             gl.uniform1i(program.uniform_locations.mesh_res, mesh_res);
-            if (cur_gps_pos)
-                gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, cur_gps_pos.lat - grid_offset_pos.lat, cur_gps_pos.lon - grid_offset_pos.lon);
-            else
-                gl.uniform2f(program.uniform_locations.cur_gps_pos_loc, -1e10, -1e10);
             gl.uniform2f(program.uniform_locations.grid_offset_pos, grid_offset_pos.lat, grid_offset_pos.lon);
             if (!framebuffer)
                 gl.drawBuffers([gl.BACK]);
@@ -685,7 +680,7 @@
         const update_tiles = document.getElementById("enable_tile_update").checked;
         let start = performance.now();
         // select and upload the mesh tiles once, they are shared by both passes
-        const mesh_tiles = select_mesh_tiles(view_projection, grid_offset_pos, + document.getElementById("triangle_resolution").value);
+        const mesh_tiles = select_mesh_tiles(view_projection, grid_offset_pos, + document.getElementById("triangle_resolution").value, eye);
         gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, mesh_tiles_buffer);
         gl_context.bufferSubData(gl_context.UNIFORM_BUFFER, 0, mesh_tiles.data, 0, mesh_tiles.count * 4);
         gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, null);
@@ -698,7 +693,7 @@
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
-        draw_track(view_projection, grid_offset_pos);
+        draw_track(view_projection, grid_offset_pos, eye);
         
         // copy to download gpu buffers
         if (do_readback) {
@@ -1505,30 +1500,36 @@
         camera_center = Vec4(center.x, center.y + dist_m * Math.cos(camera_pitch) / m_per_uv, Util.m_to_wgs_84_uv(800 + dist_m * Math.sin(camera_pitch)) * 1.4);
         return true;
     };
-    const draw_track = (view_projection, grid_offset_pos) => {
+    const draw_track = (view_projection, grid_offset_pos, eye) => {
         if (!track_renderer)
             return;
         track_renderer.update(gpx_doc);
-        const marker = gpx_mode == "follow" && gpx_follower.length_m ? gpx_follower.position_at(gpx_follow.s)
-                     : gpx_recorder.recording && gpx_recorder.filter ? gpx_recorder.filter : null;
+        // own position (filtered while recording) and the current position of the follow animation
+        let markers = [];
+        const own_pos = gpx_recorder.recording && gpx_recorder.filter ? gpx_recorder.filter : cur_gps_pos ? {x: cur_gps_pos.lat, y: cur_gps_pos.lon} : null;
+        if (own_pos)
+            markers.push({...own_pos, color: [.1, .45, 1, 1]});
+        if (gpx_mode == "follow" && gpx_follower.length_m)
+            markers.push({...gpx_follower.position_at(gpx_follow.s), color: [1, .55, 0, 1]});
         const draw_params = {
             view_proj: view_projection.entries,
             grid_offset_pos: {x: grid_offset_pos.lat, y: grid_offset_pos.lon},
-            cam_pos: [camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z()],
+            cam_pos: [eye.x - grid_offset_pos.lat, eye.y - grid_offset_pos.lon, eye.z],
+            eye_offset: eye.offset,
             viewport: [canvas3d.width, canvas3d.height],
-            pixel_angle: 2 * Math.tan(camera_fov_deg() / 2 * Math.PI / 180) / canvas3d.height,
-            lod_factor: mesh_lod_factor(+document.getElementById("triangle_resolution").value),
+            pixel_angle: 2 * Math.tan(eye.fov_deg / 2 * Math.PI / 180) / canvas3d.height,
+            lod_factor: mesh_lod_factor(+document.getElementById("triangle_resolution").value, eye.fov_deg),
             max_mesh_level: virtual_height_map.max_level + heightmap_tile_res_log2 - mesh_res_log2,
             virtual_height_map: virtual_height_map,
             show_handles: gpx_mode == "edit",
             selected_index: gpx_selected ? track_renderer.global_index(gpx_selected.seg, gpx_selected.i) : -1,
             handle_size: is_touch ? 22 : 14,
-            marker: marker,
+            markers: markers,
         };
         track_renderer.draw(draw_params);
         if (gpx_mode == "measure" && gpx_measure.points.length) {
             measure_renderer.update(measure_render_doc());
-            measure_renderer.draw({...draw_params, show_handles: true, selected_index: -1, marker: null});
+            measure_renderer.draw({...draw_params, show_handles: true, selected_index: -1, markers: []});
         }
     };
 
@@ -1602,6 +1603,7 @@
         uniform vec2 grid_offset_pos;
         uniform mat4 view;
         uniform mat4 view_proj;
+        uniform float depth_offset;         // distance the eye was moved back for the 2d transition
         ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
         layout(std140) uniform MeshTiles {
             vec4 mesh_tiles[${max_mesh_tiles}];  // xy: tile origin relative to grid_offset_pos, z: tile width in uv, w: quadtree level
@@ -1642,7 +1644,9 @@
             vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
 
             gl_Position = view_proj * pos_cam_rel;
-            depth = -(view * pos_cam_rel).z; // has to be inverted as the depth is in -z direction;
+            // has to be inverted as the depth is in -z direction. Stored relative to the camera before it was moved back for the
+            // 2d transition, otherwise the eye offset (which changes with every zoom) would make the delayed readback useless
+            depth = -(view * pos_cam_rel).z - depth_offset;
         }
         `;
         const fs = `#version 300 es
@@ -1658,7 +1662,6 @@
         in float n_dot_l;
         uniform vec2 grid_offset_pos;
         uniform vec4 color_correction;
-        uniform vec2 cur_gps_pos_loc; // gps position in local pos
         uniform int parcell_map_enabled; // 0->disabled, enabled else
         ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
         ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
@@ -1714,10 +1717,6 @@
             // return;
 
             // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
-            if (distance(loc_pos, cur_gps_pos_loc) / gl_FragCoord.z * gl_FragCoord.w * 1e-6 < 1. / 4e7) {
-                out_col = vec4(1, 0, 0, 1);
-                return;
-            }
             vec2 dx = dFdx(loc_pos);
             vec2 dy = dFdy(loc_pos);
             float max_del = min(dot(dx, dx), dot(dy, dy));
@@ -1777,8 +1776,8 @@
                     grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
                     view: gl_context.getUniformLocation(pipeline, 'view'),
                     view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
+                    depth_offset: gl_context.getUniformLocation(pipeline, 'depth_offset'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
-                    cur_gps_pos_loc: gl_context.getUniformLocation(pipeline, 'cur_gps_pos_loc'),
                     parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
@@ -1862,33 +1861,70 @@
     const get_front_dir = (dir, pitch) => { return Vec4(Math.sin(dir), Math.cos(dir), 0, 0); };
     // constructs the right vector which is independent of the viewing pitch
     const get_right_dir = (dir) => { return Vec4(Math.cos(-dir), Math.sin(-dir), 0, 0); }; // the - sign is added as the we interpret the direction to go clock-wise
+    // height (scene z) of the plane whose size on screen is kept during the transition to 2d, taken from the terrain at the
+    // screen center when the transition starts. A fixed plane keeps the 2d scale stable while panning over hills
+    let projection_focus_z = null;
+    /** @returns {float} scene z of the terrain at the screen center, the terrain below the camera when looking at the sky */
+    const terrain_focus_z = () => {
+        const v = get_forward_dir(camera_dir, camera_pitch);    // the camera looks along -v
+        const ground_z = (x, y) => Util.m_to_wgs_84_uv(terrain_height_mean_at(x, y) ?? 0) * 1.4;
+        for (let d = Util.m_to_wgs_84_uv(1); d < Util.m_to_wgs_84_uv(200000); d *= 1.05) {
+            const x = camera_center.x() - v.x() * d, y = camera_center.y() - v.y() * d, z = camera_center.z() - v.z() * d;
+            if (z <= ground_z(x, y))
+                return z;
+        }
+        return ground_z(camera_center.x(), camera_center.y());
+    };
+    /** @returns {float} distance in uv from the camera to the focus plane along the view direction */
+    const focus_distance = () => {
+        if (projection_focus_z === null)
+            projection_focus_z = terrain_focus_z();
+        const down = Math.max(get_forward_dir(camera_dir, camera_pitch).z(), .05);   // the camera looks along -forward
+        return Math.max((camera_center.z() - projection_focus_z) / down, Util.m_to_wgs_84_uv(10));
+    };
     const get_projection_mat = (camera_center, canvas) => {
         const displayWidth = canvas.width;
         const displayHeight = canvas.height;
         const height_multiplier = Math.max(1, 500000 * camera_center.z());
-        const near = 1e-10 * height_multiplier;
-        const far = .001 * height_multiplier;
-        camera_perspective = PerspectiveFov(camera_fov_deg(), displayWidth / displayHeight, near , far);
-        const screen_size_factor = camera_center.z() * 5e-4;
-        camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, near, far);
+        // transition from 3d to 2d as dolly zoom: the field of view shrinks while the eye moves back along the view direction
+        // such that the terrain at the focus distance keeps its size on screen, at the end it is replaced by the equal orthographic projection
+        const t = Math.min(Math.max(+document.getElementById("camera_interpolation").value, 0), 1);
+        const orthographic = t >= 1;
+        const fov_deg = camera_fov_deg();
+        const tan_half = Math.tan(fov_deg / 2 * Math.PI / 180);
+        if (t == 0)
+            projection_focus_z = null;
+        const focus = t > 0 ? focus_distance() : 0;
+        const s = orthographic ? 1e-3 : 1 - t;                  // tan(current fov / 2) / tan(fov / 2)
+        const eye_offset = focus / s - focus;                   // distance the eye moves back
+        const eye_fov_deg = 2 * Math.atan(tan_half * s) * 180 / Math.PI;
+        const near = 1e-10 * height_multiplier + .5 * eye_offset;
+        const far = .001 * height_multiplier + eye_offset;
+        const aspect = displayWidth / displayHeight;
+        const projection = orthographic ? Orthographic(focus * tan_half, focus * tan_half * aspect, near, far)
+                                        : PerspectiveFov(eye_fov_deg, aspect, near, far);
+        // the camera looks along -get_forward_dir, so moving back is along +forward
+        const forward = get_forward_dir(camera_dir, camera_pitch);
+        const eye = {x: camera_center.x() + forward.x() * eye_offset, y: camera_center.y() + forward.y() * eye_offset, z: camera_center.z() + forward.z() * eye_offset,
+                     fov_deg: eye_fov_deg, offset: eye_offset};
         const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
         // grid jump for triangles is done all x meters
         let grid_offset_pos = get_detail_base_pos(Pos(camera_center.x(), camera_center.y()), base_width * 0.125);
-        let at = get_forward_dir(camera_dir, camera_pitch).to_absolute_vec();
-        at.entries[0] += camera_center.x() - grid_offset_pos.lat;
-        at.entries[1] += camera_center.y() - grid_offset_pos.lon;
-        at.entries[2] += camera_center.z();
-        const view = LookAt(Vec4(camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z(), 1), // camera_center is always in the center, the tiles a re moved relative to the camera center
+        let at = forward.to_absolute_vec();
+        at.entries[0] += eye.x - grid_offset_pos.lat;
+        at.entries[1] += eye.y - grid_offset_pos.lon;
+        at.entries[2] += eye.z;
+        const view = LookAt(Vec4(eye.x - grid_offset_pos.lat, eye.y - grid_offset_pos.lon, eye.z, 1), // the tiles are moved relative to the camera center
             at,
             up_dir);
-        camera_interpolation = Math.pow(document.getElementById("camera_interpolation").value, 8);
-        let view_projection = camera_perspective.morph(camera_orthographic, camera_interpolation);
+        let view_projection = projection;
         view_projection.mul(view);  // inplace multiplication which corresponds to Proj * View which means the view matrix is applied before the projection
-        return [view_projection, view, base_width, grid_offset_pos, near, far];
+        return [view_projection, view, base_width, grid_offset_pos, near, far, eye];
     }
     // Point in clip space to point in 3d space
     const clip_space_to_world = (clip_x, clip_y, linear_z, camera_center, canvas) => {
-        const [view_projection, view, base_width, grid_offset_pos, near, far] = get_projection_mat(camera_center, canvas3d);
+        const [view_projection, view, base_width, grid_offset_pos, near, far, eye] = get_projection_mat(camera_center, canvas3d);
+        linear_z += eye.offset;     // the depth is stored relative to the camera before the eye was moved back
         const inv_view_proj = view_projection.inverse();
         let start_pos = inv_view_proj.multiply(Vec4(clip_x, clip_y, -1));
         let end_pos = inv_view_proj.multiply(Vec4(clip_x, clip_y, 1));
@@ -1897,8 +1933,8 @@
         // linear_z is the view space depth as written by the shader (not the distance along the ray), it changes linearly
         // along the ray for every projection, so the point is found by interpolating between the near and far plane points
         const depth = (p) => -view.multiply(p).z();
-        const start_depth = depth(start_pos);
-        start_pos.add(end_pos.sub(start_pos).mul((linear_z - start_depth) / (depth(end_pos) - start_depth)));
+        const start_depth = depth(start_pos), end_depth = depth(end_pos);   // before end_pos is modified in place below
+        start_pos.add(end_pos.sub(start_pos).mul((linear_z - start_depth) / (end_depth - start_depth)));
         start_pos.entries[0] += grid_offset_pos.lat;
         start_pos.entries[1] += grid_offset_pos.lon;
         return start_pos;

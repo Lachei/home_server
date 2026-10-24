@@ -483,6 +483,7 @@ const TrackRenderer = () => {
             uniform vec2 points_origin;         // relative to grid_offset_pos
             uniform vec2 grid_offset_pos;
             uniform vec3 cam_pos;               // relative to grid_offset_pos
+            uniform float eye_offset;           // distance the eye was moved back for the transition to 2d, not counted for the lift
             uniform mat4 view_proj;
             uniform vec2 viewport;
             uniform float size_px;              // line width or point diameter in pixels
@@ -515,7 +516,8 @@ const TrackRenderer = () => {
                 // lifted towards the camera to avoid z fighting with the terrain
                 vec3 to_cam = cam_pos - pos;
                 float d = length(to_cam);
-                pos += to_cam / d * min(.5 * d, wgs_84_m_to_uv(1.5) + (.003 + extra_px * pixel_angle) * d);
+                float d_lift = max(d - eye_offset, 0.);
+                pos += to_cam / d * min(.5 * d, wgs_84_m_to_uv(1.5) + .003 * d_lift + extra_px * pixel_angle * d);
                 return view_proj * vec4(pos, 1.);
             }
 
@@ -603,7 +605,7 @@ const TrackRenderer = () => {
             }
             `;
             this.program = initShaderProgram(gl, vs, fs);
-            for (const name of ["points", "point_count", "points_origin", "grid_offset_pos", "cam_pos", "view_proj", "viewport", "size_px", "lod_factor",
+            for (const name of ["points", "point_count", "points_origin", "grid_offset_pos", "cam_pos", "eye_offset", "view_proj", "viewport", "size_px", "lod_factor",
                                 "max_mesh_level", "pixel_angle", "mode", "edit_points", "only_waypoints", "marker_pos", "color", "outline_color", "selected_index",
                                 "virtual_heightmap_index", "virtual_heightmap"])
                 this.uniforms[name] = gl.getUniformLocation(this.program, name);
@@ -663,12 +665,12 @@ const TrackRenderer = () => {
         },
         /**
          * @param {{view_proj: Array, grid_offset_pos: {x, y}, cam_pos: Array, viewport: Array, lod_factor: float, max_mesh_level: int,
-         *          pixel_angle: float, virtual_height_map: VirtualMap, show_handles: bool, selected_index: int, marker: {x, y}}} p
+         *          eye_offset: float, pixel_angle: float, virtual_height_map: VirtualMap, show_handles: bool, selected_index: int, markers: Array}} p
          */
         draw: function (p) {
             const gl = this.gl;
             const u = this.uniforms;
-            if (!this.line_count && !this.edit_count && !p.marker)
+            if (!this.line_count && !this.edit_count && !(p.markers && p.markers.length))
                 return;
             gl.useProgram(this.program);
             p.virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, u.heightmap_infos);
@@ -679,6 +681,7 @@ const TrackRenderer = () => {
             gl.uniform2f(u.grid_offset_pos, p.grid_offset_pos.x, p.grid_offset_pos.y);
             gl.uniform2f(u.points_origin, this.origin.x - p.grid_offset_pos.x, this.origin.y - p.grid_offset_pos.y);
             gl.uniform3f(u.cam_pos, p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
+            gl.uniform1f(u.eye_offset, p.eye_offset || 0);
             gl.uniform2f(u.viewport, p.viewport[0], p.viewport[1]);
             gl.uniform1f(u.lod_factor, p.lod_factor);
             gl.uniform1f(u.pixel_angle, p.pixel_angle);
@@ -722,10 +725,11 @@ const TrackRenderer = () => {
                 gl.uniform1i(u.only_waypoints, 0);
                 gl.uniform1i(u.selected_index, -1);
             }
-            if (p.marker) {
+            // markers have a constant screen size
+            for (const marker of p.markers || []) {
                 gl.uniform1i(u.mode, 2);
-                gl.uniform2f(u.marker_pos, p.marker.x - p.grid_offset_pos.x, p.marker.y - p.grid_offset_pos.y);
-                gl.uniform4fv(u.color, [.1, .45, 1, 1]);
+                gl.uniform2f(u.marker_pos, marker.x - p.grid_offset_pos.x, marker.y - p.grid_offset_pos.y);
+                gl.uniform4fv(u.color, marker.color);
                 gl.uniform4fv(u.outline_color, [1, 1, 1, 1]);
                 gl.uniform1f(u.size_px, 20);
                 gl.drawArrays(gl.TRIANGLES, 0, 6);
