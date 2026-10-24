@@ -21,8 +21,12 @@
             overflow: hidden;
         }
 
+        /* the header takes the height it needs, the map gets the rest of the visible viewport (dvh excludes the mobile url bar) */
         body {
-            display: table;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            height: 100dvh;
         }
 
         a {
@@ -46,18 +50,82 @@
             height: 100%;
         }
 
-        #header,
-        #content {
+        #header {
+            flex: none;
             background-color: white;
-            display: table-row;
         }
 
-        #header+#content {
-            height: 100%;
+        #content {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        #preview {
+            position: absolute;
+            inset: 0;
         }
 
         #canvas3d {
-            height: 100%;
+            display: block;
+        }
+
+        .gpx_panel {
+            position: absolute;
+            left: 8px;
+            bottom: 8px;
+            max-width: calc(100% - 16px);
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 6px;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, .92);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
+        }
+
+        .gpx_panel * {
+            font-size: 15px;
+        }
+
+        .gpx_row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .gpx_panel button {
+            min-height: 2.2em;
+            padding: 0 .8em;
+            border: 1px solid #bbb;
+            border-radius: 6px;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        .gpx_panel button.active {
+            border-color: #e8471c;
+            background-color: #e8471c;
+            color: white;
+        }
+
+        .gpx_panel button:disabled {
+            opacity: .4;
+        }
+
+        .gpx_panel input[type=number] {
+            width: 4em;
+        }
+
+        #gpx_follow_progress {
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .gpx_hidden {
+            display: none !important;
         }
     </style>
 </head>
@@ -99,11 +167,59 @@
     <div id="content">
         <div id="preview" class="preview">
             <canvas id="canvas3d" class="fill"></canvas>
+            <div id="gpx_panel" class="gpx_panel">
+                <div class="gpx_row">
+                    <button type="button" class="gpx_mode" data-mode="view">Ansehen</button>
+                    <button type="button" class="gpx_mode gpx_editor_only" data-mode="edit">Bearbeiten</button>
+                    <button type="button" class="gpx_mode gpx_editor_only" data-mode="record">Aufnehmen</button>
+                    <button type="button" class="gpx_mode" data-mode="follow">Folgen</button>
+                    <button type="button" class="gpx_mode" data-mode="measure">Messen</button>
+                </div>
+                <div id="gpx_measure_controls" class="gpx_row gpx_hidden">
+                    <select id="gpx_measure_type">
+                        <option value="distance">Strecke</option>
+                        <option value="area">Fläche</option>
+                        <option value="point">Punkt</option>
+                    </select>
+                    <button id="gpx_measure_undo" type="button">Letzten Punkt entfernen</button>
+                    <button id="gpx_measure_clear" type="button">Zurücksetzen</button>
+                </div>
+                <div id="gpx_measure_result" class="gpx_hidden"></div>
+                <div id="gpx_edit_controls" class="gpx_row gpx_hidden">
+                    <label><input id="gpx_append_mode" type="checkbox">Punkte anhängen</label>
+                    <button id="gpx_delete" type="button">Punkt löschen</button>
+                    <button id="gpx_undo" type="button">Rückgängig</button>
+                    <button id="gpx_new_segment" type="button">Neuer Track</button>
+                </div>
+                <div id="gpx_record_controls" class="gpx_row gpx_hidden">
+                    <button id="gpx_record_toggle" type="button">Aufnahme starten</button>
+                    <button id="gpx_average_start" type="button">Punkt mitteln</button>
+                    <button id="gpx_average_accept" type="button">Übernehmen</button>
+                    <button id="gpx_average_cancel" type="button">Abbrechen</button>
+                    <label>Max. Ungenauigkeit <input id="gpx_max_accuracy" type="number" min="1" max="500" value="20"> m</label>
+                    <label>Min. Abstand <input id="gpx_min_distance" type="number" min="0" max="1000" value="3"> m</label>
+                </div>
+                <div id="gpx_follow_controls" class="gpx_row gpx_hidden">
+                    <button id="gpx_follow_play" type="button">&#9654;</button>
+                    <select id="gpx_follow_speed">
+                        <option value="5">5 km/h</option>
+                        <option value="15">15 km/h</option>
+                        <option value="50" selected>50 km/h</option>
+                        <option value="150">150 km/h</option>
+                        <option value="500">500 km/h</option>
+                    </select>
+                    <input id="gpx_follow_progress" type="range" min="0" max="1000" value="0">
+                    <label>Abstand <input id="gpx_follow_zoom" type="range" min="-100" max="150" value="0"></label>
+                    <label>Sichtfeld <input id="gpx_follow_fov" type="range" min="15" max="120" value="60"></label>
+                </div>
+                <div id="gpx_status"></div>
+            </div>
         </div>
     </div>
 </body>
 <script type="text/javascript" src="/lin_alg.js"></script>
 <script type="text/javascript" src="/virtual_texture.js"></script>
+<script type="text/javascript" src="/gpx_track.js"></script>
 <!--<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>-->
 <script>
     // var spector = new SPECTOR.Spector();
@@ -334,17 +450,20 @@
     let mesh_tiles_buffer = null;
     let mesh_tiles_cpu = null;
 
+    const default_fov_deg = 60;
+    /** @returns {float} vertical field of view of the perspective camera in degrees, adjustable in the follow mode */
+    const camera_fov_deg = () => gpx_mode == "follow" ? gpx_follow.fov_deg : default_fov_deg;
+    // a tile is refined while its vertex spacing projects to more than canvas_height / triangle_resolution pixels
+    const mesh_lod_factor = (triangle_resolution) => triangle_resolution / mesh_res / (2 * Math.tan(camera_fov_deg() / 2 * Math.PI / 180));
     /**
      * @brief selects the quadtree tiles to render such that a quad covers roughly
      * canvas_height / triangle_resolution pixels on screen
-     * @returns {{data: Float32Array, count: int}} per tile [x, y relative to grid_offset_pos, width, level], sorted front to back
+     * @returns {Object} data: Float32Array, count: int with per tile [x, y relative to grid_offset_pos, width, level], sorted front to back
      */
     const select_mesh_tiles = (view_projection, grid_offset_pos, triangle_resolution) => {
         const e = view_projection.entries;
         const cam_x = camera_center.x(), cam_y = camera_center.y(), cam_z = camera_center.z();
-        // a tile is refined while its vertex spacing projects to more than canvas_height / triangle_resolution pixels
-        // .866 = 1 / (2 tan(fov / 2)) for the 60deg fov
-        const lod_factor = triangle_resolution / mesh_res * .866;
+        const lod_factor = mesh_lod_factor(triangle_resolution);
         // deeper levels would only add vertices between heightmap texels
         const max_level = virtual_height_map.max_level + heightmap_tile_res_log2 - mesh_res_log2;
         const z_pad = Util.m_to_wgs_84_uv(50); // margin for heights sampled from coarser levels
@@ -429,6 +548,23 @@
         }
         return null;
     };
+    /** @returns {float} terrain height in meters at the given uv position (bilinear on the 4x4 texel means of the deepest loaded tile), null if not loaded */
+    const terrain_height_mean_at = (x, y) => {
+        for (let level = virtual_height_map.max_level; level >= 0; --level) {
+            const n = 1 << level;
+            const tile = virtual_height_map.get_uploaded_tile(level, Math.floor(x * n), Math.floor(y * n));
+            if (!tile || !tile.height_grid_mean)
+                continue;
+            // texel i is at i / 256 in the tile, so the center of grid cell c is at c + .375 in grid units
+            const gx = Math.min(Math.max((x * n - Math.floor(x * n)) * height_grid_res - .375, 0), height_grid_res - 1);
+            const gy = Math.min(Math.max((y * n - Math.floor(y * n)) * height_grid_res - .375, 0), height_grid_res - 1);
+            const x0 = Math.min(Math.floor(gx), height_grid_res - 2), y0 = Math.min(Math.floor(gy), height_grid_res - 2);
+            const tx = gx - x0, ty = gy - y0;
+            const at = (cx, cy) => tile.height_grid_mean[cy * height_grid_res + cx];
+            return (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+        }
+        return null;
+    };
     /** @returns {float} min camera z at the current camera position, null if no height data is loaded */
     const min_camera_z = () => {
         const h = terrain_height_at(camera_center.x(), camera_center.y());
@@ -460,7 +596,7 @@
     let readback_skipped = false;   // a frame was drawn without readback, has to be redrawn after the pending readback is done
     async function draw_scene() {
         draw_requested |= camera_updated;
-        if (document.getElementById("enable_cam_follow").checked) {
+        if (document.getElementById("enable_cam_follow").checked && cur_gps_pos) {
             const interp_factor = .05;
             let pre_x = camera_center.x();
             let pre_y = camera_center.y();
@@ -472,6 +608,8 @@
             camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
             draw_requested |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
         }
+        if (gpx_mode == "follow" && (gpx_follow.playing || gpx_follow.update_requested))
+            update_follow_camera();
         // checked every tick as finer height data might have been loaded below the camera
         draw_requested |= clamp_camera_above_terrain();
 
@@ -560,6 +698,7 @@
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
+        draw_track(view_projection, grid_offset_pos);
         
         // copy to download gpu buffers
         if (do_readback) {
@@ -685,6 +824,704 @@
         console.log(cur_gps_pos);
     }
     // ----------------------------------------------------------------------------------------
+    // gpx editing, recording and follow animation
+    // ----------------------------------------------------------------------------------------
+    const is_editor = "{{#editor}}1{{/editor}}" == "1";
+    const is_touch = 'ontouchstart' in document.documentElement;
+    const gpx_backup_key = "gpx_backup:" + file_path;
+    const gpx_doc = GpxDocument().load("{{&file_data}}");
+    const gpx_recorder = GpsRecorder();
+    const gpx_follower = TrackFollower();
+    /** @type {TrackRenderer} */
+    let track_renderer = null;
+    let gpx_mode = "view";              // one of view, edit, record, follow
+    let gpx_selected = null;            // {seg: int, i: int} index of the selected point
+    let gpx_active_segment = null;      // segment new points are appended to if no point is selected
+    let gpx_drag = null;                // {undo_pushed: bool} while a point is dragged
+    let gpx_record_track_name = null;   // name of the track the recording is appended to
+    let gpx_saved_version = gpx_doc.version;
+    let gpx_saving = false;
+    let gpx_save_state = "";
+    // zoom scales the distance of the camera to the current position
+    const gpx_follow = {playing: false, update_requested: false, s: 0, speed_mps: 50 / 3.6, last_t: 0, dir: null, zoom: 1, fov_deg: 60};
+
+    const gpx_changed = () => {
+        draw_requested = true;
+        update_gpx_ui();
+    };
+    /** @brief replaces the document content (remote change or merge), the indices of the selection are invalid afterwards */
+    const gpx_reload = (text) => {
+        gpx_doc.load(text);
+        gpx_saved_version = gpx_doc.version;
+        gpx_selected = null;
+        gpx_active_segment = null;
+        gpx_follower.init(gpx_doc);
+        gpx_changed();
+    };
+    /** @returns {GpxSegment} the segment the recording appends to, found by the track name to survive reloads of the document */
+    const gpx_record_segment = () => {
+        if (!gpx_record_track_name)
+            return null;
+        return gpx_doc.segments.find(s => s.kind == "trk" && gpx_doc.child_element(s.element.parentElement, "name")?.textContent == gpx_record_track_name) || null;
+    };
+
+    // picking --------------------------------------------------------------------------------
+    /** @returns {Object} x, y position in css pixels relative to the canvas, null if behind the camera */
+    const project_to_screen = (view_projection, grid_offset_pos, x, y) => {
+        const e = view_projection.entries;
+        const px = x - grid_offset_pos.lat, py = y - grid_offset_pos.lon;
+        const pz = Util.m_to_wgs_84_uv(terrain_height_mean_at(x, y) ?? 0) * 1.4;
+        const cx = e[0] * px + e[4] * py + e[8] * pz + e[12];
+        const cy = e[1] * px + e[5] * py + e[9] * pz + e[13];
+        const cw = e[3] * px + e[7] * py + e[11] * pz + e[15];
+        if (cw <= 0)
+            return null;
+        const r = canvas3d.getBoundingClientRect();
+        return {x: (cx / cw * .5 + .5) * r.width, y: (.5 - cy / cw * .5) * r.height};
+    };
+    /** @returns {Object} seg, i of the point closest to the screen position within radius pixels */
+    const gpx_pick_point = (sx, sy, radius) => {
+        const [view_projection, , , grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
+        let best = null, best_d = radius;
+        gpx_doc.segments.forEach((seg, si) => seg.points.forEach((p, i) => {
+            const s = project_to_screen(view_projection, grid_offset_pos, p.x, p.y);
+            const d = s ? Math.hypot(s.x - sx, s.y - sy) : Infinity;
+            if (d < best_d) {
+                best_d = d;
+                best = {seg: si, i: i};
+            }
+        }));
+        return best;
+    };
+    /** @returns {Object} seg, i, x, y of the closest line within radius pixels, i is the index a new point has to be inserted at */
+    const gpx_pick_line = (sx, sy, radius) => {
+        const [view_projection, , , grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
+        let best = null, best_d = radius;
+        gpx_doc.segments.forEach((seg, si) => {
+            if (seg.kind == "wpt")
+                return;
+            let prev = null;
+            seg.points.forEach((p, i) => {
+                const cur = project_to_screen(view_projection, grid_offset_pos, p.x, p.y);
+                if (prev && cur) {
+                    const dx = cur.x - prev.x, dy = cur.y - prev.y;
+                    const t = Math.min(Math.max(((sx - prev.x) * dx + (sy - prev.y) * dy) / Math.max(dx * dx + dy * dy, 1e-9), 0), 1);
+                    const d = Math.hypot(prev.x + t * dx - sx, prev.y + t * dy - sy);
+                    if (d < best_d) {
+                        best_d = d;
+                        const a = seg.points[i - 1];
+                        best = {seg: si, i: i, x: a.x + t * (p.x - a.x), y: a.y + t * (p.y - a.y)};
+                    }
+                }
+                prev = cur;
+            });
+        });
+        return best;
+    };
+
+    // editing --------------------------------------------------------------------------------
+    /** @brief inserts a point after the selected one, otherwise at the end of the active segment (creates a track if there is none) */
+    const gpx_append_point = (x, y) => {
+        let seg_index, i;
+        if (gpx_selected && gpx_doc.segments[gpx_selected.seg].kind != "wpt") {
+            seg_index = gpx_selected.seg;
+            i = gpx_selected.i + 1;
+        } else {
+            let seg = gpx_doc.segments.includes(gpx_active_segment) ? gpx_active_segment : gpx_doc.segments.findLast(s => s.kind == "trk");
+            if (!seg)
+                seg = gpx_doc.create_track("Track");
+            seg_index = gpx_doc.segments.indexOf(seg);
+            i = seg.points.length;
+        }
+        gpx_doc.insert_point(gpx_doc.segments[seg_index], i, {x: x, y: y, ele: terrain_height_mean_at(x, y)});
+        return {seg: seg_index, i: i};
+    };
+    const gpx_delete_selected = () => {
+        if (!gpx_selected)
+            return;
+        gpx_doc.push_undo();
+        const seg = gpx_doc.segments[gpx_selected.seg];
+        gpx_doc.delete_point(seg, gpx_selected.i);
+        // the neighbour gets selected to allow deleting several points in a row
+        gpx_selected = seg.points.length ? {seg: gpx_selected.seg, i: Math.min(gpx_selected.i, seg.points.length - 1)} : null;
+        gpx_changed();
+    };
+    const gpx_undo = () => {
+        if (gpx_recorder.recording || !gpx_doc.undo())
+            return;
+        gpx_selected = null;
+        gpx_active_segment = null;
+        gpx_changed();
+    };
+    /** @returns {bool} true if the event was used for editing and must not move the camera */
+    const gpx_pointer_down = (touch, page_x, page_y) => {
+        if (gpx_mode == "measure")
+            return measure_pointer_down(touch, page_x, page_y);
+        if (gpx_mode != "edit" || !is_editor || gpx_doc.parse_error)
+            return false;
+        const r = canvas3d.getBoundingClientRect();
+        const sx = page_x - r.left, sy = page_y - r.top;
+        const radius = touch ? 28 : 14;
+        let hit = gpx_pick_point(sx, sy, radius);
+        let undo_pushed = false;
+        if (!hit) {
+            const line_hit = gpx_pick_line(sx, sy, radius * .7);
+            if (line_hit) {
+                gpx_doc.push_undo();
+                gpx_doc.insert_point(gpx_doc.segments[line_hit.seg], line_hit.i, {x: line_hit.x, y: line_hit.y, ele: terrain_height_mean_at(line_hit.x, line_hit.y)});
+                hit = {seg: line_hit.seg, i: line_hit.i};
+            } else if (document.getElementById("gpx_append_mode").checked) {
+                const w = get_map_drag_start(page_x, page_y);
+                if (!w || isNaN(w.x()))
+                    return false;
+                gpx_doc.push_undo();
+                hit = gpx_append_point(w.x(), w.y());
+            } else {
+                if (gpx_selected) {
+                    gpx_selected = null;
+                    gpx_changed();
+                }
+                return false;
+            }
+            undo_pushed = true;
+        }
+        gpx_selected = hit;
+        gpx_active_segment = gpx_doc.segments[hit.seg];
+        gpx_drag = {undo_pushed: undo_pushed};
+        gpx_changed();
+        return true;
+    };
+    /** @returns {bool} true if a point is dragged */
+    const gpx_pointer_move = (page_x, page_y) => {
+        if (gpx_measure.down)
+            gpx_measure.down.moved = Math.max(gpx_measure.down.moved, Math.hypot(page_x - gpx_measure.down.x, page_y - gpx_measure.down.y));
+        if (gpx_measure.drag !== null)
+            return measure_pointer_move(page_x, page_y);
+        if (!gpx_drag)
+            return false;
+        // the depth readback only contains the terrain, so this is the terrain position below the cursor
+        const w = get_map_drag_start(page_x, page_y);
+        if (w && !isNaN(w.x()) && gpx_selected) {
+            if (!gpx_drag.undo_pushed) {
+                gpx_doc.push_undo();
+                gpx_drag.undo_pushed = true;
+            }
+            const point = gpx_doc.segments[gpx_selected.seg].points[gpx_selected.i];
+            gpx_doc.set_point(point, w.x(), w.y(), terrain_height_mean_at(w.x(), w.y()));
+            gpx_changed();
+        }
+        return true;
+    };
+    // registered in the capture phase to be executed before the camera handlers which are then stopped
+    canvas3d.addEventListener("mousedown", (e) => {
+        if (e.button == 0 && gpx_pointer_down(false, e.pageX, e.pageY)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }, {capture: true});
+    canvas3d.addEventListener("mousemove", (e) => {
+        if (gpx_pointer_move(e.pageX, e.pageY))
+            e.stopImmediatePropagation();
+    }, {capture: true});
+    canvas3d.addEventListener("touchstart", (e) => {
+        if (e.touches.length == 1 && gpx_pointer_down(true, e.touches[0].pageX, e.touches[0].pageY)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }, {capture: true, passive: false});
+    canvas3d.addEventListener("touchmove", (e) => {
+        if (e.touches.length == 1 && gpx_pointer_move(e.touches[0].pageX, e.touches[0].pageY)) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }, {capture: true, passive: false});
+    for (const type of ["mouseup", "touchend", "touchcancel"])
+        window.addEventListener(type, (e) => {
+            gpx_drag = null;
+            measure_pointer_up(type != "touchcancel");
+        });
+    window.addEventListener("keydown", (e) => {
+        if (gpx_mode != "edit" || !is_editor || ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName))
+            return;
+        if (e.key == "Delete" || e.key == "Backspace") {
+            gpx_delete_selected();
+            e.preventDefault();
+        }
+        if (e.key == "z" && (e.ctrlKey || e.metaKey)) {
+            gpx_undo();
+            e.preventDefault();
+        }
+    });
+
+    // recording ------------------------------------------------------------------------------
+    gpx_recorder.on_point = (p) => {
+        const seg = gpx_record_segment();
+        if (!seg)
+            return;
+        gpx_doc.insert_point(seg, seg.points.length, {...p, ele: terrain_height_mean_at(p.x, p.y)});
+        gpx_changed();
+    };
+    gpx_recorder.on_update = () => gpx_changed();
+    const gpx_toggle_recording = () => {
+        if (gpx_recorder.recording) {
+            gpx_recorder.stop();
+            const seg = gpx_record_segment();
+            if (seg && !seg.points.length)
+                gpx_doc.remove_segment(seg);
+            gpx_record_track_name = null;
+            save();
+            return;
+        }
+        gpx_recorder.max_accuracy_m = +document.getElementById("gpx_max_accuracy").value;
+        gpx_recorder.min_distance_m = +document.getElementById("gpx_min_distance").value;
+        if (!gpx_recorder.start())
+            return;
+        gpx_doc.push_undo();
+        gpx_record_track_name = "Aufnahme " + new Date().toLocaleString("de-DE");
+        gpx_doc.create_track(gpx_record_track_name);
+        // keeps the map around the current position loaded
+        document.getElementById("enable_cam_follow").checked = true;
+    };
+
+    // follow animation -----------------------------------------------------------------------
+    /** @brief places the camera behind the current track position looking along the (smoothed) track direction */
+    const update_follow_camera = () => {
+        gpx_follow.update_requested = false;
+        if (!gpx_follower.length_m) {
+            gpx_follow.playing = false;
+            return;
+        }
+        const now = performance.now();
+        const dt = gpx_follow.last_t ? Math.min((now - gpx_follow.last_t) / 1000, .2) : 0;
+        gpx_follow.last_t = now;
+        if (gpx_follow.playing) {
+            gpx_follow.s += gpx_follow.speed_mps * dt;
+            if (gpx_follow.s >= gpx_follower.length_m) {
+                gpx_follow.s = gpx_follower.length_m;
+                gpx_follow.playing = false;
+            }
+        }
+        const s = gpx_follow.s;
+        const p = gpx_follower.position_at(s);
+        // the direction is taken over the next part of the track to smooth out small zig zags
+        const look_ahead_m = Math.max(40, gpx_follow.speed_mps * 4);
+        const ahead = gpx_follower.position_at(s + look_ahead_m), behind = gpx_follower.position_at(s - 5);
+        let dx = ahead.x - behind.x, dy = ahead.y - behind.y;
+        let len = Math.hypot(dx, dy);
+        if (len < 1e-14)
+            [dx, dy, len] = gpx_follow.dir ? [...gpx_follow.dir, 1] : [0, -1, 1];
+        dx /= len;
+        dy /= len;
+        if (gpx_follow.dir && dt > 0) {
+            const a = 1 - Math.exp(-dt / .8);
+            dx = gpx_follow.dir[0] + a * (dx - gpx_follow.dir[0]);
+            dy = gpx_follow.dir[1] + a * (dy - gpx_follow.dir[1]);
+            len = Math.hypot(dx, dy) || 1;
+            dx /= len;
+            dy /= len;
+        }
+        gpx_follow.dir = [dx, dy];
+
+        const uv_per_m = 1 / GpxUtil.meters_per_uv(p.y);
+        const back_m = 70 * gpx_follow.zoom, height_m = 35 * gpx_follow.zoom, target_ahead_m = 15;
+        const ground = (x, y) => terrain_height_mean_at(x, y) ?? 0;
+        const eye = {x: p.x - dx * back_m * uv_per_m, y: p.y - dy * back_m * uv_per_m};
+        const target = {x: p.x + dx * target_ahead_m * uv_per_m, y: p.y + dy * target_ahead_m * uv_per_m};
+        camera_center.entries[0] = eye.x;
+        camera_center.entries[1] = eye.y;
+        camera_center.entries[2] = Util.m_to_wgs_84_uv(Math.max(ground(eye.x, eye.y), ground(p.x, p.y)) + height_m) * 1.4;
+        // the camera looks along -get_forward_dir(camera_dir, camera_pitch)
+        const vx = target.x - eye.x, vy = target.y - eye.y, vz = Util.m_to_wgs_84_uv(ground(target.x, target.y)) * 1.4 - camera_center.z();
+        camera_dir = Math.atan2(-vx, -vy);
+        if (camera_dir < 0)
+            camera_dir += 2 * Math.PI;
+        camera_pitch = Math.asin(-vz / Math.hypot(vx, vy, vz));
+        draw_requested = true;
+        update_gpx_ui();
+    };
+    /** @param {float} zoom factor for the camera distance, 1 is the default distance */
+    const gpx_set_follow_zoom = (zoom) => {
+        gpx_follow.zoom = Math.min(Math.max(zoom, .25), 8);
+        document.getElementById("gpx_follow_zoom").value = Math.round(Math.log2(gpx_follow.zoom) * 50);
+        gpx_follow.update_requested = true;
+    };
+    // in the follow mode the wheel and pinch change the camera distance instead of moving the camera
+    let gpx_pinch = null;
+    canvas3d.addEventListener("wheel", (e) => {
+        if (gpx_mode != "follow")
+            return;
+        gpx_set_follow_zoom(gpx_follow.zoom * Math.exp(e.deltaY * .002));
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, {capture: true, passive: false});
+    canvas3d.addEventListener("touchstart", (e) => {
+        if (gpx_mode == "follow" && e.touches.length == 2) {
+            gpx_pinch = {dist: Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY), zoom: gpx_follow.zoom};
+            e.stopImmediatePropagation();
+        }
+    }, {capture: true});
+    canvas3d.addEventListener("touchmove", (e) => {
+        if (!gpx_pinch || e.touches.length != 2)
+            return;
+        const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+        gpx_set_follow_zoom(gpx_pinch.zoom * gpx_pinch.dist / Math.max(dist, 1));
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, {capture: true, passive: false});
+    for (const type of ["touchend", "touchcancel"])
+        canvas3d.addEventListener(type, (e) => { if (e.touches.length < 2) gpx_pinch = null; });
+    const gpx_toggle_follow = () => {
+        if (!gpx_follow.playing && gpx_follow.s >= gpx_follower.length_m)
+            gpx_follow.s = 0;
+        gpx_follow.playing = !gpx_follow.playing;
+        gpx_follow.last_t = 0;
+        gpx_follow.update_requested = true;
+        update_gpx_ui();
+    };
+
+    // saving ---------------------------------------------------------------------------------
+    async function save() {
+        if (!is_editor || gpx_doc.parse_error || gpx_saving || gpx_doc.version == gpx_saved_version)
+            return;
+        gpx_saving = true;
+        const version = gpx_doc.version;
+        const text = gpx_doc.serialize();
+        try {
+            const res = await (await fetch(location.origin + "/update_file", {
+                headers: { path: file_path, revision: file_revision },
+                method: "POST",
+                body: text,
+            })).json();
+            if (res.error)
+                throw new Error(res.error);
+            if (res.revision)
+                file_revision = res.revision;
+            gpx_saved_version = version;
+            // changes from others were merged in, only taken if there were no further local changes in the meantime
+            if (res.merged_content && res.merged_content != text && gpx_doc.version == version && !gpx_drag)
+                gpx_reload(res.merged_content);
+            try { localStorage.removeItem(gpx_backup_key); } catch (e) {}
+            gpx_save_state = "gespeichert";
+        } catch (e) {
+            // e.g. no connection while recording, the data is kept locally and saved with the next try
+            try { localStorage.setItem(gpx_backup_key, text); } catch (e) {}
+            gpx_save_state = "nicht gespeichert, lokal gesichert";
+        }
+        gpx_saving = false;
+        update_gpx_ui();
+    }
+    /** @brief takes over changes of the file from other devices (e.g. a recording phone) */
+    async function check_remote_changes() {
+        if (gpx_saving || gpx_drag)
+            return;
+        try {
+            const res = await (await fetch(location.origin + "/check_file_revision", {
+                headers: { path: file_path, revision: file_revision },
+            })).json();
+            if (!res.file_revision)
+                return;
+            if (gpx_doc.version != gpx_saved_version) {
+                await save();   // the server merges both versions
+                return;
+            }
+            file_revision = res.file_revision;
+            gpx_reload(res.file_data);
+        } catch (e) {}
+    }
+
+    // measuring ------------------------------------------------------------------------------
+    /** @type {TrackRenderer} */
+    let measure_renderer = null;
+    // down: position of a pointer down which adds a point on release if it did not move (dragging still moves the camera)
+    const gpx_measure = {type: "distance", points: [], version: 0, drag: null, down: null};
+    let gpx_track_profile = {version: -1, time: 0, html: ""};
+    const measure_changed = () => {
+        gpx_measure.version++;
+        gpx_changed();
+    };
+    /** @returns {Object} document like object with the measure points for the TrackRenderer */
+    const measure_render_doc = () => {
+        const pts = gpx_measure.points;
+        const closed = gpx_measure.type == "area" && pts.length >= 3;
+        return {version: gpx_measure.version, segments: [{kind: gpx_measure.type == "point" ? "wpt" : "trk", points: closed ? [...pts, pts[0]] : pts}]};
+    };
+    const measure_pointer_down = (touch, page_x, page_y) => {
+        const r = canvas3d.getBoundingClientRect();
+        const [view_projection, , , grid_offset_pos] = get_projection_mat(camera_center, canvas3d);
+        const radius = touch ? 28 : 14;
+        let best = -1, best_d = radius;
+        gpx_measure.points.forEach((p, i) => {
+            const s = project_to_screen(view_projection, grid_offset_pos, p.x, p.y);
+            const d = s ? Math.hypot(s.x - (page_x - r.left), s.y - (page_y - r.top)) : Infinity;
+            if (d < best_d) {
+                best_d = d;
+                best = i;
+            }
+        });
+        if (best >= 0) {
+            gpx_measure.drag = best;
+            return true;
+        }
+        gpx_measure.down = {x: page_x, y: page_y, moved: 0};
+        return false;
+    };
+    const measure_pointer_move = (page_x, page_y) => {
+        const w = get_map_drag_start(page_x, page_y);
+        if (w && !isNaN(w.x())) {
+            gpx_measure.points[gpx_measure.drag] = {x: w.x(), y: w.y()};
+            measure_changed();
+        }
+        return true;
+    };
+    /** @param {bool} completed false if the pointer action was cancelled */
+    const measure_pointer_up = (completed) => {
+        const down = gpx_measure.down;
+        gpx_measure.down = null;
+        gpx_measure.drag = null;
+        if (!completed || !down || down.moved > 6 || gpx_mode != "measure")
+            return;
+        const w = get_map_drag_start(down.x, down.y);
+        if (!w || isNaN(w.x()))
+            return;
+        if (gpx_measure.type == "point")
+            gpx_measure.points = [];
+        gpx_measure.points.push({x: w.x(), y: w.y()});
+        measure_changed();
+    };
+    /**
+     * @brief samples the terrain every 5 m along the polyline
+     * @returns {Object} length_m (horizontal), length_3d_m (along the terrain), ascent_m, descent_m, missing (true if heights were not loaded)
+     */
+    const terrain_profile = (points) => {
+        let res = {length_m: 0, length_3d_m: 0, ascent_m: 0, descent_m: 0, missing: false};
+        let prev = null;
+        const add_sample = (x, y) => {
+            const h = terrain_height_mean_at(x, y);
+            res.missing |= h === null;
+            if (prev) {
+                const d = GpxUtil.distance_m(prev, {x: x, y: y});
+                const dh = h !== null && prev.h !== null ? h - prev.h : 0;
+                res.length_3d_m += Math.hypot(d, dh);
+                res.ascent_m += Math.max(dh, 0);
+                res.descent_m += Math.max(-dh, 0);
+            }
+            prev = {x: x, y: y, h: h};
+        };
+        for (let i = 0; i < points.length; ++i) {
+            if (i == 0) {
+                add_sample(points[0].x, points[0].y);
+                continue;
+            }
+            const a = points[i - 1], b = points[i];
+            const d = GpxUtil.distance_m(a, b);
+            res.length_m += d;
+            const steps = Math.min(Math.max(Math.ceil(d / 5), 1), 2000);
+            for (let k = 1; k <= steps; ++k)
+                add_sample(a.x + (b.x - a.x) * k / steps, a.y + (b.y - a.y) * k / steps);
+        }
+        return res;
+    };
+    /** @returns {float} area of the polygon in m^2 (shoelace in the local mercator scale) */
+    const polygon_area_m2 = (points) => {
+        const m_per_uv = GpxUtil.meters_per_uv(points.reduce((s, p) => s + p.y, 0) / points.length);
+        let a = 0;
+        for (let i = 0; i < points.length; ++i) {
+            const p = points[i], q = points[(i + 1) % points.length];
+            a += p.x * q.y - q.x * p.y;
+        }
+        return Math.abs(a) / 2 * m_per_uv * m_per_uv;
+    };
+    const format_length = (m) => m < 1000 ? `${m.toFixed(1)} m` : `${(m / 1000).toFixed(3)} km`;
+    const format_area = (m2) => m2 < 1e4 ? `${m2.toFixed(1)} m²` : m2 < 1e6 ? `${(m2 / 1e4).toFixed(3)} ha (${m2.toFixed(0)} m²)` : `${(m2 / 1e6).toFixed(3)} km²`;
+    const format_height = (h) => h === null ? "nicht geladen" : `${h.toFixed(1)} m`;
+    const profile_html = (p) => `${format_length(p.length_m)}, über Gelände ${format_length(p.length_3d_m)}, ` +
+                                `&#8599; ${p.ascent_m.toFixed(0)} m &#8600; ${p.descent_m.toFixed(0)} m${p.missing ? " (Höhen teilweise nicht geladen)" : ""}`;
+    const measure_results_html = () => {
+        const pts = gpx_measure.points;
+        let lines = [];
+        if (!pts.length)
+            lines.push(is_touch ? "Auf die Karte tippen um Punkte zu setzen" : "Auf die Karte klicken um Punkte zu setzen, Punkte können verschoben werden");
+        else if (gpx_measure.type == "point") {
+            const [lat, lon] = GpxUtil.uv_to_wgs_84(pts[0].x, pts[0].y);
+            lines.push(`${lat.toFixed(6)}, ${lon.toFixed(6)}, Höhe ${format_height(terrain_height_mean_at(pts[0].x, pts[0].y))}`);
+        } else if (gpx_measure.type == "distance") {
+            lines.push(`Strecke: ${profile_html(terrain_profile(pts))}`);
+            lines.push(`Höhe Start ${format_height(terrain_height_mean_at(pts[0].x, pts[0].y))}, Ende ${format_height(terrain_height_mean_at(pts.at(-1).x, pts.at(-1).y))}`);
+        } else if (pts.length < 3) {
+            lines.push("Mindestens 3 Punkte für eine Fläche setzen");
+        } else {
+            lines.push(`Fläche: ${format_area(polygon_area_m2(pts))}, Umfang ${format_length(terrain_profile([...pts, pts[0]]).length_m)}`);
+        }
+        // the track profile is cached as the terrain sampling is expensive for long tracks, refreshed for newly loaded heights
+        if (gpx_track_profile.version != gpx_doc.version || performance.now() - gpx_track_profile.time > 2000) {
+            const tracks = gpx_doc.segments.filter(s => s.kind != "wpt" && s.points.length > 1).map(s => terrain_profile(s.points));
+            gpx_track_profile = {version: gpx_doc.version, time: performance.now(),
+                                 html: tracks.length ? "Track: " + profile_html(tracks.reduce((a, p) => ({length_m: a.length_m + p.length_m, length_3d_m: a.length_3d_m + p.length_3d_m,
+                                       ascent_m: a.ascent_m + p.ascent_m, descent_m: a.descent_m + p.descent_m, missing: a.missing || p.missing}))) : ""};
+        }
+        if (gpx_track_profile.html)
+            lines.push(gpx_track_profile.html);
+        return lines.join("<br>");
+    };
+
+    // ui -------------------------------------------------------------------------------------
+    const gpx_set_mode = (mode) => {
+        if (mode == "follow" && gpx_mode != "follow") {
+            gpx_follower.init(gpx_doc);
+            gpx_follow.s = Math.min(gpx_follow.s, gpx_follower.length_m);
+            gpx_follow.dir = null;
+            gpx_follow.update_requested = true;
+        }
+        if (mode != "follow")
+            gpx_follow.playing = false;
+        if (mode != "edit")
+            gpx_drag = null;
+        gpx_mode = mode;
+        gpx_changed();
+    };
+    function update_gpx_ui() {
+        const set_hidden = (id, hidden) => document.getElementById(id).classList.toggle("gpx_hidden", hidden);
+        for (const b of document.querySelectorAll(".gpx_mode"))
+            b.classList.toggle("active", b.dataset.mode == gpx_mode);
+        set_hidden("gpx_edit_controls", gpx_mode != "edit");
+        set_hidden("gpx_record_controls", gpx_mode != "record");
+        set_hidden("gpx_follow_controls", gpx_mode != "follow");
+        set_hidden("gpx_measure_controls", gpx_mode != "measure");
+        set_hidden("gpx_measure_result", gpx_mode != "measure");
+        if (gpx_mode == "measure")
+            document.getElementById("gpx_measure_result").innerHTML = measure_results_html();
+        document.getElementById("gpx_measure_undo").disabled = !gpx_measure.points.length;
+        document.getElementById("gpx_delete").disabled = !gpx_selected;
+        document.getElementById("gpx_undo").disabled = !gpx_doc.undo_stack.length || gpx_recorder.recording;
+
+        const rec = gpx_recorder;
+        document.getElementById("gpx_record_toggle").textContent = rec.recording ? "Aufnahme beenden" : "Aufnahme starten";
+        document.getElementById("gpx_record_toggle").classList.toggle("active", rec.recording);
+        set_hidden("gpx_average_start", !rec.recording || !!rec.averaging);
+        set_hidden("gpx_average_accept", !rec.averaging);
+        set_hidden("gpx_average_cancel", !rec.averaging);
+
+        document.getElementById("gpx_follow_play").innerHTML = gpx_follow.playing ? "&#10074;&#10074;" : "&#9654;";
+        if (gpx_follower.length_m && document.activeElement?.id != "gpx_follow_progress")
+            document.getElementById("gpx_follow_progress").value = Math.round(gpx_follow.s / gpx_follower.length_m * 1000);
+
+        let status = [];
+        if (gpx_doc.parse_error)
+            status.push("Die Datei ist kein gültiges GPX, Bearbeiten ist deaktiviert");
+        status.push(`${gpx_doc.point_count()} Punkte, ${(gpx_doc.length_m() / 1000).toFixed(2)} km`);
+        if (gpx_save_state)
+            status.push(gpx_save_state);
+        if (gpx_mode == "follow")
+            status.push(`${(gpx_follow.s / 1000).toFixed(2)} / ${(gpx_follower.length_m / 1000).toFixed(2)} km`);
+        if (rec.recording) {
+            const fix = rec.last_fix;
+            status.push(fix ? `GPS ±${fix.coords.accuracy.toFixed(1)} m, gefiltert ±${rec.filter_accuracy_m().toFixed(1)} m` : "Warte auf GPS");
+            status.push(`${rec.fix_count} Messungen (${rec.rejected_count} verworfen)`);
+            if (!rec.wake_lock)
+                status.push("Bildschirm anlassen, sonst stoppt die Aufnahme");
+            const avg = rec.averaging_result();
+            if (rec.averaging)
+                status.push(avg ? `Mittelung: ${avg.n} Messungen, ${avg.duration_s.toFixed(0)} s, ±${avg.precision_m.toFixed(2)} m, Streuung ${avg.scatter_m.toFixed(1)} m`
+                                : "Mittelung: warte auf Messungen");
+        }
+        if (rec.error)
+            status.push(rec.error);
+        document.getElementById("gpx_status").textContent = status.join(" · ");
+    }
+    const setup_gpx_ui = () => {
+        for (const b of document.querySelectorAll(".gpx_mode"))
+            b.addEventListener("click", () => gpx_set_mode(b.dataset.mode));
+        for (const e of document.querySelectorAll(".gpx_editor_only"))
+            e.classList.toggle("gpx_hidden", !is_editor || gpx_doc.parse_error);
+        document.getElementById("gpx_delete").addEventListener("click", gpx_delete_selected);
+        document.getElementById("gpx_undo").addEventListener("click", gpx_undo);
+        document.getElementById("gpx_new_segment").addEventListener("click", () => {
+            gpx_doc.push_undo();
+            gpx_active_segment = gpx_doc.create_track("Track " + (gpx_doc.segments.filter(s => s.kind == "trk").length + 1));
+            gpx_selected = null;
+            document.getElementById("gpx_append_mode").checked = true;
+            gpx_changed();
+        });
+        document.getElementById("gpx_record_toggle").addEventListener("click", gpx_toggle_recording);
+        document.getElementById("gpx_average_start").addEventListener("click", () => gpx_recorder.start_averaging());
+        document.getElementById("gpx_average_accept").addEventListener("click", () => gpx_recorder.finish_averaging());
+        document.getElementById("gpx_average_cancel").addEventListener("click", () => gpx_recorder.cancel_averaging());
+        document.getElementById("gpx_max_accuracy").addEventListener("change", (e) => gpx_recorder.max_accuracy_m = +e.target.value);
+        document.getElementById("gpx_min_distance").addEventListener("change", (e) => gpx_recorder.min_distance_m = +e.target.value);
+        document.getElementById("gpx_follow_play").addEventListener("click", gpx_toggle_follow);
+        document.getElementById("gpx_measure_type").addEventListener("change", (e) => {
+            gpx_measure.type = e.target.value;
+            if (gpx_measure.type == "point")
+                gpx_measure.points = gpx_measure.points.slice(-1);
+            measure_changed();
+        });
+        document.getElementById("gpx_measure_undo").addEventListener("click", () => {
+            gpx_measure.points.pop();
+            measure_changed();
+        });
+        document.getElementById("gpx_measure_clear").addEventListener("click", () => {
+            gpx_measure.points = [];
+            measure_changed();
+        });
+        // measured heights change when more detailed terrain is loaded
+        setInterval(() => { if (gpx_mode == "measure") update_gpx_ui(); }, 2000);
+        document.getElementById("gpx_follow_speed").addEventListener("change", (e) => gpx_follow.speed_mps = e.target.value / 3.6);
+        document.getElementById("gpx_follow_zoom").addEventListener("input", (e) => gpx_set_follow_zoom(2 ** (e.target.value / 50)));
+        document.getElementById("gpx_follow_fov").addEventListener("input", (e) => {
+            gpx_follow.fov_deg = +e.target.value;
+            gpx_follow.update_requested = true;
+        });
+        document.getElementById("gpx_follow_progress").addEventListener("input", (e) => {
+            gpx_follow.s = e.target.value / 1000 * gpx_follower.length_m;
+            gpx_follow.dir = null;
+            gpx_follow.update_requested = true;
+        });
+        update_gpx_ui();
+    };
+    /** @brief places the camera such that the whole track is visible, false if there are no points */
+    const view_whole_track = () => {
+        const points = gpx_doc.segments.flatMap(s => s.points);
+        if (!points.length)
+            return false;
+        const min_x = Math.min(...points.map(p => p.x)), max_x = Math.max(...points.map(p => p.x));
+        const min_y = Math.min(...points.map(p => p.y)), max_y = Math.max(...points.map(p => p.y));
+        const center = {x: .5 * (min_x + max_x), y: .5 * (min_y + max_y)};
+        const m_per_uv = GpxUtil.meters_per_uv(center.y);
+        const dist_m = Math.max(800, 1.3 * Math.max(max_x - min_x, max_y - min_y) * m_per_uv);
+        // looking north and down, the camera clamp lifts the camera if the terrain is higher than assumed
+        camera_dir = 0;
+        camera_pitch = .9;
+        camera_center = Vec4(center.x, center.y + dist_m * Math.cos(camera_pitch) / m_per_uv, Util.m_to_wgs_84_uv(800 + dist_m * Math.sin(camera_pitch)) * 1.4);
+        return true;
+    };
+    const draw_track = (view_projection, grid_offset_pos) => {
+        if (!track_renderer)
+            return;
+        track_renderer.update(gpx_doc);
+        const marker = gpx_mode == "follow" && gpx_follower.length_m ? gpx_follower.position_at(gpx_follow.s)
+                     : gpx_recorder.recording && gpx_recorder.filter ? gpx_recorder.filter : null;
+        const draw_params = {
+            view_proj: view_projection.entries,
+            grid_offset_pos: {x: grid_offset_pos.lat, y: grid_offset_pos.lon},
+            cam_pos: [camera_center.x() - grid_offset_pos.lat, camera_center.y() - grid_offset_pos.lon, camera_center.z()],
+            viewport: [canvas3d.width, canvas3d.height],
+            pixel_angle: 2 * Math.tan(camera_fov_deg() / 2 * Math.PI / 180) / canvas3d.height,
+            lod_factor: mesh_lod_factor(+document.getElementById("triangle_resolution").value),
+            max_mesh_level: virtual_height_map.max_level + heightmap_tile_res_log2 - mesh_res_log2,
+            virtual_height_map: virtual_height_map,
+            show_handles: gpx_mode == "edit",
+            selected_index: gpx_selected ? track_renderer.global_index(gpx_selected.seg, gpx_selected.i) : -1,
+            handle_size: is_touch ? 22 : 14,
+            marker: marker,
+        };
+        track_renderer.draw(draw_params);
+        if (gpx_mode == "measure" && gpx_measure.points.length) {
+            measure_renderer.update(measure_render_doc());
+            measure_renderer.draw({...draw_params, show_handles: true, selected_index: -1, marker: null});
+        }
+    };
+
+    // ----------------------------------------------------------------------------------------
     // init section (contains also the shader code)
     // ----------------------------------------------------------------------------------------
 
@@ -706,6 +1543,8 @@
 
         let c = Util.wgs_84_to_uv(47.80177, 12.89798);
         camera_center = Vec4(c[0], c[1], Util.m_to_wgs_84_uv(700 * 1.4));
+        if (view_whole_track())
+            c = [camera_center.x(), camera_center.y()];
 
         // linalg_tests();
         const is_mobile = 'ontouchstart' in document.documentElement;
@@ -720,6 +1559,7 @@
         virtual_height_map.tile_data_callback = (tile, data) => {
             let min = Infinity, max = -Infinity;
             let grid = new Float32Array(height_grid_res * height_grid_res).fill(-Infinity);
+            let grid_mean = new Float32Array(height_grid_res * height_grid_res);
             for (let i = 0; i < data.length; i += 4) {
                 // same decoding as decode_height() in the shader, empty pixels are decoded to 0
                 const h = data[i] | data[i + 1] | data[i + 2] | data[i + 3] ? data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 : 0;
@@ -728,9 +1568,11 @@
                 const p = i >> 2;
                 const g = ((p >> 8) >> height_grid_shift) * height_grid_res + ((p & 255) >> height_grid_shift);
                 grid[g] = Math.max(grid[g], h);
+                grid_mean[g] += h / (1 << (2 * height_grid_shift));
             }
             tile.height_range = [min, max];
             tile.height_grid = grid;
+            tile.height_grid_mean = grid_mean;
         };
         const w_street = 1 << Util.max_tile_level;   // deep enough for the most detailed map layers
         virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
@@ -943,6 +1785,25 @@
             terrain: create_pipeline(gl_context, vs, fs),
             idx: create_pipeline(gl_context, vs, fs_id),
         };
+        track_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+        measure_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+        measure_renderer.track_color = [.1, .45, 1, 1];
+        measure_renderer.track_outline = [.02, .15, .4, 1];
+
+        // a version which could not be saved (e.g. recorded without connection) is offered for restore
+        try {
+            const backup = localStorage.getItem(gpx_backup_key);
+            if (backup && is_editor && backup != gpx_doc.serialize()) {
+                if (confirm("Es gibt eine lokal gesicherte Version dieser Datei, die nicht gespeichert werden konnte. Wiederherstellen?"))
+                    gpx_doc.load(backup);   // differs from the saved version, so it is saved by the next autosave
+                else
+                    localStorage.removeItem(gpx_backup_key);
+            }
+        } catch (e) {}
+        setup_gpx_ui();
+        if (is_editor)
+            setInterval(save, 5000);
+        setInterval(check_remote_changes, 5000);
 
         // starting the endless loop for updating the image cache
         setInterval(draw_scene, 20); 
@@ -996,7 +1857,7 @@
         const height_multiplier = Math.max(1, 500000 * camera_center.z());
         const near = 1e-10 * height_multiplier;
         const far = .001 * height_multiplier;
-        camera_perspective = PerspectiveFov(60, displayWidth / displayHeight, near , far);
+        camera_perspective = PerspectiveFov(camera_fov_deg(), displayWidth / displayHeight, near , far);
         const screen_size_factor = camera_center.z() * 5e-4;
         camera_orthographic = Orthographic(displayHeight * screen_size_factor, displayWidth * screen_size_factor, near, far);
         const base_width = Util.m_to_wgs_84_uv(100 * Math.max(1, .0005 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1700))); // base width of a detail tile given in meters
@@ -1150,12 +2011,13 @@
         if (requestMethod)
             requestMethod.call(element);
     };
-    window.addEventListener("resize", async () => {
-        let height = String(document.documentElement.clientHeight - document.getElementById("header").clientHeight) + "px";
-        canvas3d.style.height = height;
+    // also triggered when the header changes its height (e.g. wrapping on small screens)
+    new ResizeObserver(() => {
+        if (!gl_context)
+            return;
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         draw_requested = true;
-    });
+    }).observe(canvas3d);
 </script>
 
 </html>

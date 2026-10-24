@@ -672,6 +672,8 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/lin_alg.js")([&ling_alg_js](){crow::response r(ling_alg_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string virtual_texture_js = crow::mustache::load_text("virtual_texture.js");
     CROW_ROUTE(app, "/virtual_texture.js")([&virtual_texture_js](){crow::response r(virtual_texture_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string gpx_track_js = crow::mustache::load_text("gpx_track.js");
+    CROW_ROUTE(app, "/gpx_track.js")([&gpx_track_js](){crow::response r(gpx_track_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string qr_js = crow::mustache::load_text("qrcode.min.js");
     CROW_ROUTE(app, "/qrcode.min.js")([&qr_js](){crow::response r(qr_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string canvas_renderer_js = crow::mustache::load_text("stl_viewer/CanvasRenderer.js");

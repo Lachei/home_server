@@ -582,6 +582,7 @@ const Tile = () => {
         data_uploaded_to_gpu: false,
         height_range: null,     // [min, max] height in meters, only filled for heightmap tiles
         height_grid: null,      // Float32Array with the max height of each 4x4 texel block in meters, only filled for heightmap tiles
+        height_grid_mean: null, // Float32Array with the mean height of each 4x4 texel block in meters, only filled for heightmap tiles
 
         // member functions
         /**
@@ -653,6 +654,7 @@ const Tile = () => {
             this.data_uploaded_to_gpu = false;
             this.height_range = null;
             this.height_grid = null;
+            this.height_grid_mean = null;
         }
     };
 };
