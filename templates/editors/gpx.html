@@ -6,7 +6,7 @@
     <meta http-equiv="x-ua-compatible" content="ie=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta charset="utf-8">
-    <title>Gpx Editor</title>
+    <title>{{file_name}}</title>
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
@@ -21,7 +21,7 @@
             overflow: hidden;
         }
 
-        /* the header takes the height it needs, the map gets the rest of the visible viewport (dvh excludes the mobile url bar) */
+        /* the map fills the visible viewport (dvh excludes the mobile url bar), the header floats over it */
         body {
             display: flex;
             flex-direction: column;
@@ -35,7 +35,7 @@
 
         #save {
             border: none;
-            background-color: white;
+            background-color: transparent;
             cursor: pointer;
         }
 
@@ -48,11 +48,6 @@
         .fill {
             width: 100%;
             height: 100%;
-        }
-
-        #header {
-            flex: none;
-            background-color: white;
         }
 
         #content {
@@ -70,10 +65,10 @@
             display: block;
         }
 
-        .gpx_panel {
+        /* panels floating over the map */
+        .float_panel {
             position: absolute;
             left: 8px;
-            bottom: 8px;
             max-width: calc(100% - 16px);
             box-sizing: border-box;
             display: flex;
@@ -85,8 +80,38 @@
             box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
         }
 
-        .gpx_panel * {
+        .float_panel * {
             font-size: 15px;
+        }
+
+        .gpx_panel {
+            bottom: 8px;
+        }
+
+        #header {
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            /* without it the width would be limited to the space right of left: 50% */
+            width: max-content;
+            max-height: calc(100% - 16px);
+            overflow-y: auto;
+        }
+
+        #header.collapsed #header_controls {
+            display: none;
+        }
+
+        #title {
+            font-weight: bold;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+        }
+
+        #open_editor {
+            text-decoration: none;
         }
 
         .gpx_row {
@@ -96,7 +121,7 @@
             gap: 6px;
         }
 
-        .gpx_panel button {
+        .float_panel button {
             min-height: 2.2em;
             padding: 0 .8em;
             border: 1px solid #bbb;
@@ -105,17 +130,17 @@
             cursor: pointer;
         }
 
-        .gpx_panel button.active {
+        .float_panel button.active {
             border-color: #e8471c;
             background-color: #e8471c;
             color: white;
         }
 
-        .gpx_panel button:disabled {
+        .float_panel button:disabled {
             opacity: .4;
         }
 
-        .gpx_panel input[type=number] {
+        .float_panel input[type=number] {
             width: 4em;
         }
 
@@ -131,48 +156,51 @@
 </head>
 
 <body>
-    <div id="header">
-        {{#editor}}
-        <center id="title">GPX Editor</center>
-        <button id="save" type="button" onclick="save();">&#128190;</button>
-        <select id="layer_select" onchange="virtual_street_map.drop_all_tiles();">
-            <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
-            <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
-            <option base_url="sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/" swap_xy="true" ending=".png" detail_switch_level="19">basemap.de</option>
-            <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
-            <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
-            <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" ending="?blankTile=false" detail_switch_level="22">Satellit</option>
-            <option base_url="intergeo33.bayernwolke.de/betty/atkis/" ending="" detail_switch_level="18">Straßen bayern</option>
-            <option base_url="intergeo37.bayernwolke.de/betty/g_atkis3d/" ending="" detail_switch_level="18">Straßen bayern 3d</option>
-            <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="18" col_corr_b=".85">Satellit bayern</option>
-            <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
-            <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="14">Gelände relief</option>
-        </select>
-        <select id="height_source" title="Höhendaten" onchange="virtual_height_map.drop_all_tiles(); draw_requested = true;">
-            <option value="mapterhorn">Höhe Mapterhorn</option>
-            <option value="aws">Höhe AWS Terrarium</option>
-        </select>
-        <input id="enable_tile_update" type="checkbox" checked onchange="draw_requested = true;">
-        <label for="enable_tile_update">Karten tiles nachladen</label>
-        <input id="triangle_resolution" type="number" min="10" max="1000" value="80">
-        <label for="triangle_resolution">Geometrieauflösung</label>
-        <input id="enable_cam_follow" type="checkbox">
-        <label for="enable_cam_follow">Kamera folgen</label>
-        <input id="enable_fpv_cam" type="checkbox">
-        <label for="enable_fpv_cam">Erste person navigation</label>
-        <input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_requested = true;">
-        <label for="camera_interpolation">Projektion(3D.o.2D)</label>
-        <input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">
-        <label for="enable_parcell_map">Parzellkarte anzeigen</label>
-        <input id="enable_street_name_overlay" onchange="draw_requested = true;" type="checkbox">
-        <label for="enable_street_name_overlay">Straßen anzeigen</label>
-        <button type="button" onclick="request_full_screen();">Vollbild</button>
-        {{/editor}}
-    </div>
     <div id="content">
         <div id="preview" class="preview">
             <canvas id="canvas3d" class="fill"></canvas>
-            <div id="gpx_panel" class="gpx_panel">
+            <div id="header" class="float_panel">
+                <div class="gpx_row">
+                    <button id="header_toggle" type="button" title="Einstellungen ein-/ausklappen" aria-expanded="true">&#9776;</button>
+                    <span id="title">{{file_name}}</span>
+                    {{#editor}}
+                    <button id="save" type="button" title="Speichern" onclick="save();">&#128190;</button>
+                    {{/editor}}
+                    {{^editor}}
+                    <a id="open_editor" href="?edit=true" title="Bearbeiten">&#9997;</a>
+                    {{/editor}}
+                </div>
+                <div id="header_controls" class="gpx_row">
+                    <select id="layer_select" onchange="virtual_street_map.drop_all_tiles();">
+                        <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
+                        <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
+                        <option base_url="sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/" swap_xy="true" ending=".png" detail_switch_level="19">basemap.de</option>
+                        <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
+                        <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
+                        <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" ending="?blankTile=false" detail_switch_level="22">Satellit</option>
+                        <option base_url="intergeo31.bayernwolke.de/betty/g_satdop40_komplett/" ending="" detail_switch_level="19" col_corr_b=".85">Satellit bayern</option>
+                        <option base_url="intergeo37.bayernwolke.de/betty/c_g_hist/" ending="" detail_switch_level="18">Historisch bayern</option>
+                    </select>
+                    <select id="height_source" title="Höhendaten" onchange="virtual_height_map.drop_all_tiles(); draw_requested = true;">
+                        <option value="mapterhorn">Höhe Mapterhorn</option>
+                        <option value="aws">Höhe AWS Terrarium</option>
+                    </select>
+                    <label><input id="enable_tile_update" type="checkbox" checked onchange="draw_requested = true;">Karten tiles nachladen</label>
+                    <label><input id="triangle_resolution" type="number" min="10" max="1000" value="80">Geometrieauflösung</label>
+                    <label><input id="enable_cam_follow" type="checkbox">Kamera folgen</label>
+                    <label><input id="enable_fpv_cam" type="checkbox">Erste person navigation</label>
+                    <label><input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_requested = true;">Projektion(3D.o.2D)</label>
+                    <label><input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">Parzellkarte anzeigen</label>
+                    <label><input id="enable_street_name_overlay" onchange="draw_requested = true;" type="checkbox">Straßen anzeigen</label>
+                    <label><input id="enable_contours" type="checkbox" onchange="draw_requested = true;">Höhenlinien</label>
+                    <label>alle <input id="contour_interval" type="number" min="1" max="1000" value="20" oninput="draw_requested = true;"> m</label>
+                    <label><input id="enable_help_lines" type="checkbox" onchange="help_line_ref = null; draw_requested = true;">Hilfslinien</label>
+                    <label>Winkel <input id="help_line_angle" type="range" min="-90" max="90" value="0" oninput="help_line_ref = null; draw_requested = true;">&deg;</label>
+                    <label>Abstand <input id="help_line_distance" type="number" min="1" value="1000" oninput="help_line_ref = null; draw_requested = true;"> m</label>
+                    <button type="button" onclick="request_full_screen();">Vollbild</button>
+                </div>
+            </div>
+            <div id="gpx_panel" class="float_panel gpx_panel">
                 <div class="gpx_row">
                     <button type="button" class="gpx_mode" data-mode="view">Ansehen</button>
                     <button type="button" class="gpx_mode gpx_editor_only" data-mode="edit">Bearbeiten</button>
@@ -332,6 +360,7 @@
             yDel = 0;
             break;
         case "rotate":
+            auto_heading_paused_until = performance.now() + auto_heading_pause_ms;
             const yaw = xDel * cam_rot_speed * 2;
             camera_dir -= yaw;
             if (camera_dir > 2 * Math.PI) camera_dir -= 2 * Math.PI;
@@ -596,6 +625,15 @@
     };
 
     let draw_requested = true;
+    // while following the own position the camera turns into the direction of travel, a manual rotation pauses this
+    const auto_heading_min_speed_mps = 1;       // below the direction of the filtered velocity is mostly noise
+    const auto_heading_time_s = 1.5;            // time constant of the smooth turn
+    const auto_heading_pause_ms = 10000;        // pause after a manual rotation
+    let auto_heading_paused_until = 0;
+    let auto_heading_last_t = null;
+    // one help line passes through this uv position, its latitude converts the line distance to uv. Set when the
+    // lines are enabled or changed, otherwise the lines would move with the camera
+    let help_line_ref = null;
     let drawing_active = false;
     // only one readback of the tile id and depth buffers is in flight at a time, otherwise the download buffers would be
     // written again by newer frames before the fenced data is read (causes pipeline stalls on getBufferSubData)
@@ -611,7 +649,20 @@
             if (d > cam_dist * 5e-4)
                 draw_requested = true;
         }
+        const auto_heading_t = performance.now();
         if (document.getElementById("enable_cam_follow").checked && own_pos) {
+            const v = own_position.velocity_mps();
+            if (v && Math.hypot(v.x, v.y) > auto_heading_min_speed_mps && auto_heading_t > auto_heading_paused_until && auto_heading_last_t !== null) {
+                // the camera looks along -get_forward_dir(camera_dir, camera_pitch), turned along the shorter way
+                const target_dir = Math.atan2(-v.x, -v.y);
+                const diff = ((target_dir - camera_dir) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+                const dt = Math.min((auto_heading_t - auto_heading_last_t) / 1000, .2);
+                if (Math.abs(diff) > 1e-4) {
+                    camera_dir += diff * (1 - Math.exp(-dt / auto_heading_time_s));
+                    camera_dir = (camera_dir % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+                    draw_requested = true;
+                }
+            }
             const interp_factor = .05;
             let pre_x = camera_center.x();
             let pre_y = camera_center.y();
@@ -625,6 +676,7 @@
             camera_center.entries[1] = interp_factor * (own_pos.y + f.y()) + (1 - interp_factor) * camera_center.y();
             draw_requested |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
         }
+        auto_heading_last_t = auto_heading_t;
         if (gpx_mode == "follow" && (gpx_follow.playing || gpx_follow.update_requested))
             update_follow_camera();
         // checked every tick as finer height data might have been loaded below the camera
@@ -685,6 +737,26 @@
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
             } else {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
+            }
+            if (program.uniform_locations.contour_interval) {
+                const interval = +document.getElementById("contour_interval").value;
+                gl.uniform1f(program.uniform_locations.contour_interval, document.getElementById("enable_contours").checked && interval > 0 ? interval : 0);
+            }
+            if (program.uniform_locations.help_lines) {
+                const distance_m = +document.getElementById("help_line_distance").value;
+                if (document.getElementById("enable_help_lines").checked && distance_m > 0) {
+                    // the angle is the compass direction of the lines, 0 gives lines along the meridians, 90 along the parallels.
+                    // The distance in uv is exact at the latitude of the reference position
+                    if (!help_line_ref)
+                        help_line_ref = {x: camera_center.x(), y: camera_center.y()};
+                    const angle = +document.getElementById("help_line_angle").value * Math.PI / 180;
+                    const dir = [Math.sin(angle), -Math.cos(angle)];   // uv y points south
+                    const spacing = distance_m / GpxUtil.meters_per_uv(help_line_ref.y);
+                    const phase = (v) => v - Math.floor(v);
+                    gl.uniform4f(program.uniform_locations.help_lines, dir[0], dir[1], spacing, 0);
+                    gl.uniform1f(program.uniform_locations.help_lines_phase, phase((-dir[1] * (grid_offset_pos.lat - help_line_ref.x) + dir[0] * (grid_offset_pos.lon - help_line_ref.y)) / spacing));
+                } else
+                    gl.uniform4f(program.uniform_locations.help_lines, 0, 0, 0, 0);
             }
             // drawing all mesh tiles with a single instanced draw call
             gl.bindBufferBase(gl.UNIFORM_BUFFER, mesh_tiles_binding, mesh_tiles_buffer);
@@ -1396,6 +1468,8 @@
 
     // ui -------------------------------------------------------------------------------------
     const gpx_set_mode = (mode) => {
+        if ((mode == "edit" || mode == "record") && (!is_editor || gpx_doc.parse_error))
+            return;
         if (mode == "follow" && gpx_mode != "follow") {
             gpx_follower.init(gpx_doc);
             gpx_follow.s = Math.min(gpx_follow.s, gpx_follower.length_m);
@@ -1693,6 +1767,9 @@
         uniform vec2 grid_offset_pos;
         uniform vec4 color_correction;
         uniform int parcell_map_enabled; // 0->disabled, enabled else
+        uniform float contour_interval;     // height difference between contour lines in m, 0 disables them
+        uniform vec4 help_lines;            // xy: unit direction of the lines in uv, z: line distance in uv (0 disables them), w: unused
+        uniform float help_lines_phase;     // phase of grid_offset_pos, computed in double precision on the cpu
         ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
         ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
         ${Util.glsl_virtual_texture_uniforms("overlaymap", virtual_overlay_map)}
@@ -1705,6 +1782,14 @@
         ${Util.glsl_get_tile_index()}
 
         layout (location = 0) out vec4 out_col;
+
+        // coverage of anti aliased lines at the integer values of c with a width of px pixels, faded out if they get too dense
+        float line_coverage(float c, float px) {
+            float w = max(fwidth(c), 1e-7);
+            float d = abs(fract(c + .5) - .5) / w;
+            return clamp(px * .5 + .5 - d, 0., 1.) * (1. - smoothstep(.15, .35, w));
+        }
+
         void main(void) {
             // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
             //     out_col = vec4(1., 0., 0., 1.);
@@ -1759,7 +1844,19 @@
             vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
             float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
             out_col = vec4(surface_col.xyz, 1) * nl;
-            // out_col = mix(out_col, vec4(1, .5, 0, 1), pow(1. - clamp(abs(height_m - floor(height_m / 10.) * 10. - 1.), 0., 1.), 16.));
+            if (contour_interval > 0.) {
+                // every 5th line is drawn thicker, the per fragment height is used as the interpolated vertex height is too coarse
+                float c = d_info.x / contour_interval;
+                float contour = max(line_coverage(c, 1.), line_coverage(c / 5., 2.));
+                out_col.xyz = mix(out_col.xyz, vec3(.85, .1, .05), contour * .8);
+            }
+            if (help_lines.z > 0.) {
+                // parallel lines, web mercator is conformal so angles in uv are the angles on the ground
+                vec2 dir = help_lines.xy;
+                float across = dot(loc_pos, vec2(-dir.y, dir.x)) / help_lines.z + help_lines_phase;
+                float help = line_coverage(across, 1.5);
+                out_col.xyz = mix(out_col.xyz, vec3(.1, .3, .9), help * .8);
+            }
             // float mist = min(pow((gl_FragCoord.z / gl_FragCoord.w), .4) * 10., 1.);
             // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33))) * 1.5;
             // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
@@ -1809,6 +1906,9 @@
                     depth_offset: gl_context.getUniformLocation(pipeline, 'depth_offset'),
                     color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
                     parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
+                    contour_interval: gl_context.getUniformLocation(pipeline, 'contour_interval'),
+                    help_lines: gl_context.getUniformLocation(pipeline, 'help_lines'),
+                    help_lines_phase: gl_context.getUniformLocation(pipeline, 'help_lines_phase'),
                     virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
                     virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
                     virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
@@ -2095,7 +2195,23 @@
         if (requestMethod)
             requestMethod.call(element);
     };
-    // also triggered when the header changes its height (e.g. wrapping on small screens)
+    // the header settings can be collapsed to free the map, the state is remembered per browser
+    (() => {
+        const header = document.getElementById("header");
+        const toggle = document.getElementById("header_toggle");
+        const set_collapsed = (collapsed) => {
+            header.classList.toggle("collapsed", collapsed);
+            toggle.setAttribute("aria-expanded", String(!collapsed));
+        };
+        let stored = null;
+        try { stored = localStorage.getItem("gpx_header_collapsed"); } catch (e) {}
+        set_collapsed(stored !== null ? stored == "true" : matchMedia("(max-width: 600px)").matches);
+        toggle.addEventListener("click", () => {
+            const collapsed = !header.classList.contains("collapsed");
+            set_collapsed(collapsed);
+            try { localStorage.setItem("gpx_header_collapsed", String(collapsed)); } catch (e) {}
+        });
+    })();
     new ResizeObserver(() => {
         if (!gl_context)
             return;

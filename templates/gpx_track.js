@@ -464,6 +464,10 @@ const PositionFilter = () => {
         speed_mps: function () {
             return this.kf ? Math.hypot(this.kf.axes[0].v, this.kf.axes[1].v) : 0;
         },
+        /** @returns {{x: float, y: float}} filtered velocity in m/s along the uv axes (x east, y south), null without fix */
+        velocity_mps: function () {
+            return this.kf ? {x: this.kf.axes[0].v, y: this.kf.axes[1].v} : null;
+        },
     };
 };
 
