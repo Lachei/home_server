@@ -35,6 +35,11 @@ const map_provider_type = 0x12392452;
 
 // const declarations for settings
 const max_loading_tiles = 32;           // max tiles per virtual map which are downloaded at the same time
+// downloads which neither finished nor failed after this time are treated as failed. Some browsers (e.g. chrome mobile)
+// stall requests without an error, the stuck tiles would otherwise block all loading slots forever
+const tile_load_timeout_ms = 15000;
+// decode() does not always resolve (e.g. chrome mobile under memory pressure), the image is then used undecoded
+const tile_decode_timeout_ms = 2000;
 const coarse_level_priority_ms = 1000.;   // a tile one level coarser is kept like a tile which was used this much more recently
 // urls which could not be loaded are retried with exponential backoff. Failures are often not permanent
 // (e.g. the browser cancels requests when too many tiles are requested at once), so the first retries are quick
@@ -263,10 +268,21 @@ const VirtualMap = () => {
             // limiting the running downloads: while the camera moves, most tiles requested at once would not be needed
             // anymore when their download finished and would be canceled, which is expensive in the browser
             let loading = 0;
-            for (const cascade of this.cascades)
-                for (const tile of cascade.tiles)
-                    if (tile.is_initialized() && !tile.data_uploaded_to_gpu)
-                        ++loading;
+            for (let c = 0; c < this.cascades.length; ++c) {
+                const tiles = this.cascades[c].tiles;
+                for (let i = 0; i < tiles.length; ++i) {
+                    const tile = tiles[i];
+                    if (!tile.is_initialized() || tile.data_uploaded_to_gpu)
+                        continue;
+                    if (request_time - tile.load_start > tile_load_timeout_ms) {
+                        const failed = this.failed_urls.get(String(tile.url));
+                        this.failed_urls.set(String(tile.url), {count: failed ? failed.count + 1 : 1, time: request_time});
+                        this.drop_tile_at_index(i, c);
+                        continue;
+                    }
+                    ++loading;
+                }
+            }
             for (const n of needed) {
                 if (loading >= max_loading_tiles)
                     break;
@@ -631,6 +647,7 @@ const Tile = () => {
         cascade: 0,             // index of the cascade of the virtual map storing this tile
         lookup_table_string: "",
         last_use: 0,
+        load_start: 0,          // time the download of the tile was started
         url: null,              // url or array of urls the tile is loaded from
         /** @type{Image} */
         image: null,
@@ -658,6 +675,7 @@ const Tile = () => {
             this.url = tile_url;
             this.lookup_table_string = CoordinateMappings.coords_to_lookup_string(tile_x, tile_y, width);
             this.last_use = Date.now();
+            this.load_start = this.last_use;
             if (Array.isArray(tile_url)) {
                 this.images = [];
                 this.loaded = Array(tile_url.length).fill(false);
@@ -684,7 +702,12 @@ const Tile = () => {
         load_image: function (img, url, still_needed, done) {
             img.crossOrigin = 'anonymous';
             // a failed decode() is no load error, drawImage then decodes synchronously
-            img.onload = () => img.decode().catch(() => {}).then(() => { if (still_needed()) done(true); });
+            img.onload = () => {
+                let finished = false;
+                const finish = () => { if (!finished && still_needed()) done(true); finished = true; };
+                img.decode().catch(() => {}).then(finish);
+                setTimeout(finish, tile_decode_timeout_ms);
+            };
             img.onerror = () => { if (still_needed()) done(false); };
             img.src = url;
         },
@@ -701,6 +724,7 @@ const Tile = () => {
             this.url = null;
             this.lookup_table_string = "";
             this.last_use = 0;
+            this.load_start = 0;
             if (this.image) {
                 this.image.src = "";
                 this.image = null;
