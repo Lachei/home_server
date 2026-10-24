@@ -416,9 +416,16 @@ const VirtualMap = () => {
                         for (let image of tile.images)
                             this.image_canvas_context.drawImage(image, 0, 0);
                     } else {
-                        if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
-                            console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
-                        this.image_canvas_context.drawImage(tile.image, 0, 0);
+                        // larger images (e.g. 512 pixel tiles of the parent level) are cut with the url fragment #sub=x,y in image pixels,
+                        // the sub image is copied without scaling as encoded data (heights) must not be interpolated
+                        const sub = /#sub=(\d+),(\d+)$/.exec(String(tile.url));
+                        if (sub)
+                            this.image_canvas_context.drawImage(tile.image, +sub[1], +sub[2], this.tile_width, this.tile_height, 0, 0, this.tile_width, this.tile_height);
+                        else {
+                            if (tile.image.width != this.tile_width || tile.image.height != this.tile_height)
+                                console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
+                            this.image_canvas_context.drawImage(tile.image, 0, 0);
+                        }
                     }
                     let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
                     if (this.tile_data_callback)

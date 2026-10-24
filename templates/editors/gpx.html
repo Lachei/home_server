@@ -138,6 +138,7 @@
         <select id="layer_select" onchange="virtual_street_map.drop_all_tiles();">
             <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
             <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
+            <option base_url="sgx.geodatenzentrum.de/wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR/" swap_xy="true" ending=".png" detail_switch_level="19">basemap.de</option>
             <option base_url="maps.refuges.info/hiking/" ending=".png" detail_switch_level="19">OpenHiking</option>
             <option base_url="c.tile-cyclosm.openstreetmap.fr/cyclosm/" ending=".png" detail_switch_level="20">CyclOSM</option>
             <option base_url="server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" swap_xy="true" ending="?blankTile=false" detail_switch_level="22">Satellit</option>
@@ -147,9 +148,13 @@
             <option base_url="intergeo37.bayernwolke.de/betty/c_hist/" ending="" detail_switch_level="14">Historisch bayern</option>
             <option base_url="intergeo36.bayernwolke.de/betty/c_dgm_relief/" ending="" detail_switch_level="14">Gelände relief</option>
         </select>
+        <select id="height_source" title="Höhendaten" onchange="virtual_height_map.drop_all_tiles(); draw_requested = true;">
+            <option value="mapterhorn">Höhe Mapterhorn</option>
+            <option value="aws">Höhe AWS Terrarium</option>
+        </select>
         <input id="enable_tile_update" type="checkbox" checked onchange="draw_requested = true;">
         <label for="enable_tile_update">Karten tiles nachladen</label>
-        <input id="triangle_resolution" type="number" min="10" max="1000" value="400">
+        <input id="triangle_resolution" type="number" min="10" max="1000" value="80">
         <label for="triangle_resolution">Geometrieauflösung</label>
         <input id="enable_cam_follow" type="checkbox">
         <label for="enable_cam_follow">Kamera folgen</label>
@@ -256,7 +261,11 @@
     let virtual_height_map = null;
     let virtual_street_map = null;
     let virtual_overlay_map = null;
-    let cur_gps_pos = null;
+    // own position from the gps fixes and the inertial sensors of the phone
+    const own_position = PositionFilter();
+    const own_motion = MotionSensor();
+    own_motion.on_sample = (t, acc, stationary) => own_position.imu_sample(t, acc, stationary);
+    let own_position_drawn = null;  // own position of the last frame, the scene is redrawn if it moved visibly
     const dist = (x1, y1, x2, y2) => {let x = x2 - x1, y = y2 - y1; return Math.sqrt(x * x + y * y);}
     const get_map_drag_start = (x, y) => {
         const clip_x = (x - canvas3d.getBoundingClientRect().x) / canvas3d.getBoundingClientRect().width * 2 - 1;
@@ -594,16 +603,26 @@
     let readback_skipped = false;   // a frame was drawn without readback, has to be redrawn after the pending readback is done
     async function draw_scene() {
         draw_requested |= camera_updated;
-        if (document.getElementById("enable_cam_follow").checked && cur_gps_pos) {
+        const own_pos = own_position.position();
+        if (own_pos) {
+            // the position is extrapolated between the gps fixes, redraw if it moved about a pixel
+            const d = own_position_drawn ? Math.hypot(own_pos.x - own_position_drawn.x, own_pos.y - own_position_drawn.y) : Infinity;
+            const cam_dist = Math.hypot(own_pos.x - camera_center.x(), own_pos.y - camera_center.y(), camera_center.z());
+            if (d > cam_dist * 5e-4)
+                draw_requested = true;
+        }
+        if (document.getElementById("enable_cam_follow").checked && own_pos) {
             const interp_factor = .05;
             let pre_x = camera_center.x();
             let pre_y = camera_center.y();
             let f = get_forward_dir(camera_dir, camera_pitch);
             f.entries[2] = Math.max(.1, f.z());
             f.normalize();
-            f.mul(camera_center.z() / f.z());
-            camera_center.entries[0] = interp_factor * (cur_gps_pos.lat + f.x()) + (1 - interp_factor) * camera_center.x();
-            camera_center.entries[1] = interp_factor * (cur_gps_pos.lon + f.y()) + (1 - interp_factor) * camera_center.y();
+            // the view ray through the screen center has to hit the position on the terrain, not at height 0
+            const ground_z = Util.m_to_wgs_84_uv(terrain_height_mean_at(own_pos.x, own_pos.y) ?? 0) * 1.4;
+            f.mul(Math.max(camera_center.z() - ground_z, 0) / f.z());
+            camera_center.entries[0] = interp_factor * (own_pos.x + f.x()) + (1 - interp_factor) * camera_center.x();
+            camera_center.entries[1] = interp_factor * (own_pos.y + f.y()) + (1 - interp_factor) * camera_center.y();
             draw_requested |= Math.abs(pre_x - camera_center.x()) > 1e-7 || Math.abs(pre_y - camera_center.y()) > 1e-8; 
         }
         if (gpx_mode == "follow" && (gpx_follow.playing || gpx_follow.update_requested))
@@ -616,6 +635,7 @@
         drawing_active = true;
         draw_requested = false;
         camera_updated = false;
+        own_position_drawn = own_position.position();
 
         // creating the view matrix -------------------------------------------
         const [view_projection, view, base_width, grid_offset_pos, , , eye] = get_projection_mat(camera_center, canvas3d);
@@ -764,12 +784,20 @@
         console.log(`checking tiles took ${performance.now() - start} milli`);
         let decoded_tiles = Util.int32_to_tile_id(needed_tiles, readback.grid_offset_pos);
         Util.add_missing_parent_tiles(decoded_tiles);
-        // max level for height is tile 15 
+        // own heightmaps of the server are preferred, aws terrarium only goes up to level 15
         const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
-        let requested_tiles = decoded_tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= 15)).map(tile => TileRequest().init(tile.x, tile.y, tile.level,
-            !tile_on_minifuzi(tile) ? `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`:
-                                   `${location.origin}/heightmap/${tile.level}/${tile.x}/${tile.y}`
-        ));
+        // mapterhorn has 512 pixel tiles up to level 16 (1 m data in parts of europe), so level l is a quarter of a level l - 1 tile
+        const height_source = document.getElementById("height_source").value;
+        const height_max_level = height_source == "mapterhorn" ? 17 : 15;
+        const height_url = (tile) => {
+            if (tile_on_minifuzi(tile))
+                return `${location.origin}/heightmap/${tile.level}/${tile.x}/${tile.y}`;
+            if (height_source == "mapterhorn" && tile.level > 0)
+                return `https://tiles.mapterhorn.com/${tile.level - 1}/${tile.x >> 1}/${tile.y >> 1}.webp#sub=${(tile.x & 1) * 256},${(tile.y & 1) * 256}`;
+            return `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`;
+        };
+        let requested_tiles = decoded_tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= height_max_level))
+                                           .map(tile => TileRequest().init(tile.x, tile.y, tile.level, height_url(tile)));
         virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
         let layer = get_selected_layer();
         const offset_level = (level, layer) => {
@@ -823,11 +851,8 @@
         tex_update_locked[name] = false;
     }
     function updateGpsPosition(p) {
-        let [lat, lon] = Util.wgs_84_to_uv(p.coords.latitude, p.coords.longitude);
-        cur_gps_pos = {lat: lat, lon: lon};
-        console.log("Update cur_gps_pos:");
-        console.log(p);
-        console.log(cur_gps_pos);
+        if (own_position.add_fix(p))
+            draw_requested = true;
     }
     // ----------------------------------------------------------------------------------------
     // gpx editing, recording and follow animation
@@ -836,7 +861,7 @@
     const is_touch = 'ontouchstart' in document.documentElement;
     const gpx_backup_key = "gpx_backup:" + file_path;
     const gpx_doc = GpxDocument().load("{{&file_data}}");
-    const gpx_recorder = GpsRecorder();
+    const gpx_recorder = GpsRecorder(own_position);
     const gpx_follower = TrackFollower();
     /** @type {TrackRenderer} */
     let track_renderer = null;
@@ -1423,6 +1448,11 @@
             const fix = rec.last_fix;
             status.push(fix ? `GPS ±${fix.coords.accuracy.toFixed(1)} m, gefiltert ±${rec.filter_accuracy_m().toFixed(1)} m` : "Warte auf GPS");
             status.push(`${rec.fix_count} Messungen (${rec.rejected_count} verworfen)`);
+            if (own_motion.active)
+                status.push(!own_motion.sample_count ? "Bewegungssensor: keine Daten" : own_motion.stationary ? "Stillstand erkannt"
+                            : own_motion.absolute ? "Bewegungssensor aktiv" : "Bewegungssensor ohne Kompass");
+            else if (own_motion.error)
+                status.push(own_motion.error);
             if (!rec.wake_lock)
                 status.push("Bildschirm anlassen, sonst stoppt die Aufnahme");
             const avg = rec.averaging_result();
@@ -1448,7 +1478,12 @@
             document.getElementById("gpx_append_mode").checked = true;
             gpx_changed();
         });
-        document.getElementById("gpx_record_toggle").addEventListener("click", gpx_toggle_recording);
+        document.getElementById("gpx_record_toggle").addEventListener("click", () => {
+            own_motion.start();     // ios only allows the sensors after a user gesture
+            gpx_toggle_recording();
+        });
+        document.getElementById("enable_cam_follow").addEventListener("click", () => own_motion.start());
+        own_motion.on_update = () => update_gpx_ui();
         document.getElementById("gpx_average_start").addEventListener("click", () => gpx_recorder.start_averaging());
         document.getElementById("gpx_average_accept").addEventListener("click", () => gpx_recorder.finish_averaging());
         document.getElementById("gpx_average_cancel").addEventListener("click", () => gpx_recorder.cancel_averaging());
@@ -1504,9 +1539,9 @@
         if (!track_renderer)
             return;
         track_renderer.update(gpx_doc);
-        // own position (filtered while recording) and the current position of the follow animation
+        // own position (gps and inertial sensors filtered) and the current position of the follow animation
         let markers = [];
-        const own_pos = gpx_recorder.recording && gpx_recorder.filter ? gpx_recorder.filter : cur_gps_pos ? {x: cur_gps_pos.lat, y: cur_gps_pos.lon} : null;
+        const own_pos = own_position.position();
         if (own_pos)
             markers.push({...own_pos, color: [.1, .45, 1, 1]});
         if (gpx_mode == "follow" && gpx_follower.length_m)
@@ -1558,10 +1593,6 @@
         if (view_whole_track())
             c = [camera_center.x(), camera_center.y()];
 
-        // linalg_tests();
-        const is_mobile = 'ontouchstart' in document.documentElement;
-        if (is_mobile)
-            document.getElementById("triangle_resolution").value = 80;
         // the virtual maps have to exist before the shaders are created as their uniform sizes depend on them
         const max_depth = 18;
         const v_width = 1 << max_depth;
@@ -1833,6 +1864,9 @@
         
         if (navigator.geolocation)
             navigator.geolocation.watchPosition(updateGpsPosition, ()=>{}, {enableHighAccuracy: true});
+        // without permission api (android) the sensors work without user gesture
+        if (!window.DeviceMotionEvent || typeof DeviceMotionEvent.requestPermission != "function")
+            own_motion.start();
     }
     window.onload = init;
 

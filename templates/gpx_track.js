@@ -2,6 +2,8 @@
  * @brief Gpx track editing, gps recording and track rendering for the gpx editor
  *
  * GpxDocument   keeps the gpx xml document as source of truth and edits it in place (unknown elements are preserved)
+ * MotionSensor  inertial sensors of the phone (earth frame acceleration, stand still detection)
+ * PositionFilter kalman filter of the own position from gps fixes, gps doppler speed and the inertial sensors
  * GpsRecorder   records filtered gps points and supports averaging a point while standing still
  * TrackRenderer draws the tracks draped on the terrain without vertex buffers (positions come from a float texture)
  * TrackFollower gives positions along the tracks by distance for the follow animation
@@ -226,22 +228,259 @@ const GpxDocument = () => {
 };
 
 /**
- * @brief records gps points. Fixes with bad accuracy are rejected, the remaining ones are smoothed with a kalman filter
- * (constant velocity model per axis, in meters relative to the first fix) and a point is emitted every min_distance_m.
- * For a precise single point the position can be averaged over all fixes while standing still (weighted by 1 / accuracy^2)
+ * @brief inertial data of the phone: linear acceleration in the east/south frame of the uv coordinates and stand still detection
+ *
+ * The acceleration is rotated into the earth frame with the absolute device orientation (compass based). Without an
+ * absolute orientation only the stand still detection is available, as it only needs the magnitudes
  */
-const GpsRecorder = () => {
+const MotionSensor = () => {
+    return {
+        active: false,
+        /** true if the orientation is relative to north, only then the acceleration direction is known */
+        absolute: false,
+        stationary: false,
+        sample_count: 0,
+        error: "",
+        orientation: null,          // {alpha, beta, gamma} in degrees
+        window: [],                 // {t, a, r} samples of the last stationary_window_s for the stand still detection
+        stationary_window_s: 1,
+        stationary_max_acc: .35,    // m/s^2, hand tremor while standing is below this
+        stationary_max_rot: 12,     // deg/s
+        /** @type {function(float, Array.<float>, bool):void} called per sample with the time in s, [east, south] acceleration in m/s^2 (null if unknown) and the stand still flag */
+        on_sample: null,
+        /** @type {function():void} called if the state (active, absolute, stationary) changed */
+        on_update: null,
+
+        /** @brief has to be called from a user gesture for the permission request on iOS @returns {Promise<bool>} */
+        start: async function () {
+            if (this.active)
+                return true;
+            if (!window.DeviceMotionEvent) {
+                this.error = "Keine Bewegungssensoren";
+                return false;
+            }
+            try {
+                if (typeof DeviceMotionEvent.requestPermission == "function" && await DeviceMotionEvent.requestPermission() != "granted")
+                    throw new Error("nicht erlaubt");
+                if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission == "function")
+                    await DeviceOrientationEvent.requestPermission();
+            } catch (e) {
+                this.error = "Bewegungssensoren: " + e.message;
+                this.notify();
+                return false;
+            }
+            this.active = true;
+            this.error = "";
+            this.orientation_listener = (e) => this.handle_orientation(e);
+            this.motion_listener = (e) => this.handle_motion(e);
+            // chrome only gives the north based orientation with the absolute event, safari has webkitCompassHeading instead
+            this.orientation_event = "ondeviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation";
+            window.addEventListener(this.orientation_event, this.orientation_listener);
+            window.addEventListener("devicemotion", this.motion_listener);
+            this.notify();
+            return true;
+        },
+        stop: function () {
+            if (!this.active)
+                return;
+            window.removeEventListener(this.orientation_event, this.orientation_listener);
+            window.removeEventListener("devicemotion", this.motion_listener);
+            this.active = this.absolute = this.stationary = false;
+            this.orientation = null;
+            this.window = [];
+            this.notify();
+        },
+        notify: function () {
+            if (this.on_update)
+                this.on_update();
+        },
+        handle_orientation: function (e) {
+            if (e.alpha === null || e.beta === null || e.gamma === null)
+                return;
+            let alpha = e.alpha, absolute = e.absolute || e.type == "deviceorientationabsolute";
+            if (typeof e.webkitCompassHeading == "number" && e.webkitCompassHeading >= 0) {
+                // compass heading is clockwise, alpha counter clockwise
+                alpha = 360 - e.webkitCompassHeading;
+                absolute = true;
+            }
+            this.orientation = {alpha: alpha, beta: e.beta, gamma: e.gamma};
+            if (absolute != this.absolute) {
+                this.absolute = absolute;
+                this.notify();
+            }
+        },
+        /** @returns {Array.<float>} vector v in device coordinates rotated to the earth frame (east, north, up), see the w3c device orientation spec */
+        device_to_earth: function (v) {
+            const o = this.orientation, d = Math.PI / 180;
+            const cA = Math.cos(o.alpha * d), sA = Math.sin(o.alpha * d);
+            const cB = Math.cos(o.beta * d), sB = Math.sin(o.beta * d);
+            const cG = Math.cos(o.gamma * d), sG = Math.sin(o.gamma * d);
+            return [(cA * cG - sA * sB * sG) * v[0] - cB * sA * v[1] + (cG * sA * sB + cA * sG) * v[2],
+                    (cG * sA + cA * sB * sG) * v[0] + cA * cB * v[1] + (sA * sG - cA * cG * sB) * v[2],
+                    -cB * sG * v[0] + sB * v[1] + cB * cG * v[2]];
+        },
+        handle_motion: function (e) {
+            const t = Date.now() / 1000;
+            const vec = (a) => a && a.x !== null && a.y !== null && a.z !== null ? [a.x, a.y, a.z] : null;
+            let acc = vec(e.acceleration), earth = null;
+            if (this.orientation) {
+                if (acc)
+                    earth = this.device_to_earth(acc);
+                else if (vec(e.accelerationIncludingGravity)) {
+                    // devices without gyroscope only give the acceleration including gravity, which points up at rest
+                    earth = this.device_to_earth(vec(e.accelerationIncludingGravity));
+                    earth[2] -= 9.81;
+                    acc = earth;
+                }
+            }
+            if (!acc)
+                return;
+            ++this.sample_count;
+            const r = e.rotationRate && e.rotationRate.alpha !== null ? Math.hypot(e.rotationRate.alpha, e.rotationRate.beta, e.rotationRate.gamma) : 0;
+            this.window.push({t: t, a: Math.hypot(...acc), r: r});
+            while (this.window.length && this.window[0].t < t - this.stationary_window_s)
+                this.window.shift();
+            const covered = this.window.length > 5 && t - this.window[0].t > .8 * this.stationary_window_s;
+            const stationary = covered && this.window.every(s => s.a < this.stationary_max_acc && s.r < this.stationary_max_rot);
+            if (stationary != this.stationary) {
+                this.stationary = stationary;
+                this.notify();
+            }
+            if (!this.on_sample)
+                return;
+            // shocks (steps, bumps) are clamped, they average out but would dominate single predictions
+            const clamp = (x) => Math.min(Math.max(x, -8), 8);
+            const en = earth && this.absolute ? [clamp(earth[0]), -clamp(earth[1])] : null;  // uv y points south
+            this.on_sample(t, en, stationary);
+        },
+    };
+};
+
+/**
+ * @brief kalman filter of the own position combining the gps fixes, the gps doppler speed and the inertial sensors
+ *
+ * Constant velocity model per axis in meters relative to an origin (uv), the measured acceleration is used as control input
+ * of the prediction. While standing still (detected from the inertial sensors) the velocity is pulled to zero, which keeps
+ * the position from drifting with the gps noise
+ */
+const PositionFilter = () => {
+    return {
+        acceleration_noise: .3,         // process noise of the constant velocity model in m^2/s^3 (unknown walking acceleration)
+        imu_acceleration_noise: .1,     // remaining process noise if the measured acceleration is used
+        imu_max_fix_age_s: 5,           // the acceleration is integrated only this long after a gps fix, it drifts quickly
+        speed_sigma_mps: .4,            // standard deviation of the gps doppler velocity
+        zero_velocity_sigma_mps: .05,   // standard deviation of the velocity while standing still
+        max_gap_s: 30,                  // the filter is reset after a longer gps gap
+        max_extrapolation_s: 2,
+        /** per axis position and velocity in meters relative to origin (uv) with 2x2 covariance [pp, pv, vp, vv] */
+        kf: null,
+        /** @type {GeolocationPosition} */
+        last_fix: null,
+        last_fix_t: 0,
+        imu_used: false,                // true if the last prediction used the measured acceleration
+
+        reset: function (x, y, pos_var, t, vel_var = 4) {
+            const axis = () => ({p: 0, v: 0, P: [pos_var, 0, 0, vel_var]});
+            this.kf = {origin: {x: x, y: y}, m_per_uv: GpxUtil.meters_per_uv(y), axes: [axis(), axis()], t: t};
+        },
+        /** @brief prediction to time t with the optional acceleration [east, south] in m/s^2 */
+        predict: function (t, acc = null) {
+            const kf = this.kf;
+            const dt = t - kf.t;
+            if (!(dt > 0))
+                return;
+            const q = acc ? this.imu_acceleration_noise : this.acceleration_noise;
+            kf.axes.forEach((a, i) => {
+                const u = acc ? acc[i] : 0;
+                a.p += a.v * dt + .5 * u * dt * dt;
+                a.v += u * dt;
+                const [pp, pv, vp, vv] = a.P;
+                a.P = [pp + dt * (pv + vp) + dt * dt * vv + q * dt ** 3 / 3, pv + dt * vv + q * dt * dt / 2,
+                       vp + dt * vv + q * dt * dt / 2, vv + q * dt];
+            });
+            kf.t = t;
+        },
+        /** @brief kalman update of the position (state 0) or velocity (state 1) of axis a with measurement z of variance r */
+        update: function (a, state, z, r) {
+            const [pp, pv, vp, vv] = a.P;
+            const s = (state ? vv : pp) + r;
+            const k0 = (state ? pv : pp) / s, k1 = (state ? vv : vp) / s;
+            const innovation = z - (state ? a.v : a.p);
+            a.p += k0 * innovation;
+            a.v += k1 * innovation;
+            a.P = state ? [pp - k0 * vp, pv - k0 * vv, vp - k1 * vp, vv - k1 * vv]
+                        : [pp - k0 * pp, pv - k0 * pv, vp - k1 * pp, vv - k1 * pv];
+        },
+        /** @returns {bool} false if the fix was already added (several position watches get the same fixes) */
+        add_fix: function (pos) {
+            if (this.last_fix && pos.timestamp <= this.last_fix.timestamp)
+                return false;
+            const c = pos.coords;
+            const [x, y] = Util.wgs_84_to_uv(c.latitude, c.longitude);
+            const r = c.accuracy * c.accuracy;
+            // the fix is a bit older than the inertial predictions, it is applied at the current filter time
+            const t = Math.max(pos.timestamp / 1000, this.kf ? this.kf.t : 0);
+            this.last_fix = pos;
+            if (!this.kf || t - this.last_fix_t > this.max_gap_s) {
+                this.reset(x, y, r, t);
+                this.last_fix_t = t;
+                return true;
+            }
+            this.last_fix_t = t;
+            this.predict(t);
+            const kf = this.kf;
+            const z = [(x - kf.origin.x) * kf.m_per_uv, (y - kf.origin.y) * kf.m_per_uv];
+            kf.axes.forEach((a, i) => this.update(a, 0, z[i], r));
+            // doppler velocity, much more precise than the position differences
+            if (c.speed !== null && c.speed >= 0 && c.heading !== null && isFinite(c.heading)) {
+                const h = c.heading * Math.PI / 180;
+                const v = [c.speed * Math.sin(h), -c.speed * Math.cos(h)];
+                kf.axes.forEach((a, i) => this.update(a, 1, v[i], this.speed_sigma_mps ** 2));
+            }
+            return true;
+        },
+        /** @brief inertial sample at time t with the acceleration [east, south] (null if the direction is unknown) */
+        imu_sample: function (t, acc, stationary) {
+            if (!this.kf)
+                return;
+            this.imu_used = !!acc && !stationary && t - this.last_fix_t < this.imu_max_fix_age_s;
+            this.predict(t, this.imu_used ? acc : null);
+            if (stationary)
+                this.kf.axes.forEach(a => this.update(a, 1, 0, this.zero_velocity_sigma_mps ** 2));
+        },
+        /** @returns {{x: float, y: float}} position extrapolated to time t in s, null without fix */
+        position: function (t = Date.now() / 1000) {
+            const kf = this.kf;
+            if (!kf)
+                return null;
+            const dt = Math.min(Math.max(t - kf.t, 0), this.max_extrapolation_s);
+            return {x: kf.origin.x + (kf.axes[0].p + kf.axes[0].v * dt) / kf.m_per_uv,
+                    y: kf.origin.y + (kf.axes[1].p + kf.axes[1].v * dt) / kf.m_per_uv};
+        },
+        /** @returns {float} standard deviation of the filtered position in meters */
+        accuracy_m: function () {
+            return this.kf ? Math.sqrt(Math.max(this.kf.axes[0].P[0], this.kf.axes[1].P[0])) : NaN;
+        },
+        speed_mps: function () {
+            return this.kf ? Math.hypot(this.kf.axes[0].v, this.kf.axes[1].v) : 0;
+        },
+    };
+};
+
+/**
+ * @brief records gps points. The fixes are smoothed with the position filter (shared with the position display), fixes with
+ * bad accuracy are not recorded and a point is emitted every min_distance_m.
+ * For a precise single point the position can be averaged over all fixes while standing still (weighted by 1 / accuracy^2)
+ * @param {PositionFilter} position_filter
+ */
+const GpsRecorder = (position_filter) => {
     return {
         max_accuracy_m: 20,
         min_distance_m: 3,
         recording: false,
         watch_id: null,
         wake_lock: null,
-        /** @type {{x: float, y: float}} filtered position in uv */
-        filter: null,
-        /** kalman filter state, per axis position and velocity in meters relative to origin (uv) with 2x2 covariance */
-        kf: null,
-        acceleration_noise: .3, // process noise of the constant velocity model in m^2/s^3
+        position_filter: position_filter,
         /** @type {GeolocationPosition} */
         last_fix: null,
         last_emitted: null,
@@ -262,7 +501,6 @@ const GpsRecorder = () => {
                 return false;
             }
             this.recording = true;
-            this.filter = null;
             this.last_emitted = null;
             this.fix_count = this.rejected_count = 0;
             this.error = "";
@@ -302,9 +540,15 @@ const GpsRecorder = () => {
             if (this.on_update)
                 this.on_update();
         },
+        /** @returns {{x: float, y: float}} filtered position */
+        position: function () {
+            return this.position_filter.position();
+        },
         handle_fix: function (pos) {
             const c = pos.coords;
             const [x, y] = Util.wgs_84_to_uv(c.latitude, c.longitude);
+            // the filter ignores fixes it already got from another position watch
+            this.position_filter.add_fix(pos);
             this.last_fix = pos;
             this.fix_count++;
             if (c.accuracy > this.max_accuracy_m) {
@@ -319,51 +563,18 @@ const GpsRecorder = () => {
                 this.averaging.sum_y += w * y;
                 this.averaging.samples.push({x: x, y: y, w: w});
             }
-
-            const t = pos.timestamp / 1000;
-            if (!this.kf || t - this.kf.t > 30)
-                this.reset_filter(x, y, c.accuracy * c.accuracy, t);
-            else
-                this.update_filter(x, y, c.accuracy * c.accuracy, t);
             // while averaging no track points are emitted, the averaged point is added on finish
-            if (!this.averaging && (!this.last_emitted || GpxUtil.distance_m(this.last_emitted, this.filter) >= this.min_distance_m)) {
-                this.last_emitted = {x: this.filter.x, y: this.filter.y};
+            const p = this.position_filter.position();
+            if (!this.averaging && (!this.last_emitted || GpxUtil.distance_m(this.last_emitted, p) >= this.min_distance_m)) {
+                this.last_emitted = p;
                 if (this.on_point)
-                    this.on_point({x: this.filter.x, y: this.filter.y, time: new Date(pos.timestamp)});
+                    this.on_point({x: p.x, y: p.y, time: new Date(pos.timestamp)});
             }
             this.notify();
         },
-        reset_filter: function (x, y, pos_var, t) {
-            const axis = () => ({p: 0, v: 0, P: [pos_var, 0, 0, 4]});  // covariance as [pp, pv, vp, vv], walking speed uncertainty
-            this.kf = {origin: {x: x, y: y}, m_per_uv: GpxUtil.meters_per_uv(y), axes: [axis(), axis()], t: t};
-            this.filter = {x: x, y: y};
-        },
-        /** @brief kalman predict and update with the measurement at uv x, y with variance r in m^2 */
-        update_filter: function (x, y, r, t) {
-            const kf = this.kf;
-            const dt = Math.max(t - kf.t, 0);
-            const q = this.acceleration_noise;
-            const z = [(x - kf.origin.x) * kf.m_per_uv, (y - kf.origin.y) * kf.m_per_uv];
-            kf.axes.forEach((a, i) => {
-                // predict with white acceleration noise
-                a.p += a.v * dt;
-                const [pp, pv, vp, vv] = a.P;
-                a.P = [pp + dt * (pv + vp) + dt * dt * vv + q * dt ** 3 / 3, pv + dt * vv + q * dt * dt / 2,
-                       vp + dt * vv + q * dt * dt / 2, vv + q * dt];
-                // update with the position measurement
-                const s = a.P[0] + r;
-                const k = [a.P[0] / s, a.P[2] / s];
-                const innovation = z[i] - a.p;
-                a.p += k[0] * innovation;
-                a.v += k[1] * innovation;
-                a.P = [(1 - k[0]) * a.P[0], (1 - k[0]) * a.P[1], a.P[2] - k[1] * a.P[0], a.P[3] - k[1] * a.P[1]];
-            });
-            kf.t = t;
-            this.filter = {x: kf.origin.x + kf.axes[0].p / kf.m_per_uv, y: kf.origin.y + kf.axes[1].p / kf.m_per_uv};
-        },
         /** @returns {float} standard deviation of the filtered position in meters */
         filter_accuracy_m: function () {
-            return this.kf ? Math.sqrt(Math.max(this.kf.axes[0].P[0], this.kf.axes[1].P[0])) : NaN;
+            return this.position_filter.accuracy_m();
         },
         start_averaging: function () {
             this.averaging = {sum_w: 0, sum_x: 0, sum_y: 0, samples: [], start: Date.now()};
@@ -385,8 +596,8 @@ const GpsRecorder = () => {
             const res = this.averaging_result();
             this.averaging = null;
             if (res) {
-                this.reset_filter(res.x, res.y, res.precision_m ** 2, Date.now() / 1000);
-                this.kf.axes.forEach(a => a.P[3] = .1);    // standing still at the end of the averaging
+                // standing still at the end of the averaging
+                this.position_filter.reset(res.x, res.y, res.precision_m ** 2, Math.max(Date.now() / 1000, this.position_filter.kf?.t ?? 0), .1);
                 this.last_emitted = {x: res.x, y: res.y};
                 if (this.on_point)
                     this.on_point({x: res.x, y: res.y, time: new Date(),
