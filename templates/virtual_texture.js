@@ -34,6 +34,10 @@ const texture_type_type = 0x12392451;
 const map_provider_type = 0x12392452;
 
 // const declarations for settings
+// texels outside of a tile are fetched from the neighbor tiles in the shaders (no seams at the tile borders). Costs a
+// branch and a tile search per texel at the borders (too slow for mobile gpus), false clamps to the tile border texels instead.
+// Compiled into the shaders, they have to be created again after a change
+let seamless_tiles = true;
 const max_loading_tiles = 32;           // max tiles per virtual map which are downloaded at the same time
 // downloads used for preloading, the remaining slots are kept free for tiles which become visible
 const max_preloading_tiles = 16;
@@ -1159,7 +1163,7 @@ const Util = {
         // The border texel of the tile is used if the neighbor is not loaded
         vec4 virtual_${v_map_name}_fetch(int index, vec2 uv_offset, vec2 uv_loc, vec2 image_uv, ivec2 texel) {
             ivec2 size = textureSize(virtual_${v_map_name}, 0).xy;
-            if (texel != clamp(texel, ivec2(0), size - 1)) {
+            if (${seamless_tiles} && texel != clamp(texel, ivec2(0), size - 1)) {
                 // the neighbor is searched at the texel center, given relative to uv_loc to keep the precision for deep levels
                 float tile_w = float(virtual_${v_map_name}_infos[index].z) / exp2(virtual_${v_map_name}_cascades[0].w);
                 vec2 n_loc = uv_loc + (vec2(texel) + .5 - image_uv) / vec2(size) * tile_w;
@@ -1168,16 +1172,15 @@ const Util = {
                     index = n;
                     texel = ivec2(floor(virtual_${v_map_name}_tile_uv(n, uv_offset, n_loc) * vec2(size)));
                 }
-                texel = clamp(texel, ivec2(0), size - 1);
             }
-            return texelFetch(virtual_${v_map_name}, ivec3(texel, index), 0);
+            return texelFetch(virtual_${v_map_name}, ivec3(clamp(texel, ivec2(0), size - 1), index), 0);
         }
         // bilinear sample of the tile at index, near the tile border the interpolation continues into the neighbor tiles
         vec4 virtual_${v_map_name}_sample(int index, vec2 uv_offset, vec2 uv_loc) {
             vec2 size = vec2(textureSize(virtual_${v_map_name}, 0).xy);
             vec2 tuv = virtual_${v_map_name}_tile_uv(index, uv_offset, uv_loc);
             vec2 image_uv = tuv * size;
-            if (image_uv == clamp(image_uv, vec2(.5), size - .5))    // fast path, the hardware filter stays inside of the tile
+            if (!${seamless_tiles} || image_uv == clamp(image_uv, vec2(.5), size - .5))    // fast path, the hardware filter stays inside of the tile
                 return texture(virtual_${v_map_name}, vec3(tuv, float(index)));
             vec2 p = image_uv - .5;     // texel centers are at i + .5
             ivec2 i = ivec2(floor(p));

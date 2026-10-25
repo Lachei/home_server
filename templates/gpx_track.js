@@ -690,6 +690,23 @@ const TrackRenderer = () => {
          */
         init: function (gl, virtual_height_map, height_level_offset) {
             this.gl = gl;
+            this.create_program(virtual_height_map, height_level_offset);
+            const create_texture = () => {
+                const t = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, t);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                return t;
+            };
+            this.line_texture = create_texture();
+            this.edit_texture = create_texture();
+            return this;
+        },
+        /** @brief (re)creates the shader program, needed again if a setting compiled into the shaders changes (seamless_tiles) */
+        create_program: function (virtual_height_map, height_level_offset) {
+            const gl = this.gl;
+            if (this.program)
+                gl.deleteProgram(this.program);
             const vs = `#version 300 es
             precision highp int;
             precision highp float;
@@ -829,16 +846,6 @@ const TrackRenderer = () => {
                                 "virtual_heightmap_index", "virtual_heightmap"])
                 this.uniforms[name] = gl.getUniformLocation(this.program, name);
             this.uniforms.heightmap_infos = gl.getUniformBlockIndex(this.program, "Infos_heightmap");
-            const create_texture = () => {
-                const t = gl.createTexture();
-                gl.bindTexture(gl.TEXTURE_2D, t);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-                return t;
-            };
-            this.line_texture = create_texture();
-            this.edit_texture = create_texture();
-            return this;
         },
         /** @brief uploads the points of the document if it changed since the last upload */
         update: function (doc) {

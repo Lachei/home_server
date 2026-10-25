@@ -191,6 +191,7 @@
                         <option value="aws">Höhe AWS Terrarium</option>
                     </select>
                     <label><input id="enable_tile_update" type="checkbox" checked onchange="draw_requested = true;">Karten tiles nachladen</label>
+                    <label title="Keine Nähte an den Kachelgrenzen, langsam auf Handys"><input id="enable_seamless_tiles" type="checkbox">Nahtlose Kacheln</label>
                     <label><input id="triangle_resolution" type="number" min="10" max="1000" value="80">Geometrieauflösung</label>
                     <label><input id="enable_cam_follow" type="checkbox">Kamera folgen</label>
                     <label><input id="enable_fpv_cam" type="checkbox">Erste person navigation</label>
@@ -653,6 +654,10 @@
     // written again by newer frames before the fenced data is read (causes pipeline stalls on getBufferSubData)
     let pending_readback = null;    // {fence, grid_offset_pos, tile_buffer, depth_buffer}
     let readback_skipped = false;   // a frame was drawn without readback, has to be redrawn after the pending readback is done
+    // the readback blocks the main thread in getBufferSubData (up to ~80 ms on mobile), the needed tiles change slowly
+    // enough to read them back only a few times per second instead of every frame
+    const tile_readback_interval_ms = 200;
+    let last_readback_t = -Infinity;
     async function draw_scene() {
         draw_requested |= camera_updated;
         const own_pos = own_position.position();
@@ -715,6 +720,9 @@
             update_follow_camera();
         // checked every tick as finer height data might have been loaded below the camera
         draw_requested |= clamp_camera_above_terrain();
+        // the last frame of a movement has to be read back once the interval passed, otherwise its tiles are never loaded
+        if (readback_skipped && !pending_readback && performance.now() - last_readback_t >= tile_readback_interval_ms)
+            draw_requested = true;
 
         if (!gl_context || drawing_active || !draw_requested)
             return;
@@ -811,8 +819,10 @@
         gl_context.bufferSubData(gl_context.UNIFORM_BUFFER, 0, mesh_tiles.data, 0, mesh_tiles.count * 4);
         gl_context.bindBuffer(gl_context.UNIFORM_BUFFER, null);
         console.log(`Selected ${mesh_tiles.count} mesh tiles in ${performance.now() - start} milli`);
-        const do_readback = !pending_readback;
+        const do_readback = !pending_readback && performance.now() - last_readback_t >= tile_readback_interval_ms;
         readback_skipped = !do_readback;
+        if (do_readback)
+            last_readback_t = performance.now();
         // draw tile ids ---------------------------------------
         if (update_tiles && do_readback)
             draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
@@ -1707,9 +1717,6 @@
     // ----------------------------------------------------------------------------------------
 
     async function init() {
-        // mobile gpus are too slow for the default geometry resolution
-        if (is_touch)
-            document.getElementById("triangle_resolution").value = 10;
         // webgl init
         // very important to set willReadFrequently because it disables gpu acceleration
         gl_context = canvas3d.getContext('webgl2', {antialias: true, willReadFrequently: false, powerPreference: 'high-performance' }) || canvas3d.getContext('experimental-webgl2');
@@ -1762,238 +1769,255 @@
         const w_overlay = 1 << 19;
         virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
 
-        const vs = `#version 300 es
-        #define PI 3.1415926535897932384626433832795
-        precision highp int;
-        precision highp float;
-        precision highp sampler2DArray;
-        precision highp usampler2D;
-        precision highp usampler2DArray;
+        // the shaders are created again if a setting compiled into them changes (seamless tiles). Off by default on mobile,
+        // the neighbor tile search per texel is too slow for mobile gpus
+        seamless_tiles = !is_touch;
+        document.getElementById("enable_seamless_tiles").checked = seamless_tiles;
+        const create_render_pipelines = () => {
+            const vs = `#version 300 es
+            #define PI 3.1415926535897932384626433832795
+            precision highp int;
+            precision highp float;
+            precision highp sampler2DArray;
+            precision highp usampler2D;
+            precision highp usampler2DArray;
 
-        uniform int mesh_res;               // quads per tile side
-        uniform vec2 grid_offset_pos;
-        uniform mat4 view;
-        uniform mat4 view_proj;
-        uniform float depth_offset;         // distance the eye was moved back for the 2d transition
-        ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
-        layout(std140) uniform MeshTiles {
-            vec4 mesh_tiles[${max_mesh_tiles}];  // xy: tile origin relative to grid_offset_pos, z: tile width in uv, w: quadtree level
-        };
+            uniform int mesh_res;               // quads per tile side
+            uniform vec2 grid_offset_pos;
+            uniform mat4 view;
+            uniform mat4 view_proj;
+            uniform float depth_offset;         // distance the eye was moved back for the 2d transition
+            ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
+            layout(std140) uniform MeshTiles {
+                vec4 mesh_tiles[${max_mesh_tiles}];  // xy: tile origin relative to grid_offset_pos, z: tile width in uv, w: quadtree level
+            };
 
-        // out variables
-        out vec2 loc_pos;
-        out float height_m;
-        out float n_dot_l;
-        out float depth;
+            // out variables
+            out vec2 loc_pos;
+            out float height_m;
+            out float n_dot_l;
+            out float depth;
 
-        ${Util.glsl_calc_level()}
-        ${Util.glsl_virtual_heightmap_load()}
-        ${Util.glsl_wgs_84_m_to_uv()}
+            ${Util.glsl_calc_level()}
+            ${Util.glsl_virtual_heightmap_load()}
+            ${Util.glsl_wgs_84_m_to_uv()}
         
-        void main(void) {
-            // each tile is one triangle strip, every quad row is a strip which is connected to the next row
-            // via degenerate triangles. The grid has an additional vertex ring around the tile which forms the skirt
-            vec4 tile = mesh_tiles[gl_InstanceID];
-            int cols = mesh_res + 3;
-            int row = gl_VertexID / (2 * cols + 2);
-            int k = clamp(gl_VertexID % (2 * cols + 2) - 1, 0, 2 * cols - 1);
-            ivec2 grid = ivec2(k >> 1, row + (k & 1)) - 1;
-            ivec2 grid_c = clamp(grid, ivec2(0), ivec2(mesh_res));
-            bool skirt = grid != grid_c;
+            void main(void) {
+                // each tile is one triangle strip, every quad row is a strip which is connected to the next row
+                // via degenerate triangles. The grid has an additional vertex ring around the tile which forms the skirt
+                vec4 tile = mesh_tiles[gl_InstanceID];
+                int cols = mesh_res + 3;
+                int row = gl_VertexID / (2 * cols + 2);
+                int k = clamp(gl_VertexID % (2 * cols + 2) - 1, 0, 2 * cols - 1);
+                ivec2 grid = ivec2(k >> 1, row + (k & 1)) - 1;
+                ivec2 grid_c = clamp(grid, ivec2(0), ivec2(mesh_res));
+                bool skirt = grid != grid_c;
 
-            loc_pos = tile.xy + vec2(grid_c) / float(mesh_res) * tile.z;
+                loc_pos = tile.xy + vec2(grid_c) / float(mesh_res) * tile.z;
 
-            // sample the heightmap at the level where the texel spacing equals the vertex spacing
-            float level = max(tile.w + log2(float(mesh_res)) - ${heightmap_tile_res_log2}., 0.);
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, level);
-            height_m = d_info.x;
-            n_dot_l = (max(0., dot(vec3(0, .7, .7), d_info.yzw)) * .5 + .5) + .05;
-            float height = wgs_84_m_to_uv(height_m) * 1.4; // * sqrt(2) due to 1 / cos(45deg)
-            if (skirt)
-                height -= tile.z * ${mesh_skirt_fac};
+                // sample the heightmap at the level where the texel spacing equals the vertex spacing
+                float level = max(tile.w + log2(float(mesh_res)) - ${heightmap_tile_res_log2}., 0.);
+                vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, level);
+                height_m = d_info.x;
+                n_dot_l = (max(0., dot(vec3(0, .7, .7), d_info.yzw)) * .5 + .5) + .05;
+                float height = wgs_84_m_to_uv(height_m) * 1.4; // * sqrt(2) due to 1 / cos(45deg)
+                if (skirt)
+                    height -= tile.z * ${mesh_skirt_fac};
 
-            vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
+                vec4 pos_cam_rel = vec4(loc_pos, height, 1.);
 
-            gl_Position = view_proj * pos_cam_rel;
-            // has to be inverted as the depth is in -z direction. Stored relative to the camera before it was moved back for the
-            // 2d transition, otherwise the eye offset (which changes with every zoom) would make the delayed readback useless
-            depth = -(view * pos_cam_rel).z - depth_offset;
-        }
-        `;
-        const fs = `#version 300 es
-        #define PI 3.1415926535897932384626433832795
-        precision highp int;
-        precision highp float;
-        precision highp sampler2DArray;
-        precision highp usampler2D;
-        precision highp usampler2DArray;
+                gl_Position = view_proj * pos_cam_rel;
+                // has to be inverted as the depth is in -z direction. Stored relative to the camera before it was moved back for the
+                // 2d transition, otherwise the eye offset (which changes with every zoom) would make the delayed readback useless
+                depth = -(view * pos_cam_rel).z - depth_offset;
+            }
+            `;
+            const fs = `#version 300 es
+            #define PI 3.1415926535897932384626433832795
+            precision highp int;
+            precision highp float;
+            precision highp sampler2DArray;
+            precision highp usampler2D;
+            precision highp usampler2DArray;
 
-        in vec2 loc_pos;
-        in float height_m;
-        in float n_dot_l;
-        uniform vec2 grid_offset_pos;
-        uniform vec4 color_correction;
-        uniform int parcell_map_enabled; // 0->disabled, enabled else
-        uniform float contour_interval;     // height difference between contour lines in m, 0 disables them
-        uniform vec4 help_lines;            // xy: unit direction of the lines in uv, z: line distance in uv (0 disables them), w: unused
-        uniform float help_lines_phase;     // phase of grid_offset_pos, computed in double precision on the cpu
-        ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
-        ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
-        ${Util.glsl_virtual_texture_uniforms("overlaymap", virtual_overlay_map)}
+            in vec2 loc_pos;
+            in float height_m;
+            in float n_dot_l;
+            uniform vec2 grid_offset_pos;
+            uniform vec4 color_correction;
+            uniform int parcell_map_enabled; // 0->disabled, enabled else
+            uniform float contour_interval;     // height difference between contour lines in m, 0 disables them
+            uniform vec4 help_lines;            // xy: unit direction of the lines in uv, z: line distance in uv (0 disables them), w: unused
+            uniform float help_lines_phase;     // phase of grid_offset_pos, computed in double precision on the cpu
+            ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
+            ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
+            ${Util.glsl_virtual_texture_uniforms("overlaymap", virtual_overlay_map)}
 
-        ${Util.glsl_wgs_84_to_uv()}
-        ${Util.glsl_virtual_texture_load("streetmap")}
-        ${Util.glsl_virtual_texture_load("overlaymap")}
-        ${Util.glsl_virtual_heightmap_load()}
-        ${Util.glsl_calc_level()}
-        ${Util.glsl_get_tile_index()}
+            ${Util.glsl_wgs_84_to_uv()}
+            ${Util.glsl_virtual_texture_load("streetmap")}
+            ${Util.glsl_virtual_texture_load("overlaymap")}
+            ${Util.glsl_virtual_heightmap_load()}
+            ${Util.glsl_calc_level()}
+            ${Util.glsl_get_tile_index()}
 
-        layout (location = 0) out vec4 out_col;
+            layout (location = 0) out vec4 out_col;
 
-        // coverage of anti aliased lines at the integer values of c with a width of px pixels, faded out if they get too dense
-        float line_coverage(float c, float px) {
-            float w = max(fwidth(c), 1e-7);
-            float d = abs(fract(c + .5) - .5) / w;
-            return clamp(px * .5 + .5 - d, 0., 1.) * (1. - smoothstep(.15, .35, w));
-        }
+            // coverage of anti aliased lines at the integer values of c with a width of px pixels, faded out if they get too dense
+            float line_coverage(float c, float px) {
+                float w = max(fwidth(c), 1e-7);
+                float d = abs(fract(c + .5) - .5) / w;
+                return clamp(px * .5 + .5 - d, 0., 1.) * (1. - smoothstep(.15, .35, w));
+            }
 
-        void main(void) {
-            // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
-            //     out_col = vec4(1., 0., 0., 1.);
-            // else
-            //     out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
+            void main(void) {
+                // if (distance(world_pos, vec2(47.80168, 12.89865)) < 1e-3)
+                //     out_col = vec4(1., 0., 0., 1.);
+                // else
+                //     out_col = vec4(sin(vs_tid * .134), sin(vs_tid * .143 + .3), sin(vs_tid * 0.143 + .67), 1.);
 
-            // out_col = vec4((w_pos.z - 400.) / 300.);
-            // return;
-            // out_col = vec4(world_pos / 1000., 0., 1.);
-            // return;
+                // out_col = vec4((w_pos.z - 400.) / 300.);
+                // return;
+                // out_col = vec4(world_pos / 1000., 0., 1.);
+                // return;
 
-            // vec2 uv_glob;
-            // vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
+                // vec2 uv_glob;
+                // vec3 tile_id = vec3(get_tile_index_uv(uv_glob));
             
-            // uint t = texture(virtual_streetmap_index, vec2(gl_FragCoord.xy) / vec2(textureSize(virtual_streetmap_index, 0).xy) * 40.).x;
-            // out_col = texture(virtual_heightmap, vec3(uv_glob, float(t - 1u)));
-            // return;
-            // if (t == 0u)
-            //     out_col = vec4(1., 0, 0, 1);
-            // else
-            //     out_col = vec4(float(t % 10u) * .1);
-            // return;
+                // uint t = texture(virtual_streetmap_index, vec2(gl_FragCoord.xy) / vec2(textureSize(virtual_streetmap_index, 0).xy) * 40.).x;
+                // out_col = texture(virtual_heightmap, vec3(uv_glob, float(t - 1u)));
+                // return;
+                // if (t == 0u)
+                //     out_col = vec4(1., 0, 0, 1);
+                // else
+                //     out_col = vec4(float(t % 10u) * .1);
+                // return;
 
-            // ivec2 pixel_pos = ivec2(gl_FragCoord.xy);
-            // ivec2 xy = pixel_pos % 256;
-            // ivec2 tile = pixel_pos / 256;
-            // int lev = tile.x + tile.y * 16;
-            // out_col = texelFetch(virtual_streetmap, ivec3(xy, lev), 0);
-            // return;
+                // ivec2 pixel_pos = ivec2(gl_FragCoord.xy);
+                // ivec2 xy = pixel_pos % 256;
+                // ivec2 tile = pixel_pos / 256;
+                // int lev = tile.x + tile.y * 16;
+                // out_col = texelFetch(virtual_streetmap, ivec3(xy, lev), 0);
+                // return;
 
-            // uint t = texelFetch(virtual_heightmap_index, pixel_pos, 0).r;
-            // if (min(pixel_pos, textureSize(virtual_heightmap_index, 0)) != pixel_pos) {
-            //     out_col = vec4(1., 0, 0, 1.);
-            //     return;
-            // }
-            // if (t != 0u)
-            //     out_col = vec4(1.);
-            // else
-            //     out_col = vec4(0.);
-            // return;
+                // uint t = texelFetch(virtual_heightmap_index, pixel_pos, 0).r;
+                // if (min(pixel_pos, textureSize(virtual_heightmap_index, 0)) != pixel_pos) {
+                //     out_col = vec4(1., 0, 0, 1.);
+                //     return;
+                // }
+                // if (t != 0u)
+                //     out_col = vec4(1.);
+                // else
+                //     out_col = vec4(0.);
+                // return;
 
-            // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
-            vec2 dx = dFdx(loc_pos);
-            vec2 dy = dFdy(loc_pos);
-            float max_del = get_footprint(dx, dy);
-            vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
-            if (surface_col == vec4(0))
-                surface_col = vec4(.85);
-            if (1 == parcell_map_enabled) {
-                surface_col += virtual_overlaymap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.));
-            }
-            vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
-            float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
-            out_col = vec4(surface_col.xyz, 1) * nl;
-            if (contour_interval > 0.) {
-                // every 5th line is drawn thicker, the per fragment height is used as the interpolated vertex height is too coarse
-                float c = d_info.x / contour_interval;
-                float contour = max(line_coverage(c, 1.), line_coverage(c / 5., 2.));
-                out_col.xyz = mix(out_col.xyz, vec3(.85, .1, .05), contour * .8);
-            }
-            if (help_lines.z > 0.) {
-                // parallel lines, web mercator is conformal so angles in uv are the angles on the ground
-                vec2 dir = help_lines.xy;
-                float across = dot(loc_pos, vec2(-dir.y, dir.x)) / help_lines.z + help_lines_phase;
-                float help = line_coverage(across, 1.5);
-                out_col.xyz = mix(out_col.xyz, vec3(.1, .3, .9), help * .8);
-            }
-            // float mist = min(pow((gl_FragCoord.z / gl_FragCoord.w), .4) * 10., 1.);
-            // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33))) * 1.5;
-            // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
-        }
-        `;
-
-        const fs_id = `#version 300 es
-        #define PI 3.1415926535897932384626433832795
-        precision highp int;
-        precision highp float;
-        precision highp sampler2DArray;
-        precision highp usampler2D;
-        precision highp usampler2DArray;
-
-        in vec2 loc_pos;
-        in float depth;
-
-        uniform vec2 grid_offset_pos;
-
-        ${Util.glsl_calc_level()}
-        ${Util.glsl_get_tile_index()}
-
-        layout (location = 0) out vec4 out_col;
-        layout (location = 1) out vec4 out_depth;
-        void main(void) {
-            uint tile_id = get_tile_index();
-            float div = float((1 << 8) - 1);
-            out_col = vec4(uvec4(tile_id, tile_id >> 8, tile_id >> 16, tile_id >> 24) & 0xffu) / div;   // little endian for the Uint32Array readout
-            uint depth_bits = floatBitsToUint(depth);   // writing linear depth to allow later for correct reconstruction with perspective and othographic projection
-            out_depth = vec4(float( depth_bits         & 0xffU) / div,
-                             float((depth_bits >> 8u)  & 0xffU) / div,
-                             float((depth_bits >> 16u) & 0xffU) / div,
-                             float( depth_bits >> 24u         ) / div);
-        }
-        `;
-
-        const create_pipeline = (gl_context, vs, fs) => {
-            const pipeline = initShaderProgram(gl_context, vs, fs);
-            return {
-                program: pipeline,
-                uniform_locations: {
-                    mesh_res: gl_context.getUniformLocation(pipeline, 'mesh_res'),
-                    mesh_tiles: gl_context.getUniformBlockIndex(pipeline, 'MeshTiles'),
-                    grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
-                    view: gl_context.getUniformLocation(pipeline, 'view'),
-                    view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
-                    depth_offset: gl_context.getUniformLocation(pipeline, 'depth_offset'),
-                    color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
-                    parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
-                    contour_interval: gl_context.getUniformLocation(pipeline, 'contour_interval'),
-                    help_lines: gl_context.getUniformLocation(pipeline, 'help_lines'),
-                    help_lines_phase: gl_context.getUniformLocation(pipeline, 'help_lines_phase'),
-                    virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
-                    virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
-                    virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
-                    virtual_streetmap_index: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index'),
-                    virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
-                    virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
-                    virtual_overlaymap_index: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap_index'),
-                    virtual_overlaymap: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap'),
-                    virtual_overlaymap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_overlaymap"),
+                // vec2 uv_glob = wgs_84_to_uv(loc_pos + pos_off);
+                vec2 dx = dFdx(loc_pos);
+                vec2 dy = dFdy(loc_pos);
+                float max_del = get_footprint(dx, dy);
+                vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
+                if (surface_col == vec4(0))
+                    surface_col = vec4(.85);
+                if (1 == parcell_map_enabled) {
+                    surface_col += virtual_overlaymap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.));
                 }
+                vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
+                float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
+                out_col = vec4(surface_col.xyz, 1) * nl;
+                if (contour_interval > 0.) {
+                    // every 5th line is drawn thicker, the per fragment height is used as the interpolated vertex height is too coarse
+                    float c = d_info.x / contour_interval;
+                    float contour = max(line_coverage(c, 1.), line_coverage(c / 5., 2.));
+                    out_col.xyz = mix(out_col.xyz, vec3(.85, .1, .05), contour * .8);
+                }
+                if (help_lines.z > 0.) {
+                    // parallel lines, web mercator is conformal so angles in uv are the angles on the ground
+                    vec2 dir = help_lines.xy;
+                    float across = dot(loc_pos, vec2(-dir.y, dir.x)) / help_lines.z + help_lines_phase;
+                    float help = line_coverage(across, 1.5);
+                    out_col.xyz = mix(out_col.xyz, vec3(.1, .3, .9), help * .8);
+                }
+                // float mist = min(pow((gl_FragCoord.z / gl_FragCoord.w), .4) * 10., 1.);
+                // vec3 desat = vec3(dot(out_col.xyz, vec3(0.33))) * 1.5;
+                // out_col.xyz = mix(out_col.xyz, vec3(1), mist);
+            }
+            `;
+
+            const fs_id = `#version 300 es
+            #define PI 3.1415926535897932384626433832795
+            precision highp int;
+            precision highp float;
+            precision highp sampler2DArray;
+            precision highp usampler2D;
+            precision highp usampler2DArray;
+
+            in vec2 loc_pos;
+            in float depth;
+
+            uniform vec2 grid_offset_pos;
+
+            ${Util.glsl_calc_level()}
+            ${Util.glsl_get_tile_index()}
+
+            layout (location = 0) out vec4 out_col;
+            layout (location = 1) out vec4 out_depth;
+            void main(void) {
+                uint tile_id = get_tile_index();
+                float div = float((1 << 8) - 1);
+                out_col = vec4(uvec4(tile_id, tile_id >> 8, tile_id >> 16, tile_id >> 24) & 0xffu) / div;   // little endian for the Uint32Array readout
+                uint depth_bits = floatBitsToUint(depth);   // writing linear depth to allow later for correct reconstruction with perspective and othographic projection
+                out_depth = vec4(float( depth_bits         & 0xffU) / div,
+                                 float((depth_bits >> 8u)  & 0xffU) / div,
+                                 float((depth_bits >> 16u) & 0xffU) / div,
+                                 float( depth_bits >> 24u         ) / div);
+            }
+            `;
+
+            const create_pipeline = (gl_context, vs, fs) => {
+                const pipeline = initShaderProgram(gl_context, vs, fs);
+                return {
+                    program: pipeline,
+                    uniform_locations: {
+                        mesh_res: gl_context.getUniformLocation(pipeline, 'mesh_res'),
+                        mesh_tiles: gl_context.getUniformBlockIndex(pipeline, 'MeshTiles'),
+                        grid_offset_pos: gl_context.getUniformLocation(pipeline, 'grid_offset_pos'),
+                        view: gl_context.getUniformLocation(pipeline, 'view'),
+                        view_proj: gl_context.getUniformLocation(pipeline, 'view_proj'),
+                        depth_offset: gl_context.getUniformLocation(pipeline, 'depth_offset'),
+                        color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
+                        parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
+                        contour_interval: gl_context.getUniformLocation(pipeline, 'contour_interval'),
+                        help_lines: gl_context.getUniformLocation(pipeline, 'help_lines'),
+                        help_lines_phase: gl_context.getUniformLocation(pipeline, 'help_lines_phase'),
+                        virtual_heightmap_index: gl_context.getUniformLocation(pipeline, 'virtual_heightmap_index'),
+                        virtual_heightmap: gl_context.getUniformLocation(pipeline, 'virtual_heightmap'),
+                        virtual_heightmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_heightmap"),
+                        virtual_streetmap_index: gl_context.getUniformLocation(pipeline, 'virtual_streetmap_index'),
+                        virtual_streetmap: gl_context.getUniformLocation(pipeline, 'virtual_streetmap'),
+                        virtual_streetmap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_streetmap"),
+                        virtual_overlaymap_index: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap_index'),
+                        virtual_overlaymap: gl_context.getUniformLocation(pipeline, 'virtual_overlaymap'),
+                        virtual_overlaymap_infos: gl_context.getUniformBlockIndex(pipeline, "Infos_overlaymap"),
+                    }
+                };
+            };
+            if (render_pipelines)
+                for (const pipeline of Object.values(render_pipelines))
+                    gl_context.deleteProgram(pipeline.program);
+            render_pipelines = {
+                terrain: create_pipeline(gl_context, vs, fs),
+                idx: create_pipeline(gl_context, vs, fs_id),
             };
         };
-        render_pipelines = {
-            terrain: create_pipeline(gl_context, vs, fs),
-            idx: create_pipeline(gl_context, vs, fs_id),
-        };
+        create_render_pipelines();
         track_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         measure_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+        document.getElementById("enable_seamless_tiles").addEventListener("change", (e) => {
+            seamless_tiles = e.target.checked;
+            create_render_pipelines();
+            for (const renderer of [track_renderer, measure_renderer])
+                renderer.create_program(virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+            draw_requested = true;
+        });
         measure_renderer.track_color = [.1, .45, 1, 1];
         measure_renderer.track_outline = [.02, .15, .4, 1];
 
