@@ -571,31 +571,71 @@ int main(int argc, const char** argv) {
     // Map loading (read only and currently does not need authentication)
     // ------------------------------------------------------------------------------------------------
     CROW_ROUTE(app, "/heightmap/meta")([](const crow::request& req) {
-        // the tiles are already string encoded for faster processing
-        // on the website side)
-        static nlohmann::json meta = [](){  // single instantiate on first call
-            std::vector<std::string> tiles{};
-            if (!std::filesystem::exists("data/tiles"))
-                return nlohmann::json{{"tiles", std::move(tiles)}};
-            for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
-                if (dir_entry.is_regular_file() && dir_entry.path().extension() == ".png") {
-                    // finding the 2 last / from the back
-                    const std::string tmp = dir_entry.path().string();
-                    std::string_view string_view = tmp;
-                    string_view = string_view.substr(0, string_view.find_last_of("."));
-                    int slash_count = 0;
-                    auto c = string_view.end() - 1;
-                    for (; c >= string_view.begin(); --c) {
-                        if (*c == '/') ++slash_count;
-                        if (slash_count >= 3) break;
-                    }
-                    tiles.emplace_back(c + 1, string_view.end());
+        // the available tiles are sent as a quadtree coverage {"level/x/y": max_level}: all descendants of the tile down
+        // to max_level exist. A tile exists if an ancestor (or the tile itself) is listed with max_level >= its level.
+        // The plain tile list has millions of entries (~40 MB json for bavaria) which is too much for mobile browsers
+        static const std::string meta = [](){  // single instantiate on first call
+            // tile key: level in the upper bits, x and y with 29 bits each
+            const auto key = [](uint64_t l, uint64_t x, uint64_t y) { return (l << 58) | (x << 29) | y; };
+            std::vector<std::vector<std::pair<uint32_t, uint32_t>>> levels;
+            std::unordered_set<uint64_t> tiles;
+            if (std::filesystem::exists("data/tiles")) {
+                for (const auto& dir_entry: std::filesystem::recursive_directory_iterator("data/tiles")) {
+                    if (!dir_entry.is_regular_file() || dir_entry.path().extension() != ".png")
+                        continue;
+                    // path is data/tiles/level/x/y.png
+                    const auto& p = dir_entry.path();
+                    try {
+                        const uint32_t y = std::stoul(p.stem().string());
+                        const uint32_t x = std::stoul(p.parent_path().filename().string());
+                        const uint32_t l = std::stoul(p.parent_path().parent_path().filename().string());
+                        if (l > 31)
+                            continue;
+                        if (levels.size() <= l)
+                            levels.resize(l + 1);
+                        levels[l].emplace_back(x, y);
+                        tiles.insert(key(l, x, y));
+                    } catch (...) {}
                 }
             }
-            return nlohmann::json{{"tiles", std::move(tiles)}};
+            // deepest level down to which the whole subtree of a tile exists, computed bottom up
+            std::unordered_map<uint64_t, uint32_t> full;
+            for (int l = int(levels.size()) - 1; l >= 0; --l) {
+                for (const auto& [x, y]: levels[l]) {
+                    uint32_t depth = l;
+                    bool all_children = true;
+                    for (uint32_t c = 0; c < 4 && all_children; ++c) {
+                        auto it = full.find(key(l + 1, 2 * x + (c & 1), 2 * y + (c >> 1)));
+                        if (it == full.end())
+                            all_children = false;
+                        else
+                            depth = c == 0 ? it->second : std::min(depth, it->second);
+                    }
+                    full[key(l, x, y)] = all_children ? depth : l;
+                }
+            }
+            // top down from the tiles without parent, a tile is listed if its subtree reaches deeper than its listed ancestors
+            nlohmann::json coverage = nlohmann::json::object();
+            const auto emit = [&](auto&& emit, uint32_t l, uint32_t x, uint32_t y, int reach) -> void {
+                auto it = full.find(key(l, x, y));
+                if (it == full.end())
+                    return;
+                if (int(it->second) > reach) {
+                    coverage[std::to_string(l) + "/" + std::to_string(x) + "/" + std::to_string(y)] = it->second;
+                    reach = it->second;
+                }
+                for (uint32_t c = 0; c < 4; ++c)
+                    emit(emit, l + 1, 2 * x + (c & 1), 2 * y + (c >> 1), reach);
+            };
+            for (size_t l = 0; l < levels.size(); ++l)
+                for (const auto& [x, y]: levels[l])
+                    if (l == 0 || !tiles.contains(key(l - 1, x / 2, y / 2)))
+                        emit(emit, l, x, y, -1);
+            return nlohmann::json{{"coverage", std::move(coverage)}}.dump();
         }();
 
-        crow::response res{meta.dump()};
+        crow::response res{meta};
+        res.set_header("Content-Type", "application/json");
         return res;
     });
     CROW_ROUTE(app, "/heightmap/<path>")([](const crow::request& req, const std::string& tile) {

@@ -444,6 +444,10 @@ const PositionFilter = () => {
             if (!this.kf)
                 return;
             this.imu_used = !!acc && !stationary && t - this.last_fix_t < this.imu_max_fix_age_s;
+            // without measured acceleration the prediction is left to position(), which limits the extrapolation.
+            // Predicting here would move the position along the (noisy) velocity forever and redraw the map every frame
+            if (!this.imu_used && !stationary)
+                return;
             this.predict(t, this.imu_used ? acc : null);
             if (stationary)
                 this.kf.axes.forEach(a => this.update(a, 1, 0, this.zero_velocity_sigma_mps ** 2));

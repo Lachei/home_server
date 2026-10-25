@@ -4,7 +4,7 @@
 
 <head>
     <meta http-equiv="x-ua-compatible" content="ie=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <meta charset="utf-8">
     <title>{{file_name}}</title>
     <style>
@@ -19,6 +19,8 @@
             height: 100%;
             margin: 0px;
             overflow: hidden;
+            /* no page zoom (pinch and double tap), scrolling of the panels stays possible */
+            touch-action: pan-x pan-y;
         }
 
         /* the map fills the visible viewport (dvh excludes the mobile url bar), the header floats over it */
@@ -63,6 +65,9 @@
 
         #canvas3d {
             display: block;
+            /* all gestures on the map are handled by the page. Set in css as the browser does not wait for the touch
+               handlers if the main thread is busy and would zoom the whole page instead */
+            touch-action: none;
         }
 
         /* panels floating over the map */
@@ -627,9 +632,16 @@
     };
 
     let draw_requested = true;
+    const own_position_redraw_m = .5;           // min movement of the own position for a redraw
     // while following the own position the camera turns into the direction of travel, a manual rotation pauses this
-    const auto_heading_min_speed_mps = 1;       // below the direction of the filtered velocity is mostly noise
+    const auto_heading_min_speed_mps = 1.5;     // the camera starts turning above this speed, below the course is mostly noise
+    const auto_heading_stop_speed_mps = .8;     // and stops turning below this speed
+    const auto_heading_max_fix_age_ms = 3000;   // the gps course is used for this long after the fix
+    const auto_heading_smooth_s = 2;            // time constant of the low pass of the travel direction
+    const auto_heading_dead_zone = 3 * Math.PI / 180;  // smaller direction changes do not turn the camera
     const auto_heading_time_s = 1.5;            // time constant of the smooth turn
+    let auto_heading_active = false;
+    let auto_heading_vec = null;                // smoothed unit travel direction in uv
     const auto_heading_pause_ms = 10000;        // pause after a manual rotation
     let auto_heading_paused_until = 0;
     let auto_heading_last_t = null;
@@ -645,21 +657,41 @@
         draw_requested |= camera_updated;
         const own_pos = own_position.position();
         if (own_pos) {
-            // the position is extrapolated between the gps fixes, redraw if it moved about a pixel
+            // the position is extrapolated between the gps fixes, redraw if it moved about a pixel and at least
+            // own_position_redraw_m, otherwise the sensor noise redraws the map every frame when zoomed in
             const d = own_position_drawn ? Math.hypot(own_pos.x - own_position_drawn.x, own_pos.y - own_position_drawn.y) : Infinity;
             const cam_dist = Math.hypot(own_pos.x - camera_center.x(), own_pos.y - camera_center.y(), camera_center.z());
-            if (d > cam_dist * 5e-4)
+            if (d > Math.max(cam_dist * 5e-4, own_position_redraw_m / GpxUtil.meters_per_uv(own_pos.y)))
                 draw_requested = true;
         }
         const auto_heading_t = performance.now();
         if (document.getElementById("enable_cam_follow").checked && own_pos) {
-            const v = own_position.velocity_mps();
-            if (v && Math.hypot(v.x, v.y) > auto_heading_min_speed_mps && auto_heading_t > auto_heading_paused_until && auto_heading_last_t !== null) {
+            // the gps course is used for the direction, the filtered velocity contains the integrated accelerations which
+            // change their direction with every step. Turning the camera with it swings the view around and makes the
+            // tile loading run constantly. The filter velocity is only used if the gps gives no course
+            const fix = own_position.last_fix;
+            let v = null;
+            if (fix && Date.now() - fix.timestamp < auto_heading_max_fix_age_ms && fix.coords.speed !== null && fix.coords.heading !== null && isFinite(fix.coords.heading)) {
+                const h = fix.coords.heading * Math.PI / 180;
+                v = {x: fix.coords.speed * Math.sin(h), y: -fix.coords.speed * Math.cos(h)};   // uv y points south
+            } else
+                v = own_position.velocity_mps();
+            const speed = v ? Math.hypot(v.x, v.y) : 0;
+            // hysteresis, otherwise walking at about the threshold speed toggles the turning on and off
+            auto_heading_active = speed > (auto_heading_active ? auto_heading_stop_speed_mps : auto_heading_min_speed_mps);
+            const dt = auto_heading_last_t !== null ? Math.min((auto_heading_t - auto_heading_last_t) / 1000, .2) : 0;
+            if (auto_heading_active) {
+                // the direction is low pass filtered as a vector, single noisy courses only turn it a bit
+                const a = 1 - Math.exp(-dt / auto_heading_smooth_s);
+                auto_heading_vec = auto_heading_vec ? {x: auto_heading_vec.x + a * (v.x / speed - auto_heading_vec.x), y: auto_heading_vec.y + a * (v.y / speed - auto_heading_vec.y)}
+                                                    : {x: v.x / speed, y: v.y / speed};
+            } else
+                auto_heading_vec = null;
+            if (auto_heading_vec && auto_heading_t > auto_heading_paused_until && dt > 0) {
                 // the camera looks along -get_forward_dir(camera_dir, camera_pitch), turned along the shorter way
-                const target_dir = Math.atan2(-v.x, -v.y);
+                const target_dir = Math.atan2(-auto_heading_vec.x, -auto_heading_vec.y);
                 const diff = ((target_dir - camera_dir) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
-                const dt = Math.min((auto_heading_t - auto_heading_last_t) / 1000, .2);
-                if (Math.abs(diff) > 1e-4) {
+                if (Math.abs(diff) > auto_heading_dead_zone) {
                     camera_dir += diff * (1 - Math.exp(-dt / auto_heading_time_s));
                     camera_dir = (camera_dir % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
                     draw_requested = true;
@@ -874,7 +906,18 @@
                 }
         }
         // own heightmaps of the server are preferred, aws terrarium only goes up to level 15
-        const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
+        // the server sends the quadtree coverage {"level/x/y": max_level}, all descendants of a listed tile exist down to max_level
+        const tile_on_minifuzi = (tile) => {
+            const coverage = heightmap_meta_data && heightmap_meta_data.coverage;
+            if (!coverage)
+                return false;
+            for (let l = tile.level; l >= 0; --l) {
+                const max_level = coverage[`${l}/${tile.x >> (tile.level - l)}/${tile.y >> (tile.level - l)}`];
+                if (max_level !== undefined && max_level >= tile.level)
+                    return true;
+            }
+            return false;
+        };
         // mapterhorn has 512 pixel tiles up to level 16 (1 m data in parts of europe), so level l is a quarter of a level l - 1 tile
         const height_source = document.getElementById("height_source").value;
         const height_max_level = height_source == "mapterhorn" ? 17 : 15;
@@ -1664,6 +1707,9 @@
     // ----------------------------------------------------------------------------------------
 
     async function init() {
+        // mobile gpus are too slow for the default geometry resolution
+        if (is_touch)
+            document.getElementById("triangle_resolution").value = 10;
         // webgl init
         // very important to set willReadFrequently because it disables gpu acceleration
         gl_context = canvas3d.getContext('webgl2', {antialias: true, willReadFrequently: false, powerPreference: 'high-performance' }) || canvas3d.getContext('experimental-webgl2');
@@ -1687,7 +1733,10 @@
         // the virtual maps have to exist before the shaders are created as their uniform sizes depend on them
         const max_depth = 18;
         const v_width = 1 << max_depth;
-        virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        // tiles per cascade, also the size of the info arrays in the shaders. With 96 the shader compiler of chrome mobile
+        // failed with the assertion "cannot compute GV size for OOB", so test on mobile before changing it
+        const tiles_per_cascade = 255;
+        virtual_height_map = VirtualMap().init(v_width, v_width, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
         // the height range of each tile is needed for culling and lod selection of the mesh tiles
         // the max pooled height grid is used to keep the camera above the terrain
         virtual_height_map.tile_data_callback = (tile, data) => {
@@ -1709,9 +1758,9 @@
             tile.height_grid_mean = grid_mean;
         };
         const w_street = 1 << Util.max_tile_level;   // deep enough for the most detailed map layers
-        virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
         const w_overlay = 1 << 19;
-        virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, 255, TextureTypes(gl_context).un8rgba, gl_context);
+        virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
 
         const vs = `#version 300 es
         #define PI 3.1415926535897932384626433832795
@@ -1963,18 +2012,35 @@
             setInterval(save, 5000);
         setInterval(check_remote_changes, 5000);
 
-        // starting the endless loop for updating the image cache
-        setInterval(draw_scene, 20); 
-        setInterval(() => check_virtual_textures_update("height", virtual_height_map), 20);
-        setInterval(() => check_virtual_textures_update("streetmap", virtual_street_map), 20);
-        setInterval(() => check_virtual_textures_update("overlay", virtual_overlay_map), 20);
-        setInterval(gpu_tile_processing, 20);
+        // the endless loop for the texture uploads, the tile processing and drawing. It runs with requestAnimationFrame
+        // instead of timers as the browser then waits for the gpu: with timers the gpu work of the next frames is queued even
+        // if the gpu is slower (mobile), the queue grows until the browser hangs or the context gets lost
+        // a late frame means the main thread was blocked (or the browser waited for the gpu), the steps of the frame
+        // are timed to find what blocked: if they are all fast, the time was spent outside of the frame loop
+        let last_frame_t = null;
+        const frame = () => {
+            const t0 = performance.now();
+            const times = [];
+            const step = (name, f) => { const s = performance.now(); f(); times.push(`${name} ${(performance.now() - s).toFixed(0)}`); };
+            try {
+                step("height", () => check_virtual_textures_update("height", virtual_height_map));
+                step("streetmap", () => check_virtual_textures_update("streetmap", virtual_street_map));
+                step("overlay", () => check_virtual_textures_update("overlay", virtual_overlay_map));
+                step("tiles", () => gpu_tile_processing());
+                step("draw", () => draw_scene());
+            } finally {
+                const t1 = performance.now();
+                if (last_frame_t !== null && t0 - last_frame_t > 100 || t1 - t0 > 50)
+                    console.warn(`late frame: ${(t0 - last_frame_t).toFixed(0)} milli since the last frame, steps (milli): ${times.join(", ")}`);
+                last_frame_t = t1;
+                requestAnimationFrame(frame);
+            }
+        };
+        requestAnimationFrame(frame);
         resizeCanvasToDisplaySize(canvas3d, indices_render_objs, gl_context);
         
         try {
             heightmap_meta_data = await (await fetch(location.origin + "/heightmap/meta")).json();
-            // adding a set for all the available tiles
-            heightmap_meta_data.tiles_set = new Set(heightmap_meta_data.tiles);
         } catch(e) {}
         // console.log = () => {};
         // console.info = () => {};

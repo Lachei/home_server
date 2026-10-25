@@ -470,6 +470,7 @@ const VirtualMap = () => {
         upload_loaded_images: function () {
             const max_upload = 5; // upload at max 5 images per call
             let upload = 0;
+            let undecoded_uploaded = false;
             let change = false;
             for (let c = 0; c < this.cascades.length; ++c) {
                 const tiles = this.cascades[c].tiles;
@@ -490,6 +491,13 @@ const VirtualMap = () => {
                         this.drop_tile_at_index(i, c);
                         change = true;
                         continue;
+                    }
+                    // each undecoded image blocks the main thread for its decode, only one such tile is uploaded per call
+                    const undecoded = tile.images ? tile.images.some(img => !img.decoded) : !tile.image.decoded;
+                    if (undecoded) {
+                        if (undecoded_uploaded)
+                            continue;
+                        undecoded_uploaded = true;
                     }
                     if (tile.images) {
                         // several images are composed on the canvas
@@ -517,6 +525,10 @@ const VirtualMap = () => {
                         }
                     }
                     tile.data_uploaded_to_gpu = true;
+                    // the decoded images are not needed anymore, keeping them would hold up to a few hundred MB on the cpu.
+                    // src is not cleared, the browser cache still has the image if the tile is requested again
+                    tile.image = null;
+                    tile.images = null;
                     this.failed_urls.delete(String(tile.url));
                     change = true;
                     upload += 1;
@@ -742,7 +754,8 @@ const Tile = () => {
             img.onload = () => {
                 let finished = false;
                 const finish = () => { if (!finished && still_needed()) done(true); finished = true; };
-                img.decode().catch(() => {}).then(finish);
+                // undecoded images are decoded synchronously on upload, upload_loaded_images limits them per call
+                img.decode().then(() => { img.decoded = true; }, () => {}).then(finish);
                 setTimeout(finish, tile_decode_timeout_ms);
             };
             img.onerror = () => { if (still_needed()) done(false); };
@@ -1044,11 +1057,11 @@ const Util = {
             float mip_offset = max_l + 6.5;
             return max_l - clamp(.5 * log2(d2) + mip_offset, 0., max_l);
         }
-        // squared uv footprint of a pixel for the level selection. The larger axis is used, the anisotropy is limited
-        // to 4 (16 squared) to keep some sharpness at glancing angles without requesting the finest tiles up to the horizon
+        // squared uv footprint of a pixel for the level selection, the average length of the screen x and y derivatives.
+        // At glancing angles this lies between the smaller axis (sharp, but fine tiles up to the horizon) and the larger axis (blurry)
         float get_footprint(vec2 dx, vec2 dy) {
-            float dx2 = dot(dx, dx), dy2 = dot(dy, dy);
-            return min(max(dx2, dy2), min(dx2, dy2) * 16.);
+            float d = .5 * (length(dx) + length(dy));
+            return d * d;
         }
         `
     },
