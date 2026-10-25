@@ -35,6 +35,10 @@ const map_provider_type = 0x12392452;
 
 // const declarations for settings
 const max_loading_tiles = 32;           // max tiles per virtual map which are downloaded at the same time
+// downloads used for preloading, the remaining slots are kept free for tiles which become visible
+const max_preloading_tiles = 16;
+// preloaded tiles only replace tiles which were not used for this time
+const preload_keep_ms = 10000;
 // downloads which neither finished nor failed after this time are treated as failed. Some browsers (e.g. chrome mobile)
 // stall requests without an error, the stuck tiles would otherwise block all loading slots forever
 const tile_load_timeout_ms = 15000;
@@ -212,11 +216,55 @@ const VirtualMap = () => {
             }
             return changed;
         },
+        /**
+         * @brief validates the request and computes where the tile is stored
+         * @returns {Object} null if the tile can not be stored or its url failed recently, otherwise
+         *          {url, c, final_x, final_y, width, lookup_table_string, stored: bool, dropped: bool}. dropped is set if a
+         *          stored tile with different urls was dropped, the virtual texture has to be rebuilt then
+         */
+        resolve_request: function (tile_req) {
+            if (tile_req.type != tile_request_type) {// ignore wrong type tiles
+                console.error("Wrong type for tile request, got type: " + String(tile_req.type));
+                return null;
+            }
+            if (tile_req.level > this.max_level) {
+                console.error("Too deep level for this virtual texture. Ignoring");
+                return null;
+            }
+            const width = 2 ** (this.max_level - tile_req.level);
+            const final_x = (tile_req.x * width + Math.floor(tile_req.offsets.x * this.v_tex_width)) % this.v_tex_width;
+            const final_y = (tile_req.y * width + Math.floor(tile_req.offsets.y * this.v_tex_height)) % this.v_tex_height;
+            if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height) {
+                console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
+                return null;
+            }
+            const c = this.cascade_of_level(tile_req.level);
+            if (!this.tile_in_window(c, final_x, final_y, width))   // can not be stored, coarser tiles are used there
+                return null;
+            const failed = this.failed_urls.get(String(tile_req.url));
+            if (failed !== undefined && Date.now() - failed.time < Math.min(failed_url_retry_base_ms * 2 ** (failed.count - 1), failed_url_retry_max_ms))
+                return null;
+            let cascade = this.cascades[c];
+            const lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
+            let stored = lookup_table_string in cascade.lookup_table;
+            let dropped = false;
+            if (stored && Array.isArray(cascade.tiles[cascade.lookup_table[lookup_table_string]].url)) {
+                const tile = cascade.tiles[cascade.lookup_table[lookup_table_string]];
+                if (!Array.isArray(tile_req.url) || tile.url.length != tile_req.url.length || tile.url.some((url, i) => url != tile_req.url[i])) {
+                    this.drop_tile_at_index(cascade.lookup_table[lookup_table_string], c);
+                    stored = false;
+                    dropped = true;
+                }
+            }
+            return {url: tile_req.url, c: c, final_x: final_x, final_y: final_y, width: width, lookup_table_string: lookup_table_string, stored: stored, dropped: dropped};
+        },
         /** 
          * @param {Array.<TileRequest>} tile_requests Tiles which are needed next frame 
          * @param {{x: float, y: float}} cam_center_uv Camera center the cascade windows are centered around
-        */
-        update_needed_tiles: function (tile_requests, cam_center_uv) {
+         * @param {Array.<TileRequest>} preload_requests Tiles which might be needed soon (e.g. neighbors of the visible tiles).
+         *        They are only loaded with spare download slots and never replace tiles which were used recently
+         */
+        update_needed_tiles: function (tile_requests, cam_center_uv, preload_requests = []) {
             // sorting the tile requests to have the highest detailed images last, if a cascade is full the
             // coarser tiles get the free slots as they are the fallback for the detailed ones
             tile_requests.sort((a, b) => a.level - b.level);
@@ -227,42 +275,14 @@ const VirtualMap = () => {
             // tile could drop a stored tile which is requested later in this update and has to be loaded again
             let needed = [];
             for (const tile_req of tile_requests) {
-                if (tile_req.type != tile_request_type) {// ignore wrong type tiles
-                    console.error("Wrong type for tile request, got type: " + String(tile_req.type));
+                const r = this.resolve_request(tile_req);
+                if (!r)
                     continue;
-                }
-                if (tile_req.level > this.max_level) {
-                    console.error("Too deep level for this virtual texture. Ignoring");
-                    continue;
-                }
-                const width = 2 ** (this.max_level - tile_req.level);
-                const final_x = (tile_req.x * width + Math.floor(tile_req.offsets.x * this.v_tex_width)) % this.v_tex_width;
-                const final_y = (tile_req.y * width + Math.floor(tile_req.offsets.y * this.v_tex_height)) % this.v_tex_height;
-                if (final_x + width > this.v_tex_width || final_y + width > this.v_tex_height) {
-                    console.error("VirtualTexture::update_needed_tiles() new tile invalid x/y");
-                    continue;
-                }
-                const c = this.cascade_of_level(tile_req.level);
-                if (!this.tile_in_window(c, final_x, final_y, width))   // can not be stored, coarser tiles are used there
-                    continue;
-                const failed = this.failed_urls.get(String(tile_req.url));
-                if (failed !== undefined && Date.now() - failed.time < Math.min(failed_url_retry_base_ms * 2 ** (failed.count - 1), failed_url_retry_max_ms))
-                    continue;
-                let cascade = this.cascades[c];
-                const lookup_table_string = CoordinateMappings.coords_to_lookup_string(final_x, final_y, width);
-                let already_loaded = lookup_table_string in cascade.lookup_table;
-                if (already_loaded && Array.isArray(cascade.tiles[cascade.lookup_table[lookup_table_string]].url)) {
-                    const tile = cascade.tiles[cascade.lookup_table[lookup_table_string]];
-                    if (!Array.isArray(tile_req.url) || tile.url.length != tile_req.url.length || tile.url.some((url, i) => url != tile_req.url[i])) {
-                        this.drop_tile_at_index(cascade.lookup_table[lookup_table_string], c);
-                        rebuild_vtex_needed = true;
-                        already_loaded = false;
-                    }
-                }
-                if (already_loaded)
-                    cascade.tiles[cascade.lookup_table[lookup_table_string]].last_use = request_time;
+                rebuild_vtex_needed |= r.dropped;
+                if (r.stored)
+                    this.cascades[r.c].tiles[this.cascades[r.c].lookup_table[r.lookup_table_string]].last_use = request_time;
                 else
-                    needed.push({url: tile_req.url, c: c, final_x: final_x, final_y: final_y, width: width, lookup_table_string: lookup_table_string});
+                    needed.push(r);
             }
 
             // limiting the running downloads: while the camera moves, most tiles requested at once would not be needed
@@ -283,21 +303,21 @@ const VirtualMap = () => {
                     ++loading;
                 }
             }
-            for (const n of needed) {
-                if (loading >= max_loading_tiles)
-                    break;
+            const load = (n, keep_since, max_loading) => {
+                if (loading >= max_loading)
+                    return false;
                 let cascade = this.cascades[n.c];
                 if (n.lookup_table_string in cascade.lookup_table)  // requested twice
-                    continue;
+                    return true;
                 // make space for a new tile if tile cache full
                 if (cascade.free_tiles.size == 0) {
-                    this.drop_least_important_tiles(10, n.c, request_time);
+                    this.drop_least_important_tiles(10, n.c, keep_since);
                     rebuild_vtex_needed = true;
                 }
                 // all tiles of the cascade are needed by this request, the coarser tiles are used instead
                 // (requests are sorted coarse to fine). Dropping needed tiles would reload them forever
                 if (cascade.free_tiles.size == 0)
-                    continue;
+                    return true;
                 const [i_cpu] = cascade.free_tiles;
                 cascade.free_tiles.delete(i_cpu);
                 let t = cascade.tiles[i_cpu];
@@ -306,6 +326,23 @@ const VirtualMap = () => {
                 t.last_use = request_time;
                 cascade.lookup_table[n.lookup_table_string] = i_cpu;
                 ++loading;
+                return true;
+            };
+            for (const n of needed)
+                if (!load(n, request_time, max_loading_tiles))
+                    break;
+
+            // preloading after the needed tiles, so that preloaded tiles of earlier updates can be replaced by needed ones
+            preload_requests.sort((a, b) => a.level - b.level);
+            for (const tile_req of preload_requests) {
+                const r = this.resolve_request(tile_req);
+                if (!r)
+                    continue;
+                rebuild_vtex_needed |= r.dropped;
+                if (r.stored)
+                    this.cascades[r.c].tiles[this.cascades[r.c].lookup_table[r.lookup_table_string]].last_use = request_time;
+                else if (!load(r, request_time - preload_keep_ms, max_preloading_tiles))
+                    break;
             }
             if (rebuild_vtex_needed)
                 this.rebuild_virtual_texture();

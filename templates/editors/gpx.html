@@ -197,6 +197,7 @@
                     <label><input id="enable_help_lines" type="checkbox" onchange="help_line_ref = null; draw_requested = true;">Hilfslinien</label>
                     <label>Winkel <input id="help_line_angle" type="range" min="-90" max="90" value="0" oninput="help_line_ref = null; draw_requested = true;">&deg;</label>
                     <label>Abstand <input id="help_line_distance" type="number" min="1" value="1000" oninput="help_line_ref = null; draw_requested = true;"> m</label>
+		    <button type="button" onclick='camera_pitch = Math.PI / 2; camera_dir = 0; camera_interpolation.value = "1";'>2D view</button>
                     <button type="button" onclick="request_full_screen();">Vollbild</button>
                 </div>
             </div>
@@ -857,6 +858,21 @@
         console.log(`checking tiles took ${performance.now() - start} milli`);
         let decoded_tiles = Util.int32_to_tile_id(needed_tiles, readback.grid_offset_pos);
         Util.add_missing_parent_tiles(decoded_tiles);
+        // the neighbors of the visible tiles are preloaded, they become visible when the camera pans or turns
+        const decoded_set = new Set(decoded_tiles.map(t => `${t.level}|${t.x}|${t.y}`));
+        let preload_tiles = [];
+        for (const t of decoded_tiles) {
+            const n = 1 << t.level;
+            for (let dy = -1; dy <= 1; ++dy)
+                for (let dx = -1; dx <= 1; ++dx) {
+                    const p = {level: t.level, x: (t.x + dx + n) % n, y: t.y + dy};
+                    const key = `${p.level}|${p.x}|${p.y}`;
+                    if (p.y < 0 || p.y >= n || decoded_set.has(key))
+                        continue;
+                    decoded_set.add(key);
+                    preload_tiles.push(p);
+                }
+        }
         // own heightmaps of the server are preferred, aws terrarium only goes up to level 15
         const tile_on_minifuzi = (tile) => {return heightmap_meta_data && heightmap_meta_data.tiles_set && heightmap_meta_data.tiles_set.has(`${tile.level}/${tile.x}/${tile.y}`);}
         // mapterhorn has 512 pixel tiles up to level 16 (1 m data in parts of europe), so level l is a quarter of a level l - 1 tile
@@ -869,9 +885,10 @@
                 return `https://tiles.mapterhorn.com/${tile.level - 1}/${tile.x >> 1}/${tile.y >> 1}.webp#sub=${(tile.x & 1) * 256},${(tile.y & 1) * 256}`;
             return `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/${tile.level}/${tile.x}/${tile.y}.png`;
         };
-        let requested_tiles = decoded_tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= height_max_level))
-                                           .map(tile => TileRequest().init(tile.x, tile.y, tile.level, height_url(tile)));
-        virtual_height_map.update_needed_tiles(requested_tiles, {x: camera_center.x(), y: camera_center.y()});
+        const height_requests = (tiles) => tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= height_max_level))
+                                                .map(tile => TileRequest().init(tile.x, tile.y, tile.level, height_url(tile)));
+        const cam_uv = {x: camera_center.x(), y: camera_center.y()};
+        virtual_height_map.update_needed_tiles(height_requests(decoded_tiles), cam_uv, height_requests(preload_tiles));
         let layer = get_selected_layer();
         const offset_level = (level, layer) => {
             if (layer.getAttribute("level_offset"))
@@ -886,14 +903,14 @@
                 offset.y = parseFloat(layer.getAttribute("y_offset"));
             return offset;
         };
-        let requested_streetmap_tiles = decoded_tiles.map(tile => 
+        const streetmap_requests = (tiles) => tiles.map(tile => 
             TileRequest().init(tile.x, tile.y, offset_level(tile.level, layer),
             !layer.getAttribute("swap_xy") ? `https://${layer.getAttribute("base_url")}${tile.level}/${tile.x}/${tile.y}${layer.getAttribute("ending") || ""}`
                                            : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending") || ""}`,
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
-        virtual_street_map.update_needed_tiles(requested_streetmap_tiles, {x: camera_center.x(), y: camera_center.y()});
+        virtual_street_map.update_needed_tiles(streetmap_requests(decoded_tiles), cam_uv, streetmap_requests(preload_tiles));
         if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
-            let requested_parcell_tiles = decoded_tiles.map(tile => {
+            const parcell_requests = (tiles) => tiles.map(tile => {
                 let urls = [];
                 if (document.getElementById("enable_parcell_map").checked)
                     urls.push(`https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`);
@@ -901,7 +918,7 @@
                     urls.push(`https://intergeo33.bayernwolke.de/betty/g_atkishybrid_webp/${tile.level}/${tile.x}/${tile.y}`);
                 return TileRequest().init(tile.x, tile.y, tile.level, urls);
             }).filter(e => e.level <= 19);
-            virtual_overlay_map.update_needed_tiles(requested_parcell_tiles, {x: camera_center.x(), y: camera_center.y()});
+            virtual_overlay_map.update_needed_tiles(parcell_requests(decoded_tiles), cam_uv, parcell_requests(preload_tiles));
         }
         
         console.log(`Full tile update took ${performance.now() - tile_processing_start} milli`);
