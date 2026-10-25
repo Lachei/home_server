@@ -1101,6 +1101,42 @@ const Util = {
             // the tile origin is subtracted before adding uv_loc to keep the precision for deep levels
             return ((uv_offset - vec2(info.xy) / v_tex_width) + uv_loc) * (v_tex_width / float(info.z));
         }
+        int virtual_${v_map_name}_tile_level(int index) {
+            return int(virtual_${v_map_name}_cascades[0].w) - int(round(log2(float(virtual_${v_map_name}_infos[index].z))));
+        }
+        // texel of the tile at index, image_uv is the position of uv_loc in its pixels. Texels outside of the tile are
+        // fetched from the neighboring tile (same or coarser level), otherwise each tile would end with a visible seam.
+        // The border texel of the tile is used if the neighbor is not loaded
+        vec4 virtual_${v_map_name}_fetch(int index, vec2 uv_offset, vec2 uv_loc, vec2 image_uv, ivec2 texel) {
+            ivec2 size = textureSize(virtual_${v_map_name}, 0).xy;
+            if (texel != clamp(texel, ivec2(0), size - 1)) {
+                // the neighbor is searched at the texel center, given relative to uv_loc to keep the precision for deep levels
+                float tile_w = float(virtual_${v_map_name}_infos[index].z) / exp2(virtual_${v_map_name}_cascades[0].w);
+                vec2 n_loc = uv_loc + (vec2(texel) + .5 - image_uv) / vec2(size) * tile_w;
+                int n = virtual_${v_map_name}_find_tile(uv_offset, n_loc, float(virtual_${v_map_name}_tile_level(index))).x;
+                if (n >= 0) {
+                    index = n;
+                    texel = ivec2(floor(virtual_${v_map_name}_tile_uv(n, uv_offset, n_loc) * vec2(size)));
+                }
+                texel = clamp(texel, ivec2(0), size - 1);
+            }
+            return texelFetch(virtual_${v_map_name}, ivec3(texel, index), 0);
+        }
+        // bilinear sample of the tile at index, near the tile border the interpolation continues into the neighbor tiles
+        vec4 virtual_${v_map_name}_sample(int index, vec2 uv_offset, vec2 uv_loc) {
+            vec2 size = vec2(textureSize(virtual_${v_map_name}, 0).xy);
+            vec2 tuv = virtual_${v_map_name}_tile_uv(index, uv_offset, uv_loc);
+            vec2 image_uv = tuv * size;
+            if (image_uv == clamp(image_uv, vec2(.5), size - .5))    // fast path, the hardware filter stays inside of the tile
+                return texture(virtual_${v_map_name}, vec3(tuv, float(index)));
+            vec2 p = image_uv - .5;     // texel centers are at i + .5
+            ivec2 i = ivec2(floor(p));
+            vec2 a = p - vec2(i);
+            return mix(mix(virtual_${v_map_name}_fetch(index, uv_offset, uv_loc, image_uv, i),
+                           virtual_${v_map_name}_fetch(index, uv_offset, uv_loc, image_uv, i + ivec2(1, 0)), a.x),
+                       mix(virtual_${v_map_name}_fetch(index, uv_offset, uv_loc, image_uv, i + ivec2(0, 1)),
+                           virtual_${v_map_name}_fetch(index, uv_offset, uv_loc, image_uv, i + ivec2(1, 1)), a.x), a.y);
+        }
         `;
     },
 
@@ -1110,8 +1146,8 @@ const Util = {
             ivec2 tiles = virtual_${v_map_name}_find_tile(uv_offset, uv_loc, level);
             if (tiles.x < 0)
                 return vec4(0);
-            vec4 c = texture(virtual_${v_map_name}, vec3(virtual_${v_map_name}_tile_uv(tiles.x, uv_offset, uv_loc), float(tiles.x)));
-            vec4 t = texture(virtual_${v_map_name}, vec3(virtual_${v_map_name}_tile_uv(tiles.y, uv_offset, uv_loc), float(tiles.y)));
+            vec4 c = virtual_${v_map_name}_sample(tiles.x, uv_offset, uv_loc);
+            vec4 t = tiles.y == tiles.x ? c : virtual_${v_map_name}_sample(tiles.y, uv_offset, uv_loc);
             // blending to the next deeper tile
             float alpha = clamp(level - floor(level), 0., 1.);
             alpha = alpha * 10. - 5.;
@@ -1131,36 +1167,30 @@ const Util = {
         vec3 create_normal(float dx, float dy, float w) {
             return normalize(cross(vec3(w, 0, dx), vec3(0, w, dy)));
         }
+        float virtual_heightmap_height(int index, vec2 uv_offset, vec2 uv_loc, vec2 image_uv, ivec2 texel) {
+            return decode_height(virtual_heightmap_fetch(index, uv_offset, uv_loc, image_uv, texel));
+        }
         // returns the height in x, and the normal in yzw
         vec4 virtual_heightmap_load(vec2 uv_offset, vec2 uv_loc, float level) {
             int index = virtual_heightmap_find_tile(uv_offset, uv_loc, level).x;
             if (index < 0)
                 return vec4(0);
             float width = float(virtual_heightmap_infos[index].z);
-            // fetching the surrounding pixels
+            // texel centers are at i + .5, neighbors outside of the tile are taken from the adjacent tiles such that
+            // heights and normals are continuous over tile borders
             vec2 image_uv = virtual_heightmap_tile_uv(index, uv_offset, uv_loc) * 256.;    // assumes always a tile size of 256
-            ivec2 iuv_loc = clamp(ivec2(image_uv), ivec2(0), ivec2(255));
-            ivec2 l10 = min(iuv_loc + ivec2(1, 0), ivec2(255));
-            ivec2 l01 = min(iuv_loc + ivec2(0, 1), ivec2(255));
-            ivec2 l11 = min(iuv_loc + ivec2(1, 1), ivec2(255));
-            // getting negative side pixels for better normals
-            ivec2 ln10 = max(iuv_loc + ivec2(-1, 0), ivec2(0));
-            ivec2 ln01 = max(iuv_loc + ivec2(0, -1), ivec2(0));
-            ivec2 ln1p1 = max(iuv_loc + ivec2(-1, 1), ivec2(0));
-            ivec2 lp1n1 = max(iuv_loc + ivec2(1, -1), ivec2(0));
-            float d00 = decode_height(texelFetch(virtual_heightmap, ivec3(iuv_loc, index), 0));
-            float d10 = decode_height(texelFetch(virtual_heightmap, ivec3(l10, index), 0));
-            float d01 = decode_height(texelFetch(virtual_heightmap, ivec3(l01, index), 0));
-            float d11 = decode_height(texelFetch(virtual_heightmap, ivec3(l11, index), 0));
-            float dn10 = decode_height(texelFetch(virtual_heightmap, ivec3(ln10, index), 0));
-            float dn01 = decode_height(texelFetch(virtual_heightmap, ivec3(ln01, index), 0));
-            float dn1p1 = decode_height(texelFetch(virtual_heightmap, ivec3(ln1p1, index), 0));
-            float dp1n1 = decode_height(texelFetch(virtual_heightmap, ivec3(lp1n1, index), 0));
-            vec2 a = image_uv - floor(image_uv);
-            if (iuv_loc.x == 255) {d10 = mix(d00, dn10, -1.); d11 = 3. * d00 - dn01 - dn10; dp1n1 = dn01;}
-            if (iuv_loc.y == 255) {d01 = mix(d00, dn01, -1.); d11 = 3. * d00 - dn01 - dn10; dn1p1 = dn10;}
-            if (iuv_loc.x == 0) {dn10 = 2. * d00 - d10; dn1p1 = 2. * d01 - d11;}
-            if (iuv_loc.y == 0) {dn01 = 2. * d00 - d01; dp1n1 = 2. * d10 - d11;}
+            vec2 p = image_uv - .5;
+            ivec2 i = ivec2(floor(p));
+            vec2 a = p - vec2(i);
+            float d00 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i);
+            float d10 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(1, 0));
+            float d01 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(0, 1));
+            float d11 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(1, 1));
+            // negative side pixels for the normals
+            float dn10 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(-1, 0));
+            float dn01 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(0, -1));
+            float dn1p1 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(-1, 1));
+            float dp1n1 = virtual_heightmap_height(index, uv_offset, uv_loc, image_uv, i + ivec2(1, -1));
             float gw = width / 4.;
             vec3 t = mix(mix(vec3(d00, d00 - dn10, d00 - dn01), vec3(d10, d10 - d00, d10 - dp1n1), a.x), 
                          mix(vec3(d01, d01 - dn1p1, d01 - d00 ), vec3(d11, d11 - d01, d11 - d10 ), a.x), a.y);

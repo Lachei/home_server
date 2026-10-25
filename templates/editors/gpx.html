@@ -573,9 +573,10 @@
             const tile = virtual_height_map.get_uploaded_tile(level, Math.floor(x * n), Math.floor(y * n));
             if (!tile || !tile.height_grid)
                 continue;
-            // the shader interpolates between texel floor(p) and floor(p) + 1, take the max of all grid cells containing them
-            const px = Math.min(Math.floor((x * n - Math.floor(x * n)) * 256), 255);
-            const py = Math.min(Math.floor((y * n - Math.floor(y * n)) * 256), 255);
+            // texel centers are at i + .5, the shader interpolates between texel floor(p - .5) and floor(p - .5) + 1,
+            // take the max of all grid cells containing them (texels of neighbor tiles are ignored)
+            const px = Math.min(Math.max(Math.floor((x * n - Math.floor(x * n)) * 256 - .5), 0), 255);
+            const py = Math.min(Math.max(Math.floor((y * n - Math.floor(y * n)) * 256 - .5), 0), 255);
             let h = -Infinity;
             for (let gy = py >> height_grid_shift; gy <= Math.min(py + 1, 255) >> height_grid_shift; ++gy)
                 for (let gx = px >> height_grid_shift; gx <= Math.min(px + 1, 255) >> height_grid_shift; ++gx)
@@ -591,9 +592,9 @@
             const tile = virtual_height_map.get_uploaded_tile(level, Math.floor(x * n), Math.floor(y * n));
             if (!tile || !tile.height_grid_mean)
                 continue;
-            // texel i is at i / 256 in the tile, so the center of grid cell c is at c + .375 in grid units
-            const gx = Math.min(Math.max((x * n - Math.floor(x * n)) * height_grid_res - .375, 0), height_grid_res - 1);
-            const gy = Math.min(Math.max((y * n - Math.floor(y * n)) * height_grid_res - .375, 0), height_grid_res - 1);
+            // texel i is centered at (i + .5) / 256 in the tile, so the center of grid cell c is at c + .5 in grid units
+            const gx = Math.min(Math.max((x * n - Math.floor(x * n)) * height_grid_res - .5, 0), height_grid_res - 1);
+            const gy = Math.min(Math.max((y * n - Math.floor(y * n)) * height_grid_res - .5, 0), height_grid_res - 1);
             const x0 = Math.min(Math.floor(gx), height_grid_res - 2), y0 = Math.min(Math.floor(gy), height_grid_res - 2);
             const tx = gx - x0, ty = gy - y0;
             const at = (cx, cy) => tile.height_grid_mean[cy * height_grid_res + cx];
@@ -2015,6 +2016,7 @@
         const down = Math.max(get_forward_dir(camera_dir, camera_pitch).z(), .05);   // the camera looks along -forward
         return Math.max((camera_center.z() - projection_focus_z) / down, Util.m_to_wgs_84_uv(10));
     };
+    const near_height_fac = .25;            // near plane distance relative to the camera height above the terrain
     const get_projection_mat = (camera_center, canvas) => {
         const displayWidth = canvas.width;
         const displayHeight = canvas.height;
@@ -2031,7 +2033,11 @@
         const s = orthographic ? 1e-3 : 1 - t;                  // tan(current fov / 2) / tan(fov / 2)
         const eye_offset = focus / s - focus;                   // distance the eye moves back
         const eye_fov_deg = 2 * Math.atan(tan_half * s) * 180 / Math.PI;
-        const near = 1e-10 * height_multiplier + .5 * eye_offset;
+        // the near plane determines the depth precision, a near plane far below the closest visible terrain makes distant
+        // mountains flicker. The terrain can not be closer than the height above it times the cosine of its slope
+        const ground_h = terrain_height_at(camera_center.x(), camera_center.y());
+        const height_above_ground = ground_h === null ? 0 : camera_center.z() - Util.m_to_wgs_84_uv(ground_h) * 1.4;
+        const near = Math.max(1e-10 * height_multiplier, near_height_fac * height_above_ground) + .5 * eye_offset;
         const far = .001 * height_multiplier + eye_offset;
         const aspect = displayWidth / displayHeight;
         const projection = orthographic ? Orthographic(focus * tan_half, focus * tan_half * aspect, near, far)
