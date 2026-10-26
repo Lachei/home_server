@@ -714,6 +714,10 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/virtual_texture.js")([&virtual_texture_js](){crow::response r(virtual_texture_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string gpx_track_js = crow::mustache::load_text("gpx_track.js");
     CROW_ROUTE(app, "/gpx_track.js")([&gpx_track_js](){crow::response r(gpx_track_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string vector_tiles_js = crow::mustache::load_text("vector_tiles.js");
+    CROW_ROUTE(app, "/vector_tiles.js")([&vector_tiles_js](){crow::response r(vector_tiles_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
+    const std::string bayern_3d_js = crow::mustache::load_text("bayern_3d.js");
+    CROW_ROUTE(app, "/bayern_3d.js")([&bayern_3d_js](){crow::response r(bayern_3d_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string qr_js = crow::mustache::load_text("qrcode.min.js");
     CROW_ROUTE(app, "/qrcode.min.js")([&qr_js](){crow::response r(qr_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
     const std::string canvas_renderer_js = crow::mustache::load_text("stl_viewer/CanvasRenderer.js");

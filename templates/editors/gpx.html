@@ -93,6 +93,18 @@
             bottom: 8px;
         }
 
+        #map_attribution {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            padding: 1px 4px;
+            background: rgba(255, 255, 255, .7);
+        }
+
+        #map_attribution, #map_attribution * {
+            font-size: 10px;
+        }
+
         #header {
             top: 8px;
             left: 50%;
@@ -105,6 +117,47 @@
 
         #header.collapsed #header_controls {
             display: none;
+        }
+
+        #header_controls {
+            flex-direction: column;
+            align-items: stretch;
+            max-width: 560px;
+        }
+
+        #header_controls fieldset {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 14px;
+            margin: 0;
+            padding: 6px 0 0;
+            border: none;
+            border-top: 1px solid #ddd;
+        }
+
+        #header_controls legend {
+            float: left;
+            width: 100%;
+            font-size: 12px;
+            color: #777;
+        }
+
+        #header_controls label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .float_panel select {
+            min-height: 2em;
+            border: 1px solid #bbb;
+            border-radius: 6px;
+            background-color: white;
+        }
+
+        .float_panel input {
+            accent-color: #e8471c;
         }
 
         #title {
@@ -176,6 +229,7 @@
                     {{/editor}}
                 </div>
                 <div id="header_controls" class="gpx_row">
+                    <fieldset><legend>Karte</legend>
                     <select id="layer_select" onchange="virtual_street_map.drop_all_tiles();">
                         <option base_url="tile.openstreetmap.org/" ending=".png" detail_switch_level="19">OSM</option>
                         <option base_url="tile.opentopomap.org/" ending=".png" detail_switch_level="19">OpenTopo</option>
@@ -190,21 +244,36 @@
                         <option value="mapterhorn">Höhe Mapterhorn</option>
                         <option value="aws">Höhe AWS Terrarium</option>
                     </select>
+                    <label title="Straßen, Wege, Grenzen, Gewässer, Grate, Gipfel und Ortsnamen aus OpenStreetMap über der Karte">Kartenbeschriftung
+                        <select id="vector_overlay_mode" onchange="update_map_attribution(); draw_requested = true;">
+                            <option value="off">Aus</option>
+                            <option value="ground">Am Boden</option>
+                            <option value="ground_billboards">Am Boden, Namen aufrecht</option>
+                            <option value="3d">3D Linien und Namen</option>
+                        </select>
+                    </label>
+                    <label title="LoD2 Gebäudemodelle der Bayerischen Vermessungsverwaltung, nur in Bayern"><input id="enable_buildings" type="checkbox" checked onchange="update_map_attribution(); draw_requested = true;">3D Gebäude</label>
+                    <label><input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">Parzellkarte anzeigen</label>
+                    </fieldset>
+                    <fieldset><legend>Darstellung</legend>
                     <label><input id="enable_tile_update" type="checkbox" checked onchange="draw_requested = true;">Karten tiles nachladen</label>
                     <label title="Keine Nähte an den Kachelgrenzen, langsam auf Handys"><input id="enable_seamless_tiles" type="checkbox">Nahtlose Kacheln</label>
                     <label><input id="triangle_resolution" type="number" min="10" max="1000" value="80">Geometrieauflösung</label>
+                    <label><input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_requested = true;">Projektion(3D.o.2D)</label>
+                    </fieldset>
+                    <fieldset><legend>Kamera</legend>
                     <label><input id="enable_cam_follow" type="checkbox">Kamera folgen</label>
                     <label><input id="enable_fpv_cam" type="checkbox">Erste person navigation</label>
-                    <label><input id="camera_interpolation" type="range" min="0" max="1" value="0" step=".01" oninput="draw_requested = true;">Projektion(3D.o.2D)</label>
-                    <label><input id="enable_parcell_map" onchange="camera_updated=true;" type="checkbox">Parzellkarte anzeigen</label>
-                    <label><input id="enable_street_name_overlay" onchange="draw_requested = true;" type="checkbox">Straßen anzeigen</label>
+                    <button type="button" onclick='camera_pitch = Math.PI / 2; camera_dir = 0; camera_interpolation.value = "1";'>2D view</button>
+                    <button type="button" onclick="request_full_screen();">Vollbild</button>
+                    </fieldset>
+                    <fieldset><legend>Hilfen</legend>
                     <label><input id="enable_contours" type="checkbox" onchange="draw_requested = true;">Höhenlinien</label>
                     <label>alle <input id="contour_interval" type="number" min="1" max="1000" value="20" oninput="draw_requested = true;"> m</label>
                     <label><input id="enable_help_lines" type="checkbox" onchange="help_line_ref = null; draw_requested = true;">Hilfslinien</label>
                     <label>Winkel <input id="help_line_angle" type="range" min="-90" max="90" value="0" oninput="help_line_ref = null; draw_requested = true;">&deg;</label>
                     <label>Abstand <input id="help_line_distance" type="number" min="1" value="1000" oninput="help_line_ref = null; draw_requested = true;"> m</label>
-		    <button type="button" onclick='camera_pitch = Math.PI / 2; camera_dir = 0; camera_interpolation.value = "1";'>2D view</button>
-                    <button type="button" onclick="request_full_screen();">Vollbild</button>
+                    </fieldset>
                 </div>
             </div>
             <div id="gpx_panel" class="float_panel gpx_panel">
@@ -254,11 +323,23 @@
                 </div>
                 <div id="gpx_status"></div>
             </div>
+            <div id="map_attribution" hidden>
+                <span id="osm_attribution">
+                    <a href="https://openfreemap.org" target="_blank">OpenFreeMap</a>
+                    <a href="https://www.openmaptiles.org/" target="_blank">&copy; OpenMapTiles</a>
+                    Daten von <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>
+                </span>
+                <span id="bayern_attribution">
+                    Gebäude und Namen &copy; <a href="https://geodaten.bayern.de" target="_blank">Bayerische Vermessungsverwaltung</a>
+                </span>
+            </div>
         </div>
     </div>
 </body>
 <script type="text/javascript" src="/lin_alg.js"></script>
 <script type="text/javascript" src="/virtual_texture.js"></script>
+<script type="text/javascript" src="/vector_tiles.js"></script>
+<script type="text/javascript" src="/bayern_3d.js"></script>
 <script type="text/javascript" src="/gpx_track.js"></script>
 <!--<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/spectorjs@0.9.30/dist/spector.bundle.js"></script>-->
 <script>
@@ -324,19 +405,12 @@
                               dist: e.touches.length == 2? dist(e.touches[0].pageX, e.touches[0].pageY, e.touches[1].pageX, e.touches[1].pageY): 0, 
                               type: e.touches.length == 1 ? "move": "rot_or_zoom"};
                               map_drag_start = get_map_drag_start(x, y)});
-    // user camera movements are rejected if they would end below the terrain, the camera then stays where it is
-    const save_camera = () => { return {center: [...camera_center.entries], dir: camera_dir, pitch: camera_pitch}; };
-    const restore_camera_if_below_terrain = (saved) => {
-        if (!camera_below_terrain())
-            return;
-        camera_center.entries = saved.center;
-        camera_dir = saved.dir;
-        camera_pitch = saved.pitch;
-    };
+    // user camera movements which would end below the terrain lift the camera onto the min height above it (it slides
+    // over the terrain). Rejecting them blocked all input when the camera was at the min height already: the conservative
+    // terrain height is higher than that next to it on slopes, so even sideways moves and zooming out were rejected
     const move_camera = (cur_move) => {
         if (!canvas_drag_start) 
             return;
-        const saved_camera = save_camera();
         let xDel = canvas_drag_start.x - cur_move.x;
         let yDel = canvas_drag_start.y - cur_move.y;
         let height_multiplier = Math.max(1, .001 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
@@ -397,8 +471,7 @@
             break;
         default: console.error("Unknown move type " + canvas_drag_start.type);
         }
-        // the drag movement is consumed even if rejected to avoid a jump when moving away from the terrain again
-        restore_camera_if_below_terrain(saved_camera);
+        clamp_camera_above_terrain();
         if (clear_move) {
             canvas_drag_start = cur_move;
             camera_updated = true;
@@ -428,15 +501,16 @@
     canvas3d.addEventListener("touchcancel", (e) => { canvas_drag_start = null; });
     canvas3d.addEventListener("wheel", (e) => {
         map_drag_start = get_map_drag_start(e.pageX, e.pageY);
-        const saved_camera = save_camera();
         if (!map_drag_start || isNaN(map_drag_start.entries[0])) {
             let height_multiplier = Math.max(1, .01 * (Util.wgs_84_uv_to_m(camera_center.z()) - 1100));
             camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(.1 * cam_dir_speed * height_multiplier * e.deltaY));
         }
         else {
-            camera_center.add(map_drag_start.subtract(camera_center).mul(cam_dir_speed * 80000 * -e.deltaY));
+            // exponential in the distance to the point below the mouse: zooming in and out is equally fast, fast
+            // scrolling never jumps onto or past the point
+            camera_center.add(map_drag_start.subtract(camera_center).mul(1 - Math.exp(cam_dir_speed * 80000 * e.deltaY)));
         }
-        restore_camera_if_below_terrain(saved_camera);
+        clamp_camera_above_terrain();
         camera_updated = true;
     });
     let pressed_keys = {};
@@ -451,7 +525,6 @@
             key = key.toLowerCase();
             speed *= 100;
         }
-        const saved_camera = save_camera();
         if (key === "w")
             camera_center.add(get_forward_dir(camera_dir, camera_pitch).mul(-speed));
         if (key === "a")
@@ -464,7 +537,7 @@
             camera_center.add(up_dir.multiply(-speed));
         if (key === "e")
             camera_center.add(up_dir.multiply(speed));
-        restore_camera_if_below_terrain(saved_camera);
+        clamp_camera_above_terrain();
         camera_updated = true;
     });
 
@@ -592,20 +665,36 @@
         }
         return null;
     };
-    /** @returns {float} terrain height in meters at the given uv position (bilinear on the 4x4 texel means of the deepest loaded tile), null if not loaded */
+    /**
+     * @returns {float} terrain height in meters at the given uv position (bilinear on the 4x4 texel means of the deepest
+     * loaded tile), null if not loaded. At the tile borders the cells of the neighbor tiles of the same level are used,
+     * otherwise the height would jump there (the follow camera dipped at every tile border)
+     */
     const terrain_height_mean_at = (x, y) => {
         for (let level = virtual_height_map.max_level; level >= 0; --level) {
             const n = 1 << level;
-            const tile = virtual_height_map.get_uploaded_tile(level, Math.floor(x * n), Math.floor(y * n));
+            const tx0 = Math.floor(x * n), ty0 = Math.floor(y * n);
+            const tile = virtual_height_map.get_uploaded_tile(level, tx0, ty0);
             if (!tile || !tile.height_grid_mean)
                 continue;
-            // texel i is centered at (i + .5) / 256 in the tile, so the center of grid cell c is at c + .5 in grid units
-            const gx = Math.min(Math.max((x * n - Math.floor(x * n)) * height_grid_res - .5, 0), height_grid_res - 1);
-            const gy = Math.min(Math.max((y * n - Math.floor(y * n)) * height_grid_res - .5, 0), height_grid_res - 1);
-            const x0 = Math.min(Math.floor(gx), height_grid_res - 2), y0 = Math.min(Math.floor(gy), height_grid_res - 2);
-            const tx = gx - x0, ty = gy - y0;
-            const at = (cx, cy) => tile.height_grid_mean[cy * height_grid_res + cx];
-            return (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) + (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+            // texel i is centered at (i + .5) / 256 in the tile, so the center of grid cell c is at c + .5 in grid units.
+            // Global cell coordinates over all tiles of the level
+            const gx = x * n * height_grid_res - .5, gy = y * n * height_grid_res - .5;
+            const x0 = Math.floor(gx), y0 = Math.floor(gy);
+            const fx = gx - x0, fy = gy - y0;
+            const at = (cx, cy) => {
+                const cx_tile = Math.floor(cx / height_grid_res), cy_tile = Math.floor(cy / height_grid_res);
+                let t = cx_tile == tx0 && cy_tile == ty0 ? tile : virtual_height_map.get_uploaded_tile(level, cx_tile, cy_tile);
+                // a neighbor which is not loaded at this level: the closest cell of the tile itself
+                if (!t || !t.height_grid_mean) {
+                    t = tile;
+                    cx = Math.min(Math.max(cx, tx0 * height_grid_res), (tx0 + 1) * height_grid_res - 1);
+                    cy = Math.min(Math.max(cy, ty0 * height_grid_res), (ty0 + 1) * height_grid_res - 1);
+                }
+                const lx = cx - Math.floor(cx / height_grid_res) * height_grid_res, ly = cy - Math.floor(cy / height_grid_res) * height_grid_res;
+                return t.height_grid_mean[ly * height_grid_res + lx];
+            };
+            return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
         }
         return null;
     };
@@ -628,6 +717,9 @@
     const clamp_camera_above_terrain = () => {
         if (!camera_below_terrain())
             return false;
+        const lift_m = Util.wgs_84_uv_to_m((min_camera_z() - camera_center.z()) / 1.4);
+        if (lift_m > 20)    // for finding the cause of camera jumps
+            console.warn(`camera lifted by ${lift_m.toFixed(0)} m above the terrain (conservative ${terrain_height_at(camera_center.x(), camera_center.y()).toFixed(0)} m, mean ${terrain_height_mean_at(camera_center.x(), camera_center.y()).toFixed(0)} m)`);
         camera_center.entries[2] = min_camera_z();
         return true;
     };
@@ -658,6 +750,7 @@
     // enough to read them back only a few times per second instead of every frame
     const tile_readback_interval_ms = 200;
     let last_readback_t = -Infinity;
+    let camera_ground_level = null; // finest heightmap level of the visible tiles below the camera, kept loaded (see the readback)
     async function draw_scene() {
         draw_requested |= camera_updated;
         const own_pos = own_position.position();
@@ -775,7 +868,9 @@
                 gl.uniform1i(program.uniform_locations.virtual_overlaymap, 5);
                 gl.uniformBlockBinding(program.program, program.uniform_locations.virtual_overlaymap_infos, program.uniform_locations.virtual_overlaymap_infos);
             }
-            if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
+            gl.uniform1f(program.uniform_locations.overlay_level_offset, overlay_level_offset());
+            gl.uniform1f(program.uniform_locations.overlay_finest_level, overlay_finest_level);
+            if (overlay_enabled()) {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 1);
             } else {
                 gl.uniform1i(program.uniform_locations.parcell_map_enabled, 0);
@@ -824,8 +919,16 @@
         if (do_readback)
             last_readback_t = performance.now();
         // draw tile ids ---------------------------------------
-        if (update_tiles && do_readback)
+        if (update_tiles && do_readback) {
             draw_tiles(gl_context, { width: indices_render_objs.width, height: indices_render_objs.height }, render_pipelines.idx, indices_render_objs.fb);
+            // the camera of this pass, its depth is read back with the tile ids and used for the visibility of the labels
+            id_pass_camera = {
+                view_proj: Float32Array.from(view_projection.entries),
+                view: Float32Array.from(view.entries),
+                grid_offset: {x: grid_offset_pos.lat, y: grid_offset_pos.lon},
+                eye_offset: eye.offset || 0,
+            };
+        }
 
         // draw normal frame -----------------------------------
         draw_tiles(gl_context, { width: canvas3d.width, height: canvas3d.height }, render_pipelines.terrain, null); // null sets teh default canvas framebuffer as target
@@ -848,6 +951,7 @@
                 grid_offset_pos: {x: grid_offset_pos.lat, y: grid_offset_pos.lon},  // needed to decode the tile ids
                 tile_buffer: tile_download_buffer,
                 depth_buffer: depth_download_buffer,
+                camera: update_tiles ? id_pass_camera : null,   // the id pass is only drawn while the tile loading is on
             };
             gl_context.flush(); // makes sure the fence is submitted and can be signaled
         }
@@ -889,6 +993,7 @@
 
         gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, depth_download_buffer);
         gl_context.getBufferSubData(gl_context.PIXEL_PACK_BUFFER, 0, depth_download_data);
+        label_depth = readback.camera ? {...readback.camera, data: depth_data_f32, width: indices_render_objs.width, height: indices_render_objs.height} : null;
         gl_context.bindBuffer(gl_context.PIXEL_PACK_BUFFER, null);
 
         console.log(`only reading the pixels took ${performance.now() - start} milli`);
@@ -941,7 +1046,22 @@
         const height_requests = (tiles) => tiles.filter(tile => !isNaN(tile.x) && !isNaN(tile.y) && (tile_on_minifuzi(tile) || tile.level <= height_max_level))
                                                 .map(tile => TileRequest().init(tile.x, tile.y, tile.level, height_url(tile)));
         const cam_uv = {x: camera_center.x(), y: camera_center.y()};
-        virtual_height_map.update_needed_tiles(height_requests(decoded_tiles), cam_uv, height_requests(preload_tiles));
+        // the heightmap below the camera stays needed at the finest level seen there, also when it is out of view (looking
+        // up or away). Otherwise it is dropped while rotating and the camera clamp jumps up to the conservative height of
+        // the coarser tile (up to ~100 m in the mountains)
+        const below_camera = decoded_tiles.filter(t => t.x == Math.floor(cam_uv.x * (1 << t.level)) && t.y == Math.floor(cam_uv.y * (1 << t.level)));
+        if (below_camera.length)
+            camera_ground_level = Math.max(...below_camera.map(t => t.level));
+        const height_tiles = [...decoded_tiles];
+        if (camera_ground_level !== null) {
+            const n = 1 << camera_ground_level;
+            const t = {level: camera_ground_level, x: Math.floor(cam_uv.x * n), y: Math.floor(cam_uv.y * n)};
+            if (!decoded_tiles.some(d => d.level == t.level && d.x == t.x && d.y == t.y)) {
+                height_tiles.push(t);
+                Util.add_missing_parent_tiles(height_tiles);
+            }
+        }
+        virtual_height_map.update_needed_tiles(height_requests(height_tiles), cam_uv, height_requests(preload_tiles));
         let layer = get_selected_layer();
         const offset_level = (level, layer) => {
             if (layer.getAttribute("level_offset"))
@@ -962,21 +1082,57 @@
                                            : `https://${layer.getAttribute("base_url")}${tile.level}/${tile.y}/${tile.x}${layer.getAttribute("ending") || ""}`,
         )).filter(e => e.level <= layer.getAttribute("detail_switch_level"));
         virtual_street_map.update_needed_tiles(streetmap_requests(decoded_tiles), cam_uv, streetmap_requests(preload_tiles));
-        if (document.getElementById("enable_parcell_map").checked || document.getElementById("enable_street_name_overlay").checked) {
+        if (overlay_enabled()) {
             const parcell_requests = (tiles) => tiles.map(tile => {
                 let urls = [];
                 if (document.getElementById("enable_parcell_map").checked)
-                    urls.push(`https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`);
-                if (document.getElementById("enable_street_name_overlay").checked)
-                    urls.push(`https://intergeo33.bayernwolke.de/betty/g_atkishybrid_webp/${tile.level}/${tile.x}/${tile.y}`);
+                    // the parcel map ends at level 19, level 20 uses the quarter of the level 19 tile scaled up
+                    urls.push(tile.level <= 19 ? `https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/${tile.level}/${tile.x}/${tile.y}`
+                                               : `https://intergeo35.bayernwolke.de/betty/c_g_atkishybrid_alkisinvers_parzellar/19/${tile.x >> 1}/${tile.y >> 1}#crop=${(tile.x & 1) * 128},${(tile.y & 1) * 128},128`);
+                // drawn last, on top of the other overlays
+                const vector_mode = document.getElementById("vector_overlay_mode").value;
+                if (vector_mode == "ground" || vector_mode == "ground_billboards")
+                    urls.push(`vector:${tile.level}/${tile.x}/${tile.y}${vector_mode == "ground" ? "" : "?nolabels"}`);
                 return TileRequest().init(tile.x, tile.y, tile.level, urls);
-            }).filter(e => e.level <= 19);
-            virtual_overlay_map.update_needed_tiles(parcell_requests(decoded_tiles), cam_uv, parcell_requests(preload_tiles));
+            }).filter(e => e.level <= 20);
+            // with the level offset the tiles of the finest level (and their preloaded neighbors) get their children, the
+            // shader uses them only there. Nearest first: the requests are only sorted by level, if a cascade is full the
+            // far children are left out and their parents are drawn instead
+            overlay_finest_level = decoded_tiles.length ? Math.max(...decoded_tiles.map(t => t.level)) : 0;
+            let overlay_tiles = decoded_tiles, overlay_preload = preload_tiles;
+            if (overlay_level_offset() > 0) {
+                const dist = (t) => Math.hypot((t.x + .5) / 2 ** t.level - cam_uv.x, (t.y + .5) / 2 ** t.level - cam_uv.y) * 2 ** t.level;
+                const with_children = (tiles) => {
+                    const children = tiles.filter(t => t.level == overlay_finest_level)
+                                          .flatMap(t => [0, 1, 2, 3].map(c => ({level: t.level + 1, x: 2 * t.x + (c & 1), y: 2 * t.y + (c >> 1)})));
+                    const keys = new Set();
+                    return [...tiles, ...children].filter(t => !keys.has(`${t.level}|${t.x}|${t.y}`) && keys.add(`${t.level}|${t.x}|${t.y}`))
+                                                  .sort((a, b) => dist(a) - dist(b));
+                };
+                overlay_tiles = with_children(decoded_tiles);
+                const needed_keys = new Set(overlay_tiles.map(t => `${t.level}|${t.x}|${t.y}`));
+                overlay_preload = with_children(preload_tiles).filter(t => !needed_keys.has(`${t.level}|${t.x}|${t.y}`));
+            }
+            virtual_overlay_map.update_needed_tiles(parcell_requests(overlay_tiles), cam_uv, parcell_requests(overlay_preload));
         }
         
         console.log(`Full tile update took ${performance.now() - tile_processing_start} milli`);
         tile_processing_running = false;
     }
+    // the rendered vector roads get one level more than the map at its finest level, they stay sharp in close up views
+    let overlay_finest_level = 0;
+    const overlay_level_offset = () => ["ground", "ground_billboards"].includes(document.getElementById("vector_overlay_mode").value) ? 1 : 0;
+    const overlay_enabled = () => document.getElementById("enable_parcell_map").checked ||
+                                  ["ground", "ground_billboards"].includes(document.getElementById("vector_overlay_mode").value);
+    // the vector overlay data is from openstreetmap (odbl), the building names in it and the buildings from the
+    // bayerische vermessungsverwaltung, the attributions have to be visible while they are shown
+    const update_map_attribution = () => {
+        const osm = document.getElementById("vector_overlay_mode").value != "off";
+        const bayern = osm || document.getElementById("enable_buildings").checked;
+        document.getElementById("osm_attribution").hidden = !osm;
+        document.getElementById("bayern_attribution").hidden = !bayern;
+        document.getElementById("map_attribution").hidden = !osm && !bayern;
+    };
     let tex_update_locked = {};
     function check_virtual_textures_update(name, virtual_texture) {
         if (tex_update_locked[name])
@@ -1007,6 +1163,10 @@
     const gpx_follower = TrackFollower();
     /** @type {TrackRenderer} */
     let track_renderer = null;
+    let vector_renderer = null;     // lines and labels of the vector tiles in 3d
+    let building_renderer = null;   // 3d buildings of bavaria
+    let id_pass_camera = null;      // camera of the last tile id pass
+    let label_depth = null;         // read back depth of the last tile id pass with its camera, for the visibility of the labels
     let gpx_mode = "view";              // one of view, edit, record, follow
     let gpx_selected = null;            // {seg: int, i: int} index of the selected point
     let gpx_active_segment = null;      // segment new points are appended to if no point is selected
@@ -1016,7 +1176,8 @@
     let gpx_saving = false;
     let gpx_save_state = "";
     // zoom scales the distance of the camera to the current position
-    const gpx_follow = {playing: false, update_requested: false, s: 0, speed_mps: 50 / 3.6, last_t: 0, dir: null, zoom: 1, fov_deg: 60};
+    const gpx_follow = {playing: false, update_requested: false, s: 0, speed_mps: 50 / 3.6, last_t: 0, dir: null, zoom: 1, fov_deg: 60, ground: null};
+    const follow_height_smooth_s = .5;     // time constant of the smoothing of the follow camera heights
 
     const gpx_changed = () => {
         draw_requested = true;
@@ -1300,11 +1461,21 @@
         const ground = (x, y) => terrain_height_mean_at(x, y) ?? 0;
         const eye = {x: p.x - dx * back_m * uv_per_m, y: p.y - dy * back_m * uv_per_m};
         const target = {x: p.x + dx * target_ahead_m * uv_per_m, y: p.y + dy * target_ahead_m * uv_per_m};
+        // the heights are smoothed: the loaded height data changes its level of detail along the track (finer tiles
+        // arrive while moving) and the camera would jump up and down. Reset on jumps (seek, start)
+        let eye_ground = Math.max(ground(eye.x, eye.y), ground(p.x, p.y)), target_ground = ground(target.x, target.y);
+        const smooth = gpx_follow.ground && dt > 0 && dt < .2 && Math.abs(eye_ground - gpx_follow.ground.eye) < 50;
+        if (smooth) {
+            const a = 1 - Math.exp(-dt / follow_height_smooth_s);
+            eye_ground = gpx_follow.ground.eye + a * (eye_ground - gpx_follow.ground.eye);
+            target_ground = gpx_follow.ground.target + a * (target_ground - gpx_follow.ground.target);
+        }
+        gpx_follow.ground = {eye: eye_ground, target: target_ground};
         camera_center.entries[0] = eye.x;
         camera_center.entries[1] = eye.y;
-        camera_center.entries[2] = Util.m_to_wgs_84_uv(Math.max(ground(eye.x, eye.y), ground(p.x, p.y)) + height_m) * 1.4;
+        camera_center.entries[2] = Util.m_to_wgs_84_uv(eye_ground + height_m) * 1.4;
         // the camera looks along -get_forward_dir(camera_dir, camera_pitch)
-        const vx = target.x - eye.x, vy = target.y - eye.y, vz = Util.m_to_wgs_84_uv(ground(target.x, target.y)) * 1.4 - camera_center.z();
+        const vx = target.x - eye.x, vy = target.y - eye.y, vz = Util.m_to_wgs_84_uv(target_ground) * 1.4 - camera_center.z();
         camera_dir = Math.atan2(-vx, -vy);
         if (camera_dir < 0)
             camera_dir += 2 * Math.PI;
@@ -1705,11 +1876,30 @@
             handle_size: is_touch ? 22 : 14,
             markers: markers,
         };
+        // vector tile lines below the track, labels above everything
+        const vector_mode = document.getElementById("vector_overlay_mode").value;
+        // after a resize the read back depth has another size than the buffers
+        const depth_ok = label_depth && label_depth.data === depth_data_f32 && label_depth.width == indices_render_objs.width;
+        const vector_params = {...draw_params, m_per_uv: GpxUtil.meters_per_uv(camera_center.y()), height_at: terrain_height_mean_at,
+                               label_depth: depth_ok ? label_depth : null};
+        if (vector_mode == "3d" || vector_mode == "ground_billboards") {
+            const ground_h = terrain_height_at(camera_center.x(), camera_center.y()) || 0;
+            vector_renderer.update(camera_center.x(), camera_center.y(), Util.wgs_84_uv_to_m(camera_center.z() / 1.4) - ground_h, is_touch ? 1 : 2);
+        }
+        // the buildings first, the lines and the track are depth tested against them
+        if (document.getElementById("enable_buildings").checked) {
+            building_renderer.update(eye.x, eye.y, Util.wgs_84_uv_to_m(eye.z / 1.4), GpxUtil.meters_per_uv(eye.y), canvas3d.height, eye.fov_deg * Math.PI / 180);
+            building_renderer.draw({...draw_params, virtual_street_map});
+        }
+        if (vector_mode == "3d")
+            vector_renderer.draw_lines(vector_params);
         track_renderer.draw(draw_params);
         if (gpx_mode == "measure" && gpx_measure.points.length) {
             measure_renderer.update(measure_render_doc());
             measure_renderer.draw({...draw_params, show_handles: true, selected_index: -1, markers: []});
         }
+        if (vector_mode == "3d" || vector_mode == "ground_billboards")
+            vector_renderer.draw_labels(vector_params);
     };
 
     // ----------------------------------------------------------------------------------------
@@ -1750,12 +1940,44 @@
             let min = Infinity, max = -Infinity;
             let grid = new Float32Array(height_grid_res * height_grid_res).fill(-Infinity);
             let grid_mean = new Float32Array(height_grid_res * height_grid_res);
-            for (let i = 0; i < data.length; i += 4) {
+            const heights = new Float32Array(256 * 256);
+            for (let p = 0; p < heights.length; ++p) {
                 // same decoding as decode_height() in the shader, empty pixels are decoded to 0
-                const h = data[i] | data[i + 1] | data[i + 2] | data[i + 3] ? data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 : 0;
+                const i = 4 * p;
+                heights[p] = data[i] | data[i + 1] | data[i + 2] | data[i + 3] ? data[i] * 256 + data[i + 1] + data[i + 2] / 256 - 32768 : 0;
+            }
+            // the cpu heights come from a canvas readback, browsers with fingerprinting protection change single color
+            // values there (+-256 m in the red channel). With the max pooling such a spike lifts the camera by a few hundred
+            // meters, texels far above or below all their neighbors are replaced by the mean of the neighbors. Only for the
+            // detailed levels: on coarse tiles (texels of hundreds of meters) real peaks and valleys are such outliers, and
+            // the height range is used for the culling
+            const spike_m = 128;
+            const spike_min_level = 12;
+            const spikes = [];
+            const level = virtual_height_map.max_level - Math.log2(tile.width);
+            for (let y = 0; y < 256 && level >= spike_min_level; ++y)
+                for (let x = 0; x < 256; ++x) {
+                    const p = y * 256 + x, h = heights[p];
+                    let lo = Infinity, hi = -Infinity, sum = 0, n = 0;
+                    for (const q of [x > 0 ? p - 1 : -1, x < 255 ? p + 1 : -1, y > 0 ? p - 256 : -1, y < 255 ? p + 256 : -1]) {
+                        if (q < 0)
+                            continue;
+                        lo = Math.min(lo, heights[q]);
+                        hi = Math.max(hi, heights[q]);
+                        sum += heights[q];
+                        ++n;
+                    }
+                    if (h > hi + spike_m || h < lo - spike_m)
+                        spikes.push(p, sum / n);
+                }
+            for (let k = 0; k < spikes.length; k += 2)
+                heights[spikes[k]] = spikes[k + 1];
+            if (spikes.length)
+                console.warn(`heightmap tile ${tile.url}: ${spikes.length / 2} height spikes removed (canvas readback noise?)`);
+            for (let p = 0; p < heights.length; ++p) {
+                const h = heights[p];
                 min = Math.min(min, h);
                 max = Math.max(max, h);
-                const p = i >> 2;
                 const g = ((p >> 8) >> height_grid_shift) * height_grid_res + ((p & 255) >> height_grid_shift);
                 grid[g] = Math.max(grid[g], h);
                 grid_mean[g] += h / (1 << (2 * height_grid_shift));
@@ -1766,8 +1988,10 @@
         };
         const w_street = 1 << Util.max_tile_level;   // deep enough for the most detailed map layers
         virtual_street_map = VirtualMap().init(w_street, w_street, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
-        const w_overlay = 1 << 19;
+        const w_overlay = 1 << 20;     // one level more than the most detailed overlay sources (vector roads sharp close up)
         virtual_overlay_map = VirtualMap().init(w_overlay, w_overlay, {x: c[0], y: c[1]}, 256, 256, tiles_per_cascade, TextureTypes(gl_context).un8rgba, gl_context);
+        // the vector tiles are drawn by the gpu into the overlay with blending, which needs premultiplied alpha
+        virtual_overlay_map.tiles_storage_gpu.premultiplied = true;
 
         // the shaders are created again if a setting compiled into them changes (seamless tiles). Off by default on mobile,
         // the neighbor tile search per texel is too slow for mobile gpus
@@ -1846,6 +2070,9 @@
             uniform vec2 grid_offset_pos;
             uniform vec4 color_correction;
             uniform int parcell_map_enabled; // 0->disabled, enabled else
+            const float overlay_shading = .2;   // part of the terrain shading applied to the overlay
+            uniform float overlay_level_offset; // the overlay is this many levels finer than the map at its finest level (sharper vector roads)
+            uniform float overlay_finest_level; // finest map level in the view (tile readback)
             uniform float contour_interval;     // height difference between contour lines in m, 0 disables them
             uniform vec4 help_lines;            // xy: unit direction of the lines in uv, z: line distance in uv (0 disables them), w: unused
             uniform float help_lines_phase;     // phase of grid_offset_pos, computed in double precision on the cpu
@@ -1917,12 +2144,21 @@
                 vec4 surface_col = virtual_streetmap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.)) * color_correction;
                 if (surface_col == vec4(0))
                     surface_col = vec4(.85);
+                vec4 overlay_col = vec4(0);
                 if (1 == parcell_map_enabled) {
-                    surface_col += virtual_overlaymap_load(grid_offset_pos, loc_pos, get_level(max_del * 8.));
+                    // the overlay tiles are transparent outside of their lines and labels
+                    // the same level as the map, only at the finest level of the view it gets finer (faded in over one level)
+                    float map_level = get_level(max_del * 8.);
+                    float overlay_level = map_level + overlay_level_offset * clamp(map_level - overlay_finest_level + 1., 0., 1.);
+                    // premultiplied alpha (the gpu draws the vector tiles into the overlay with blending)
+                    overlay_col = virtual_overlaymap_load(grid_offset_pos, loc_pos, overlay_level);
                 }
                 vec4 d_info = virtual_heightmap_load(grid_offset_pos, loc_pos, 18.);
                 float nl = (dot(vec3(0, .7, .7), d_info.yzw) * .5 + .5) + .05;
                 out_col = vec4(surface_col.xyz, 1) * nl;
+                // the overlay is put on after the shading with only a bit of it, shaded it looked washed out next to the
+                // unlit 3d lines of the same colors
+                out_col.rgb = out_col.rgb * (1. - overlay_col.a) + overlay_col.rgb * mix(1., nl, overlay_shading);
                 if (contour_interval > 0.) {
                     // every 5th line is drawn thicker, the per fragment height is used as the interpolated vertex height is too coarse
                     float c = d_info.x / contour_interval;
@@ -1985,6 +2221,8 @@
                         depth_offset: gl_context.getUniformLocation(pipeline, 'depth_offset'),
                         color_correction: gl_context.getUniformLocation(pipeline, "color_correction"),
                         parcell_map_enabled: gl_context.getUniformLocation(pipeline, 'parcell_map_enabled'),
+                        overlay_level_offset: gl_context.getUniformLocation(pipeline, 'overlay_level_offset'),
+                        overlay_finest_level: gl_context.getUniformLocation(pipeline, 'overlay_finest_level'),
                         contour_interval: gl_context.getUniformLocation(pipeline, 'contour_interval'),
                         help_lines: gl_context.getUniformLocation(pipeline, 'help_lines'),
                         help_lines_phase: gl_context.getUniformLocation(pipeline, 'help_lines_phase'),
@@ -2011,11 +2249,26 @@
         create_render_pipelines();
         track_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         measure_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+        vector_renderer = VectorRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+        vector_renderer.on_change = () => { draw_requested = true; };
+        building_renderer = BuildingRenderer().init(gl_context, virtual_height_map, virtual_street_map, mesh_res_log2 - heightmap_tile_res_log2, terrain_height_mean_at);
+        building_renderer.on_change = () => { draw_requested = true; };
+        update_map_attribution();
+        // the building names of an area arrived: its rendered overlay tiles (levels with names) are rendered again
+        VectorTileLoader.add_housename_listener(({z, x, y}) => {
+            virtual_overlay_map.drop_tiles_where((tile) => [].concat(tile.url).some((url) => {
+                const m = /^vector:(\d+)\/(\d+)\/(\d+)/.exec(String(url));
+                return m && +m[1] >= 16 && +m[2] >> (+m[1] - z) == x && +m[3] >> (+m[1] - z) == y;
+            }));
+            draw_requested = true;
+        });
         document.getElementById("enable_seamless_tiles").addEventListener("change", (e) => {
             seamless_tiles = e.target.checked;
             create_render_pipelines();
             for (const renderer of [track_renderer, measure_renderer])
                 renderer.create_program(virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+            vector_renderer.create_programs(virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
+            building_renderer.create_program(virtual_height_map, virtual_street_map, mesh_res_log2 - heightmap_tile_res_log2);
             draw_requested = true;
         });
         measure_renderer.track_color = [.1, .45, 1, 1];
@@ -2267,6 +2520,9 @@
                 fb.depth_test_texture = gl.createTexture();
                 gl.bindTexture(gl.TEXTURE_2D, fb.depth_test_texture);
                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, fb.width, fb.height, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
+                // sampled by the label shader (visibility), float depth can not be filtered and the default min filter needs mipmaps
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
                 fb.fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb);
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fb.texture, 0);

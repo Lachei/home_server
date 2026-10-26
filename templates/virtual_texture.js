@@ -48,6 +48,12 @@ const preload_keep_ms = 10000;
 const tile_load_timeout_ms = 15000;
 // decode() does not always resolve (e.g. chrome mobile under memory pressure), the image is then used undecoded
 const tile_decode_timeout_ms = 2000;
+// tile sources which are no images, e.g. rendered vector tiles. Each is {prefix, load(url, still_needed, priority) -> Promise<source>}
+// with an ImageData or ImageBitmap as source, or an object with gpu: true which draws itself into the layer of the tile
+// (gpu_draw(gl, texture, layer, size, clear), after the images of the tile)
+// and is used for the urls starting with its prefix. priority() is higher for more important tiles, a rejection with
+// error.dropped (full queue of the loader) is no load error
+const tile_source_loaders = [];
 const coarse_level_priority_ms = 1000.;   // a tile one level coarser is kept like a tile which was used this much more recently
 // urls which could not be loaded are retried with exponential backoff. Failures are often not permanent
 // (e.g. the browser cancels requests when too many tiles are requested at once), so the first retries are quick
@@ -274,6 +280,12 @@ const VirtualMap = () => {
             tile_requests.sort((a, b) => a.level - b.level);
             const request_time = Date.now();
             let rebuild_vtex_needed = this.update_cascade_windows(cam_center_uv);
+            // the loading tiles which are needed (visible) in this update are marked below, the others count as preloaded.
+            // Loaders with a queue (vector tiles) take the needed tiles first
+            for (const cascade of this.cascades)
+                for (const tile of cascade.tiles)
+                    if (tile.is_initialized() && !tile.data_uploaded_to_gpu)
+                        tile.request_class = 1;
 
             // first all requested tiles which are already stored are marked as used, otherwise making space for a new
             // tile could drop a stored tile which is requested later in this update and has to be loaded again
@@ -283,9 +295,11 @@ const VirtualMap = () => {
                 if (!r)
                     continue;
                 rebuild_vtex_needed |= r.dropped;
-                if (r.stored)
-                    this.cascades[r.c].tiles[this.cascades[r.c].lookup_table[r.lookup_table_string]].last_use = request_time;
-                else
+                if (r.stored) {
+                    const tile = this.cascades[r.c].tiles[this.cascades[r.c].lookup_table[r.lookup_table_string]];
+                    tile.last_use = request_time;
+                    tile.request_class = 2;
+                } else
                     needed.push(r);
             }
 
@@ -298,6 +312,11 @@ const VirtualMap = () => {
                     const tile = tiles[i];
                     if (!tile.is_initialized() || tile.data_uploaded_to_gpu)
                         continue;
+                    // dropped from the full queue of its loader, no load error: it is requested again if it is still needed
+                    if (tile.dropped) {
+                        this.drop_tile_at_index(i, c);
+                        continue;
+                    }
                     if (request_time - tile.load_start > tile_load_timeout_ms) {
                         const failed = this.failed_urls.get(String(tile.url));
                         this.failed_urls.set(String(tile.url), {count: failed ? failed.count + 1 : 1, time: request_time});
@@ -307,7 +326,7 @@ const VirtualMap = () => {
                     ++loading;
                 }
             }
-            const load = (n, keep_since, max_loading) => {
+            const load = (n, keep_since, max_loading, request_class) => {
                 if (loading >= max_loading)
                     return false;
                 let cascade = this.cascades[n.c];
@@ -326,6 +345,7 @@ const VirtualMap = () => {
                 cascade.free_tiles.delete(i_cpu);
                 let t = cascade.tiles[i_cpu];
                 t.reset();
+                t.request_class = request_class;
                 t.init(n.url, n.final_x, n.final_y, n.width, n.c);
                 t.last_use = request_time;
                 cascade.lookup_table[n.lookup_table_string] = i_cpu;
@@ -333,7 +353,7 @@ const VirtualMap = () => {
                 return true;
             };
             for (const n of needed)
-                if (!load(n, request_time, max_loading_tiles))
+                if (!load(n, request_time, max_loading_tiles, 2))
                     break;
 
             // preloading after the needed tiles, so that preloaded tiles of earlier updates can be replaced by needed ones
@@ -345,7 +365,7 @@ const VirtualMap = () => {
                 rebuild_vtex_needed |= r.dropped;
                 if (r.stored)
                     this.cascades[r.c].tiles[this.cascades[r.c].lookup_table[r.lookup_table_string]].last_use = request_time;
-                else if (!load(r, request_time - preload_keep_ms, max_preloading_tiles))
+                else if (!load(r, request_time - preload_keep_ms, max_preloading_tiles, 1))
                     break;
             }
             if (rebuild_vtex_needed)
@@ -453,6 +473,21 @@ const VirtualMap = () => {
             }
             return this;
         },
+        /** @brief drops the tiles for which pred(tile) is true, they are loaded again when they are requested the next time */
+        drop_tiles_where: function (pred) {
+            let dropped = false;
+            for (let c = 0; c < this.cascades.length; ++c) {
+                const tiles = this.cascades[c].tiles;
+                for (let i = tiles.length - 1; i >= 0; --i)
+                    if (tiles[i].is_initialized() && pred(tiles[i])) {
+                        this.drop_tile_at_index(i, c);
+                        dropped = true;
+                    }
+            }
+            if (dropped)
+                this.rebuild_virtual_texture();
+            return this;
+        },
         drop_all_tiles: function () {
             for (let c = 0; c < this.cascades.length; ++c)
                 this.drop_least_important_tiles(null, c);
@@ -470,6 +505,15 @@ const VirtualMap = () => {
                 return null;
             const tile = cascade.tiles[i];
             return tile.data_uploaded_to_gpu ? tile: null;
+        },
+        /** @returns {CanvasImageSource} the source itself, ImageData is put on a scratch canvas (drawImage does not take it) */
+        drawable: function (source) {
+            if (!(source instanceof ImageData))
+                return source;
+            if (!this.scratch_context || this.scratch_context.canvas.width != source.width || this.scratch_context.canvas.height != source.height)
+                this.scratch_context = Util.create_canvas_context(source.width, source.height);
+            this.scratch_context.putImageData(source, 0, 0);
+            return this.scratch_context.canvas;
         },
         upload_loaded_images: function () {
             const max_upload = 5; // upload at max 5 images per call
@@ -503,34 +547,65 @@ const VirtualMap = () => {
                             continue;
                         undecoded_uploaded = true;
                     }
-                    if (tile.images) {
-                        // several images are composed on the canvas
+                    // sources drawn by the gpu (vector tiles, gpu_draw) are drawn into the layer after the images
+                    const layer = c * this.max_tiles + i;
+                    const sources = tile.images || [tile.image];
+                    const gpu_sources = sources.filter(source => source && source.gpu);
+                    // a part of an image scaled up to the whole tile, url fragment #crop=x,y,size in image pixels (e.g. the
+                    // quarter of a tile of the level above for levels a source does not have)
+                    const urls = [].concat(tile.url).map(String);
+                    const images = [], crops = [];
+                    sources.forEach((source, t) => {
+                        if (source && source.gpu)
+                            return;
+                        images.push(source);
+                        crops.push(/#crop=(\d+),(\d+),(\d+)$/.exec(urls[t] || ""));
+                    });
+                    // a list with a single image needs no composition
+                    const image = images[0];
+                    if (!images.length) {
+                        // only gpu sources, the first one clears the layer
+                    } else if (images.length > 1 || crops.some(m => m)) {
+                        // several images are composed on the canvas, which is uploaded directly: a getImageData readback
+                        // stalls the main thread (up to seconds per tile on some gpus), it is only done for the data callback
                         this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
-                        for (let image of tile.images)
-                            this.image_canvas_context.drawImage(image, 0, 0);
-                        let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
-                        if (this.tile_data_callback)
+                        images.forEach((image, t) => {
+                            const m = crops[t];
+                            if (m)
+                                this.image_canvas_context.drawImage(this.drawable(image), +m[1], +m[2], +m[3], +m[3], 0, 0, this.tile_width, this.tile_height);
+                            else
+                                this.image_canvas_context.drawImage(this.drawable(image), 0, 0);
+                        });
+                        if (this.tile_data_callback) {
+                            let data = new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer);
                             this.tile_data_callback(tile, data);
-                        this.tiles_storage_gpu.set_image_data(c * this.max_tiles + i, data);
+                            this.tiles_storage_gpu.set_image_data(layer, data);
+                        } else
+                            this.tiles_storage_gpu.set_image_source(layer, this.image_canvas_context.canvas, 0, 0);
                     } else {
                         // larger images (e.g. 512 pixel tiles of the parent level) are cut with the url fragment #sub=x,y in image pixels,
                         // the sub image is copied without scaling as encoded data (heights) must not be interpolated
                         const sub = /#sub=(\d+),(\d+)$/.exec(String(tile.url));
                         const sx = sub ? +sub[1] : 0, sy = sub ? +sub[2] : 0;
-                        if (!sub && (tile.image.width != this.tile_width || tile.image.height != this.tile_height))
-                            console.error(`Image dimension mismatch, loaded image is not of same dimension ${tile.image.width}, ${tile.image.height} needed for this virtual texture`);
+                        if (!sub && (image.width != this.tile_width || image.height != this.tile_height))
+                            console.error(`Image dimension mismatch, loaded image is not of same dimension ${image.width}, ${image.height} needed for this virtual texture`);
                         // uploaded directly instead of via getImageData, browsers with fingerprinting protection (e.g. brave)
                         // add noise to canvas readbacks which results in spikes of up to 256 m in the encoded heights
-                        this.tiles_storage_gpu.set_image_source(c * this.max_tiles + i, tile.image, sx, sy);
+                        this.tiles_storage_gpu.set_image_source(layer, image, sx, sy);
                         if (this.tile_data_callback) {
                             this.image_canvas_context.clearRect(0, 0, this.tile_width, this.tile_height);
-                            this.image_canvas_context.drawImage(tile.image, sx, sy, this.tile_width, this.tile_height, 0, 0, this.tile_width, this.tile_height);
+                            this.image_canvas_context.drawImage(this.drawable(image), sx, sy, this.tile_width, this.tile_height, 0, 0, this.tile_width, this.tile_height);
                             this.tile_data_callback(tile, new Uint8Array(this.image_canvas_context.getImageData(0, 0, this.tile_width, this.tile_height).data.buffer));
                         }
                     }
+                    gpu_sources.forEach((source, k) =>
+                        source.gpu_draw(this.gl_context, this.tiles_storage_gpu.texture_gpu, layer, this.tile_width, !images.length && k == 0));
                     tile.data_uploaded_to_gpu = true;
                     // the decoded images are not needed anymore, keeping them would hold up to a few hundred MB on the cpu.
                     // src is not cleared, the browser cache still has the image if the tile is requested again
+                    for (const source of tile.images || [tile.image])
+                        if (source && source.close)
+                            source.close();
                     tile.image = null;
                     tile.images = null;
                     this.failed_urls.delete(String(tile.url));
@@ -542,6 +617,16 @@ const VirtualMap = () => {
                 this.rebuild_virtual_texture();
         }
     };
+};
+
+// stops the download of an image, frees the memory of an ImageBitmap
+const release_source = (source) => {
+    if (!source)
+        return;
+    if (source.close)
+        source.close();
+    else
+        source.src = "";
 };
 
 /**
@@ -591,6 +676,7 @@ const TilesGpu = () => {
         gl_context: null,
         /** @type {WebGLTexture} */
         texture_gpu: null,
+        premultiplied: false,   // images are stored with premultiplied alpha (needed for layers the gpu draws into with blending)
         /** @type {ArrayBuffer} */
 
         // member functions
@@ -664,6 +750,8 @@ const TilesGpu = () => {
         set_image_source: function (i, image, sx, sy) {
             const gl = this.gl_context;
             gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture_gpu);
+            if (this.premultiplied)
+                gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
             gl.pixelStorei(gl.UNPACK_ROW_LENGTH, image.width);
             gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, sx);
             gl.pixelStorei(gl.UNPACK_SKIP_ROWS, sy);
@@ -672,6 +760,7 @@ const TilesGpu = () => {
             gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
             gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
             gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+            gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
             gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
         },
         bind_to_shader: function (gl_texture_slot) {
@@ -708,6 +797,9 @@ const Tile = () => {
         loaded: false,
         load_error: false,
         data_uploaded_to_gpu: false,
+        generation: 0,          // incremented on each init and reset, loads of an earlier generation are discarded
+        request_class: 2,       // 2: needed in the last update of the virtual map, 1: preloaded, for the priority of queued loads
+        dropped: false,         // the loader dropped the request (full queue), the virtual map drops the tile
         height_range: null,     // [min, max] height in meters, only filled for heightmap tiles
         height_grid: null,      // Float32Array with the max height of each 4x4 texel block in meters, only filled for heightmap tiles
         height_grid_mean: null, // Float32Array with the mean height of each 4x4 texel block in meters, only filled for heightmap tiles
@@ -729,21 +821,50 @@ const Tile = () => {
             this.lookup_table_string = CoordinateMappings.coords_to_lookup_string(tile_x, tile_y, width);
             this.last_use = Date.now();
             this.load_start = this.last_use;
+            const generation = ++this.generation;
+            const still_needed = () => this.generation === generation;
             if (Array.isArray(tile_url)) {
-                this.images = [];
+                this.images = Array(tile_url.length).fill(null);
                 this.loaded = Array(tile_url.length).fill(false);
                 this.load_error = Array(tile_url.length).fill(false);
-                tile_url.forEach((url, t) => {
-                    const img = new Image();
-                    this.images[t] = img;
-                    this.load_image(img, url, () => this.images && this.images[t] === img, (ok) => {this.loaded[t] = true; this.load_error[t] = !ok;});
-                });
-            } else {
-                const img = new Image();
-                this.image = img;
-                this.load_image(img, tile_url, () => this.image === img, (ok) => {this.loaded = true; this.load_error = !ok;});
-            }
+                tile_url.forEach((url, t) => this.load_source(url, (source) => { this.images[t] = source; }, still_needed,
+                                                              (ok) => {this.loaded[t] = true; this.load_error[t] = !ok;}));
+            } else
+                this.load_source(tile_url, (source) => { this.image = source; }, still_needed, (ok) => {this.loaded = true; this.load_error = !ok;});
             return this;
+        },
+        /**
+         * @brief loads an image or, for urls of a tile_source_loaders entry, the ImageData or ImageBitmap of that loader
+         * @param {function(Image|ImageData|ImageBitmap):void} set_source Stores the source in the tile
+         */
+        load_source: function (url, set_source, still_needed, done) {
+            const loader = tile_source_loaders.find(l => String(url).startsWith(l.prefix));
+            if (!loader) {
+                const img = new Image();
+                set_source(img);
+                this.load_image(img, url, still_needed, done);
+                return;
+            }
+            // needed before preloaded tiles, coarse before fine (they are the fallback for the fine ones)
+            const priority = () => this.request_class * 1e6 + Math.log2(this.width) * 1000;
+            loader.load(String(url), still_needed, priority).then((source) => {
+                if (!still_needed()) {
+                    release_source(source);
+                    return;
+                }
+                source.decoded = true;
+                set_source(source);
+                done(true);
+            }, (err) => {
+                if (err.dropped) {
+                    if (still_needed())
+                        this.dropped = true;
+                    return;
+                }
+                console.warn(`Tile ${url} could not be loaded: ${err.message}`);
+                if (still_needed())
+                    done(false);
+            });
         },
         /**
          * @brief loads the image and decodes it with decode() which runs off the main thread, otherwise the decode
@@ -779,13 +900,16 @@ const Tile = () => {
             this.lookup_table_string = "";
             this.last_use = 0;
             this.load_start = 0;
+            ++this.generation;
+            this.dropped = false;
+            this.request_class = 2;
             if (this.image) {
-                this.image.src = "";
+                release_source(this.image);
                 this.image = null;
             }
             if (this.images) {
                 for (const img of this.images)
-                    img.src = "";
+                    release_source(img);
                 this.images = null;
             }
             this.loaded = false;
