@@ -674,7 +674,7 @@ int main(int argc, const char** argv) {
     CROW_ROUTE(app, "/edit_gpx")([&credentials, &data_base_folder](const crow::request& req) {
         // EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
         
-        return editor_util::get_editor(true, req, "test.gpx", data_base_folder);
+        return editor_util::get_editor(false, req, "test.gpx", data_base_folder);
     });
     
     // ------------------------------------------------------------------------------------------------
