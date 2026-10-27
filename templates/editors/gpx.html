@@ -2251,7 +2251,7 @@
         measure_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         vector_renderer = VectorRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         vector_renderer.on_change = () => { draw_requested = true; };
-        building_renderer = BuildingRenderer().init(gl_context, virtual_height_map, virtual_street_map, mesh_res_log2 - heightmap_tile_res_log2, terrain_height_mean_at);
+        building_renderer = BuildingRenderer().init(gl_context, virtual_street_map, terrain_height_mean_at);
         building_renderer.on_change = () => { draw_requested = true; };
         update_map_attribution();
         // the building names of an area arrived: its rendered overlay tiles (levels with names) are rendered again
@@ -2268,7 +2268,7 @@
             for (const renderer of [track_renderer, measure_renderer])
                 renderer.create_program(virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
             vector_renderer.create_programs(virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
-            building_renderer.create_program(virtual_height_map, virtual_street_map, mesh_res_log2 - heightmap_tile_res_log2);
+            building_renderer.create_program(virtual_street_map);
             draw_requested = true;
         });
         measure_renderer.track_color = [.1, .45, 1, 1];
@@ -2285,9 +2285,10 @@
             }
         } catch (e) {}
         setup_gpx_ui();
-        if (is_editor)
-            setInterval(save, 5000);
-        setInterval(check_remote_changes, 5000);
+	if (is_editor) {
+            	setInterval(save, 5000);
+        	setInterval(check_remote_changes, 5000);
+	}
 
         // the endless loop for the texture uploads, the tile processing and drawing. It runs with requestAnimationFrame
         // instead of timers as the browser then waits for the gpu: with timers the gpu work of the next frames is queued even

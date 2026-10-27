@@ -1,8 +1,8 @@
 // 3d buildings (LoD2) of the Bayerische Vermessungsverwaltung (geodaten.bayern.de, data of the BayernAtlas 3d view).
 // The buildings are a 3d tiles tileset of b3dm tiles (glTF 1.0 with CESIUM_RTC) in a geographic quadtree, refined by
 // adding buildings (refine ADD): the finer levels have the smaller buildings and are loaded closer to the camera.
-// The tiles are parsed in a worker into vertices on our map (uv and height above the ground of the building), each
-// building stands on our terrain. Roofs show the map below them (the aerial image shows the roofs), walls are light grey.
+// The tiles are parsed in a worker into vertices on our map (uv and height), the buildings are placed at the position
+// of the tileset. Roofs show the map below them (the aerial image shows the roofs), walls are light grey.
 // Has to be loaded after virtual_texture.js
 
 /**
@@ -10,9 +10,7 @@
  */
 const bayern_3d_worker_main = () => {
     const text_decoder = new TextDecoder();
-    const wall_floats = 10;     // per vertex: x, y (uv relative to the tile origin), height above the building ground (m),
-                                // building center x, y (as the position), ground height of the building (m in the heights
-                                // of the tileset), 1 for wall corners at the ground, -1 for bridges, normal east, south, up
+    const ground_samples = 16;  // ground vertices per tile for the height offset
 
     // wgs 84 ellipsoid
     const a = 6378137, e2 = 6.69437999014e-3;
@@ -56,29 +54,15 @@ const bayern_3d_worker_main = () => {
     /**
      * @brief b3dm with the header of the current spec (28 bytes) or the legacy headers (20 or 24 bytes, detected as in
      * cesium by too large byte lengths), embedded binary glTF 1.0
-     * @returns {{gltf, body: Uint8Array, batch_table}} batch_table: json, null if there is none
+     * @returns {{gltf, body: Uint8Array}}
      */
     const parse_b3dm = (buf) => {
         const dv = new DataView(buf);
         if (dv.getUint32(0, true) != 0x6d643362)    // "b3dm"
             throw new Error("no b3dm tile");
         const legacy = 570425344;
-        let o = 28, bt = [0, 0];     // offset and length of the batch table json
         const [f3, f4, f5, f6] = [3, 4, 5, 6].map(i => dv.getUint32(4 * i, true));
-        if (f5 >= legacy) {                 // [batch length, batch table length]
-            o = 20 + f4;
-            bt = [20, f4];
-        } else if (f6 >= legacy) {          // [batch table json length, batch table binary length, batch length]
-            o = 24 + f3 + f4;
-            bt = [24, f3];
-        } else {
-            o = 28 + f3 + f4 + f5 + f6;
-            bt = [28 + f3 + f4, f5];
-        }
-        let batch_table = null;
-        try {
-            batch_table = bt[1] ? JSON.parse(text_decoder.decode(new Uint8Array(buf, bt[0], bt[1]))) : null;
-        } catch (e) {}
+        const o = f5 >= legacy ? 20 + f4 : f6 >= legacy ? 24 + f3 + f4 : 28 + f3 + f4 + f5 + f6;
         const glb = new DataView(buf, o);
         if (glb.getUint32(0, true) != 0x46546c67)   // "glTF"
             throw new Error("no binary glTF in the b3dm tile");
@@ -86,19 +70,16 @@ const bayern_3d_worker_main = () => {
             throw new Error("only glTF 1.0 is supported");
         const json_length = glb.getUint32(12, true);
         const gltf = JSON.parse(text_decoder.decode(new Uint8Array(buf, o + 20, json_length)));
-        return {gltf, body: new Uint8Array(buf, o + 20 + json_length), batch_table};
+        return {gltf, body: new Uint8Array(buf, o + 20 + json_length)};
     };
 
     /**
-     * @returns {{vertices: Float32Array, origin: [x, y]}} triangles of the walls and roofs (the ground surfaces are left
-     * out), see wall_floats. The vertices are relative to origin in uv
+     * @returns {{vertices: Float32Array, origin: [x, y], grounds: Float32Array}} triangles of the walls and roofs (the
+     * ground surfaces are left out), per vertex x, y (uv relative to origin), height (m in the heights of the tileset),
+     * normal east, south, up. grounds: x, y, height of some vertices of the ground surfaces
      */
     const build_tile = (buf) => {
-        const {gltf, body, batch_table} = parse_b3dm(buf);
-        // bridges (alkis function 53001_*, bauwerk im verkehrsbereich) keep their own height, the terrain below them is
-        // the valley or road crossed
-        const attributes = batch_table && Array.isArray(batch_table.attributes) ? batch_table.attributes : [];
-        const is_bridge = (batch_id) => /^53001/.test((attributes[batch_id] || {}).function || "");
+        const {gltf, body} = parse_b3dm(buf);
         const rtc = gltf.extensions && gltf.extensions.CESIUM_RTC ? gltf.extensions.CESIUM_RTC.center : [0, 0, 0];
         // all triangles in earth fixed coordinates: the node matrices, then the y up of gltf to the z up of 3d tiles
         const prims = [];
@@ -114,15 +95,16 @@ const bayern_3d_worker_main = () => {
         const scene = gltf.scenes ? gltf.scenes[gltf.scene || Object.keys(gltf.scenes)[0]] : null;
         for (const id of scene ? scene.nodes : Object.keys(gltf.nodes))
             visit(id, identity);
-        const tris = [];    // per vertex: lon, lat, h, normal e, n, u, batch id
+        let origin = null;
+        const out = [], grounds = [];
         for (const {prim, m} of prims) {
             if ((prim.mode ?? 4) != 4)
                 continue;
             const pos = read_accessor(gltf, body, prim.attributes.POSITION);
             const nor = prim.attributes.NORMAL ? read_accessor(gltf, body, prim.attributes.NORMAL) : null;
-            const batch = prim.attributes._BATCHID ? read_accessor(gltf, body, prim.attributes._BATCHID) : null;
             const idx = prim.indices ? read_accessor(gltf, body, prim.indices) : null;
             const count = idx ? idx.length : pos.length / 3;
+            let tri = [];
             for (let k = 0; k < count; ++k) {
                 const i = idx ? idx[k] : k;
                 const px = pos[3 * i], py = pos[3 * i + 1], pz = pos[3 * i + 2];
@@ -140,61 +122,22 @@ const bayern_3d_worker_main = () => {
                     nn = -sa * co * ex - sa * so * ey + ca * ez;
                     nu = ca * co * ex + ca * so * ey + sa * ez;
                 }
-                tris.push(lon, lat, h, ne, nn, nu, batch ? batch[i] : 0);
+                const [x, y] = uv_of(lon, lat);
+                origin = origin || [x, y];
+                tri.push(x - origin[0], y - origin[1], h, ne, -nn, nu);
+                if (tri.length < 18)
+                    continue;
+                // ground surfaces (normal down) are below the terrain, they only give the heights for the offset
+                if (tri[5] < -.5 && tri[11] < -.5 && tri[17] < -.5)
+                    grounds.push(tri[0], tri[1], tri[2]);
+                else
+                    out.push(...tri);
+                tri = [];
             }
         }
-        // the ground surface (normal down) of each building: its mean height is the ground of the building (for bridges
-        // the underside of the deck), the shader places it on our terrain at its center (see the vertex shader). The
-        // wall vertices at the ground corners are marked to be moved down a bit there, no gaps on slopes
-        const buildings = new Map();    // batch id -> {lon, lat, h, n, corners: Map}
-        const key = (i) => `${Math.round(tris[i] * 1e8)}|${Math.round(tris[i + 1] * 1e8)}`;
-        for (let i = 0; i < tris.length; i += 7) {
-            if (tris[i + 5] > -.5)
-                continue;
-            const b = buildings.get(tris[i + 6]) || {lon: 0, lat: 0, h: 0, n: 0, corners: new Map()};
-            b.lon += tris[i]; b.lat += tris[i + 1]; b.h += tris[i + 2]; ++b.n;
-            b.corners.set(key(i), tris[i + 2]);
-            buildings.set(tris[i + 6], b);
-        }
-        // buildings without a ground surface: lowest vertex and the mean position
-        for (let i = 0; i < tris.length; i += 7)
-            if (!buildings.has(tris[i + 6]) || buildings.get(tris[i + 6]).fallback) {
-                const b = buildings.get(tris[i + 6]) || {lon: 0, lat: 0, h: Infinity, n: 0, corners: new Map(), fallback: true};
-                b.lon += tris[i]; b.lat += tris[i + 1]; b.h = Math.min(b.h, tris[i + 2]); ++b.n;
-                buildings.set(tris[i + 6], b);
-            }
-        for (const b of buildings.values()) {
-            b.lon /= b.n; b.lat /= b.n;
-            if (!b.fallback)
-                b.h /= b.n;
-            b.uv = uv_of(b.lon, b.lat);
-        }
-        const origin = tris.length ? uv_of(tris[0], tris[1]) : [0, 0];
-        const out = new Float32Array(tris.length / 7 * wall_floats);
-        let n = 0;
-        for (let i = 0; i < tris.length; i += 21) {
-            // ground surfaces are below the terrain anyway
-            if (tris[i + 5] < -.5 && tris[i + 12] < -.5 && tris[i + 19] < -.5)
-                continue;
-            for (let j = i; j < i + 21; j += 7) {
-                const b = buildings.get(tris[j + 6]);
-                const [x, y] = uv_of(tris[j], tris[j + 1]);
-                const corner = b.corners.get(key(j));
-                const at_ground = corner !== undefined && Math.abs(corner - tris[j + 2]) < .05;
-                out.set([x - origin[0], y - origin[1], tris[j + 2] - b.h, b.uv[0] - origin[0], b.uv[1] - origin[1],
-                         b.h, is_bridge(tris[j + 6]) ? -1 : at_ground ? 1 : 0, tris[j + 3], -tris[j + 4], tris[j + 5]], n);
-                n += wall_floats;
-            }
-        }
-        // ground of each building (no bridges), to match the heights of the tileset with our terrain
-        const grounds = new Float32Array(buildings.size * 3);
-        let k = 0;
-        for (const [batch_id, b] of buildings)
-            if (!is_bridge(batch_id)) {
-                grounds.set([b.uv[0] - origin[0], b.uv[1] - origin[1], b.h], k);
-                k += 3;
-            }
-        return {vertices: out.slice(0, n), origin, grounds: grounds.slice(0, k)};
+        const step = Math.max(Math.floor(grounds.length / 3 / ground_samples), 1) * 3;
+        const sampled = grounds.filter((_, i) => i % step < 3);
+        return {vertices: new Float32Array(out), origin: origin || [0, 0], grounds: new Float32Array(sampled)};
     };
 
     self.onmessage = async (e) => {
@@ -213,7 +156,7 @@ const bayern_3d_worker_main = () => {
 
 /**
  * @brief traverses the tileset of the buildings (tileset files are loaded when reached), loads the tiles close enough
- * to the camera (screen space error of their parent too large) and draws them on the terrain. Tiles fade in and out
+ * to the camera (screen space error of their parent too large) and draws them at their position. Tiles fade in and out
  * (dithered, no sorting needed)
  */
 const BuildingRenderer = () => {
@@ -224,10 +167,7 @@ const BuildingRenderer = () => {
     const fade_ms = 500;
     const retry_ms = 30000;
     const offset_interval_ms = 1000;
-    const offset_samples = 16;      // buildings per tile for the height offset
-    const floats = 10;
-    const extend_down_m = 3;        // walls on the terrain reach this far below the ground, the terrain differs a bit from the one of the models
-    const elevated_m = [4, 8];      // objects this far above our terrain keep their own height (bridges), blended in between
+    const floats = 6;
     return {
         /** @type {WebGL2RenderingContext} */
         gl: null,
@@ -243,19 +183,19 @@ const BuildingRenderer = () => {
         wanted: [],             // nodes selected in the last update, by distance
         on_change: null,        // called if a tile finished loading or a fade is running
         terrain_height: null,   // (x, y) -> height of our terrain in meters, null if not loaded
-        height_offset: 0,      // added to the heights of the tileset (above the sea as ours), median of our terrain minus the building grounds
+        height_offset: 0,       // added to the heights of the tileset (ellipsoid) to get ours (above the sea), median of our terrain minus the building grounds
         offset_time: -Infinity,
 
-        init: function (gl, virtual_height_map, virtual_street_map, height_level_offset, terrain_height) {
+        init: function (gl, virtual_street_map, terrain_height) {
             this.gl = gl;
             this.terrain_height = terrain_height;
-            this.create_program(virtual_height_map, virtual_street_map, height_level_offset);
+            this.create_program(virtual_street_map);
             this.worker = new Worker(URL.createObjectURL(new Blob([`(${bayern_3d_worker_main.toString()})()`], {type: "text/javascript"})));
             this.worker.onmessage = (e) => this.on_tile(e.data);
             return this;
         },
         /** @brief (re)creates the shader program, needed again if a setting compiled into the shaders changes (seamless_tiles) */
-        create_program: function (virtual_height_map, virtual_street_map, height_level_offset) {
+        create_program: function (virtual_street_map) {
             const gl = this.gl;
             if (this.program)
                 gl.deleteProgram(this.program);
@@ -266,39 +206,21 @@ const BuildingRenderer = () => {
             precision highp sampler2DArray;
             precision highp usampler2DArray;
             uniform vec2 grid_offset_pos;
-            uniform vec3 cam_pos;               // relative to grid_offset_pos
             uniform mat4 view_proj;
-            uniform float lod_factor;
-            uniform int max_mesh_level;
             uniform vec2 tile_origin;           // relative to grid_offset_pos
             uniform float fade;
             uniform float height_offset;        // added to the heights of the tileset
-            ${Util.glsl_virtual_texture_uniforms("heightmap", virtual_height_map)}
             ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
             ${Util.glsl_virtual_texture_load("streetmap")}
-            ${Util.glsl_virtual_heightmap_load()}
             ${Util.glsl_wgs_84_m_to_uv()}
             `;
             const vs = header + `
-            layout(location = 0) in vec3 pos;       // uv relative to the tile origin, height above the ground of the building in meters
-            layout(location = 1) in vec4 center;    // center of the building (relative to the tile origin), its ground height
-                                                    // in the heights of the tileset, 1 for wall corners at the ground,
-                                                    // -1 for bridges (they keep their own height)
-            layout(location = 2) in vec3 normal;    // east, south, up
+            layout(location = 0) in vec3 pos;       // uv relative to the tile origin, height in the heights of the tileset in meters
+            layout(location = 1) in vec3 normal;    // east, south, up
             out vec3 v_normal;
             out vec2 v_pos;
             void main() {
-                // the ground of the building on the terrain at its center, with the level the terrain mesh has there
-                vec2 c = tile_origin + center.xy;
-                float dist = max(length(c - cam_pos.xy), 1e-12);
-                float mesh_level = clamp(ceil(log2(lod_factor / dist)), 0., float(max_mesh_level));
-                float terrain = virtual_heightmap_load(grid_offset_pos, c, max(mesh_level + ${height_level_offset}., 0.)).x;
-                // bridges and objects clearly above our terrain keep their own height
-                float own = center.z + height_offset;
-                float elevated = center.w < 0. ? 1. : smoothstep(${elevated_m[0]}., ${elevated_m[1]}., own - terrain);
-                float ground = mix(terrain, own, elevated);
-                float z = ground + pos.z - max(center.w, 0.) * ${extend_down_m}. * (1. - elevated);
-                vec3 p = vec3(tile_origin + pos.xy, wgs_84_m_to_uv(z) * 1.4);
+                vec3 p = vec3(tile_origin + pos.xy, wgs_84_m_to_uv(pos.z + height_offset) * 1.4);
                 v_normal = normal;
                 v_pos = p.xy;
                 gl_Position = view_proj * vec4(p, 1);
@@ -330,10 +252,8 @@ const BuildingRenderer = () => {
             `;
             this.program = initShaderProgram(gl, vs, fs);
             const u = {};
-            for (const name of ["grid_offset_pos", "cam_pos", "view_proj", "lod_factor", "max_mesh_level", "tile_origin", "fade", "height_offset",
-                                "virtual_heightmap_index", "virtual_heightmap", "virtual_streetmap_index", "virtual_streetmap"])
+            for (const name of ["grid_offset_pos", "view_proj", "tile_origin", "fade", "height_offset", "virtual_streetmap_index", "virtual_streetmap"])
                 u[name] = gl.getUniformLocation(this.program, name);
-            u.heightmap_infos = gl.getUniformBlockIndex(this.program, "Infos_heightmap");
             u.streetmap_infos = gl.getUniformBlockIndex(this.program, "Infos_streetmap");
             this.u = u;
         },
@@ -455,9 +375,9 @@ const BuildingRenderer = () => {
                     gl.bindVertexArray(node.vao);
                     gl.bindBuffer(gl.ARRAY_BUFFER, node.buffer);
                     gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.STATIC_DRAW);
-                    for (const [a, size, offset] of [[0, 3, 0], [1, 4, 3], [2, 3, 7]]) {
+                    for (const [a, offset] of [[0, 0], [1, 3]]) {
                         gl.enableVertexAttribArray(a);
-                        gl.vertexAttribPointer(a, size, gl.FLOAT, false, floats * 4, offset * 4);
+                        gl.vertexAttribPointer(a, 3, gl.FLOAT, false, floats * 4, offset * 4);
                     }
                     gl.bindVertexArray(null);
                     gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -481,17 +401,17 @@ const BuildingRenderer = () => {
         },
         /**
          * @brief the heights of the tileset differ a bit from our terrain, the offset is the median of our terrain minus the
-         * ground of the buildings. Needed for the objects which keep their own height (bridges)
+         * ground surfaces of the buildings (mostly the height of the geoid above the ellipsoid)
          */
         update_height_offset: function (nodes) {
             this.offset_time = performance.now();
             const d = [];
             for (const node of nodes) {
-                const g = node.grounds, n = g.length / 3;
-                for (let i = 0; i < n; i += Math.max(Math.floor(n / offset_samples), 1)) {
-                    const t = this.terrain_height(node.origin[0] + g[3 * i], node.origin[1] + g[3 * i + 1]);
+                const g = node.grounds;
+                for (let i = 0; i < g.length; i += 3) {
+                    const t = this.terrain_height(node.origin[0] + g[i], node.origin[1] + g[i + 1]);
                     if (t !== null)
-                        d.push(t - g[3 * i + 2]);
+                        d.push(t - g[i + 2]);
                 }
             }
             if (d.length < 8)
@@ -522,19 +442,12 @@ const BuildingRenderer = () => {
                 this.update_height_offset(drawn);
             const u = this.u;
             gl.useProgram(this.program);
-            p.virtual_height_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, u.heightmap_infos);
-            gl.uniform1i(u.virtual_heightmap_index, 0);
-            gl.uniform1i(u.virtual_heightmap, 1);
-            gl.uniformBlockBinding(this.program, u.heightmap_infos, u.heightmap_infos);
-            p.virtual_street_map.bind_to_shader(gl.TEXTURE2, gl.TEXTURE3, u.streetmap_infos);
-            gl.uniform1i(u.virtual_streetmap_index, 2);
-            gl.uniform1i(u.virtual_streetmap, 3);
+            p.virtual_street_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, u.streetmap_infos);
+            gl.uniform1i(u.virtual_streetmap_index, 0);
+            gl.uniform1i(u.virtual_streetmap, 1);
             gl.uniformBlockBinding(this.program, u.streetmap_infos, u.streetmap_infos);
             gl.uniformMatrix4fv(u.view_proj, false, p.view_proj);
             gl.uniform2f(u.grid_offset_pos, p.grid_offset_pos.x, p.grid_offset_pos.y);
-            gl.uniform3f(u.cam_pos, p.cam_pos[0], p.cam_pos[1], p.cam_pos[2]);
-            gl.uniform1f(u.lod_factor, p.lod_factor);
-            gl.uniform1i(u.max_mesh_level, p.max_mesh_level);
             gl.uniform1f(u.height_offset, this.height_offset);
             gl.enable(gl.DEPTH_TEST);
             gl.depthFunc(gl.LESS);
