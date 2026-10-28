@@ -1412,6 +1412,7 @@ const VectorRenderer = () => {
         gl: null,
         line_program: null,
         label_program: null,
+        styles_texture: null,   // the line styles, one row per style: fill, casing, dims (width, casing width, dash on, dash off in pixels), min scale
         line_uniforms: {},
         label_uniforms: {},
         tiles: new Map(),       // "z/x/y" -> {z, x, y, state: "loading"|"ready"|"failed", count, vao, buffer, atlas, atlas_w, atlas_h, labels, last_use, fail_time}
@@ -1506,8 +1507,8 @@ const VectorRenderer = () => {
             layout(location = 1) in vec4 seg_info;      // along a, along b in meters, style, flags
             uniform vec2 tile_origin;                   // relative to grid_offset_pos
             uniform float tile_w;
-            uniform vec4 style_dims[${n_styles}];       // width, casing width, dash on, dash off in pixels
-            uniform float style_min_scale[${n_styles}]; // the width is scaled down with the distance at most to this
+            uniform sampler2D styles;   // see styles_texture, a texture as mobile chrome fails to link this program with
+                                        // dynamically indexed arrays ("cannot compute gv size for oob")
 
             out vec3 local_px;          // along and across the segment in pixels, multiplied by w for screen linear interpolation
             out vec2 ground;
@@ -1516,20 +1517,25 @@ const VectorRenderer = () => {
             flat out float len_px;
             flat out float fill_hw;
             flat out float casing_w;
-            flat out int style;
+            flat out vec4 fill_col;
+            flat out vec4 casing_col;
+            flat out vec4 dims;         // width, casing width, dash on, dash off in pixels
             flat out int flags;
 
             void main() {
                 int c = gl_VertexID;    // triangle strip: a left, a right, b left, b right
                 bool at_b = c >= 2;
                 float side = (c & 1) == 1 ? 1. : -1.;
-                style = int(seg_info.z + .5);
+                int style = int(seg_info.z + .5);
                 flags = int(seg_info.w + .5);
+                fill_col = texelFetch(styles, ivec2(0, style), 0);
+                casing_col = texelFetch(styles, ivec2(1, style), 0);
+                dims = texelFetch(styles, ivec2(2, style), 0);
+                float min_scale = texelFetch(styles, ivec2(3, style), 0).x;
                 vec2 pa = tile_origin + seg.xy * tile_w, pb = tile_origin + seg.zw * tile_w;
                 vec3 wa = terrain_pos(pa), wb = terrain_pos(pb);
-                vec4 dims = style_dims[style];
                 float d_m = max(length(.5 * (wa + wb) - cam_pos) - eye_offset, 0.) * m_per_uv;
-                float scale = clamp(sqrt(400. / max(d_m, 1.)), style_min_scale[style], 1.6);
+                float scale = clamp(sqrt(400. / max(d_m, 1.)), min_scale, 1.6);
                 // far away the casings would cover the fills of the thin lines
                 fill_hw = max(.5 * dims.x * scale, .6);
                 casing_w = dims.y * min(scale, 1.);
@@ -1567,13 +1573,12 @@ const VectorRenderer = () => {
             flat in float len_px;
             flat in float fill_hw;
             flat in float casing_w;
-            flat in int style;
+            flat in vec4 fill_col;
+            flat in vec4 casing_col;
+            flat in vec4 dims;
             flat in int flags;
             uniform vec4 tile_rect;         // drawn area relative to grid_offset_pos: the tile without its buffer (drawn by the neighbors) or the part of an ancestor replacing a missing tile
             uniform vec4 exclude_rect;      // area of the finer ring
-            uniform vec4 style_fill[${n_styles}];
-            uniform vec4 style_casing[${n_styles}];
-            uniform vec4 style_dims[${n_styles}];
             uniform int fill_pass;          // 0: casings of all lines, 1: fills, so that fills are never covered by the casing of another line
             out vec4 out_col;
             void main() {
@@ -1586,7 +1591,6 @@ const VectorRenderer = () => {
                 float hw = fill_hw + casing_w;
                 if (r > hw + .5)
                     discard;
-                vec4 dims = style_dims[style];
                 float on = 1.;
                 if (dims.z > 0.) {
                     // dash length in pixels, rounded to a power of two in meters so that the pattern does not crawl when moving
@@ -1598,10 +1602,10 @@ const VectorRenderer = () => {
                     // tunnels are drawn faint and without casing
                     if (flags == 1)
                         discard;
-                    col = style_casing[style];
+                    col = casing_col;
                     col.a *= clamp(hw + .5 - r, 0., 1.);
                 } else {
-                    col = style_fill[style];
+                    col = fill_col;
                     col.a *= clamp(fill_hw + .5 - r, 0., 1.) * on * (flags == 1 ? .45 : 1.);
                 }
                 if (col.a < .02)
@@ -1709,14 +1713,17 @@ const VectorRenderer = () => {
                 u.heightmap_infos = gl.getUniformBlockIndex(program, "Infos_heightmap");
                 return u;
             };
-            this.line_uniforms = locations(this.line_program, [...common_names, "tile_origin", "tile_w", "tile_rect", "exclude_rect", "style_fill", "style_casing", "style_dims", "style_min_scale", "fill_pass"]);
+            this.line_uniforms = locations(this.line_program, [...common_names, "tile_origin", "tile_w", "tile_rect", "exclude_rect", "fill_pass", "styles"]);
             this.label_uniforms = locations(this.label_program, [...common_names, "atlas_size", "atlas", "snap_to_pixels", "leader_lines"]);
-            gl.useProgram(this.line_program);
-            gl.uniform4fv(this.line_uniforms.style_fill, vector_line_styles_3d.flatMap(st => st.col));
-            gl.uniform4fv(this.line_uniforms.style_casing, vector_line_styles_3d.flatMap(st => st.casing));
-            gl.uniform4fv(this.line_uniforms.style_dims, vector_line_styles_3d.flatMap(st => [st.w, st.casing_w, ...(st.dash || [0, 0])]));
-            gl.uniform1fv(this.line_uniforms.style_min_scale, vector_line_styles_3d.map(st => st.min_scale || .3));
-            gl.useProgram(null);
+            if (!this.styles_texture) {
+                this.styles_texture = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, this.styles_texture);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 4, n_styles, 0, gl.RGBA, gl.FLOAT, new Float32Array(vector_line_styles_3d.flatMap(st =>
+                    [...st.col, ...st.casing, st.w, st.casing_w, ...(st.dash || [0, 0]), st.min_scale || .3, 0, 0, 0])));
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                gl.bindTexture(gl.TEXTURE_2D, null);
+            }
         },
 
         /**
@@ -1998,6 +2005,9 @@ const VectorRenderer = () => {
             const gl = this.gl;
             const u = this.line_uniforms;
             this.set_common_uniforms(u, this.line_program, p);
+            gl.activeTexture(gl.TEXTURE5);
+            gl.bindTexture(gl.TEXTURE_2D, this.styles_texture);
+            gl.uniform1i(u.styles, 5);
             const ox = p.grid_offset_pos.x, oy = p.grid_offset_pos.y;
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);

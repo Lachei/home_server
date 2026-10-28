@@ -2251,7 +2251,7 @@
         measure_renderer = TrackRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         vector_renderer = VectorRenderer().init(gl_context, virtual_height_map, mesh_res_log2 - heightmap_tile_res_log2);
         vector_renderer.on_change = () => { draw_requested = true; };
-        building_renderer = BuildingRenderer().init(gl_context, virtual_street_map, terrain_height_mean_at);
+        building_renderer = BuildingRenderer().init(gl_context, virtual_street_map);
         building_renderer.on_change = () => { draw_requested = true; };
         update_map_attribution();
         // the building names of an area arrived: its rendered overlay tiles (levels with names) are rendered again
@@ -2455,7 +2455,9 @@
         gl.linkProgram(shaderProgram);
         // If creating the shader program failed, alert
         if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
-            alert('Unable to initialize the shader program: ' + gl.getProgramInfoLog(shaderProgram));
+            // the first attribute of the vertex shader tells which program failed
+            const attribute = (/layout\(location = 0\) in [^\n]*/.exec(vsSource) || ["no attributes"])[0].trim();
+            alert('Unable to initialize the shader program (' + attribute + '): ' + gl.getProgramInfoLog(shaderProgram));
             return null;
         }
         return shaderProgram;

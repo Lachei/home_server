@@ -10,7 +10,6 @@
  */
 const bayern_3d_worker_main = () => {
     const text_decoder = new TextDecoder();
-    const ground_samples = 16;  // ground vertices per tile for the height offset
 
     // wgs 84 ellipsoid
     const a = 6378137, e2 = 6.69437999014e-3;
@@ -74,9 +73,8 @@ const bayern_3d_worker_main = () => {
     };
 
     /**
-     * @returns {{vertices: Float32Array, origin: [x, y], grounds: Float32Array}} triangles of the walls and roofs (the
-     * ground surfaces are left out), per vertex x, y (uv relative to origin), height (m in the heights of the tileset),
-     * normal east, south, up. grounds: x, y, height of some vertices of the ground surfaces
+     * @returns {{vertices: Float32Array, origin: [x, y]}} triangles of the walls and roofs (the ground surfaces are left
+     * out), per vertex x, y (uv relative to origin), height above the sea (m), normal east, south, up
      */
     const build_tile = (buf) => {
         const {gltf, body} = parse_b3dm(buf);
@@ -96,7 +94,7 @@ const bayern_3d_worker_main = () => {
         for (const id of scene ? scene.nodes : Object.keys(gltf.nodes))
             visit(id, identity);
         let origin = null;
-        const out = [], grounds = [];
+        const out = [];
         for (const {prim, m} of prims) {
             if ((prim.mode ?? 4) != 4)
                 continue;
@@ -127,17 +125,13 @@ const bayern_3d_worker_main = () => {
                 tri.push(x - origin[0], y - origin[1], h, ne, -nn, nu);
                 if (tri.length < 18)
                     continue;
-                // ground surfaces (normal down) are below the terrain, they only give the heights for the offset
-                if (tri[5] < -.5 && tri[11] < -.5 && tri[17] < -.5)
-                    grounds.push(tri[0], tri[1], tri[2]);
-                else
+                // ground surfaces (normal down) are below the terrain anyway
+                if (!(tri[5] < -.5 && tri[11] < -.5 && tri[17] < -.5))
                     out.push(...tri);
                 tri = [];
             }
         }
-        const step = Math.max(Math.floor(grounds.length / 3 / ground_samples), 1) * 3;
-        const sampled = grounds.filter((_, i) => i % step < 3);
-        return {vertices: new Float32Array(out), origin: origin || [0, 0], grounds: new Float32Array(sampled)};
+        return {vertices: new Float32Array(out), origin: origin || [0, 0]};
     };
 
     self.onmessage = async (e) => {
@@ -146,8 +140,8 @@ const bayern_3d_worker_main = () => {
             const r = await fetch(url);
             if (!r.ok)
                 throw new Error(`${r.status}`);
-            const {vertices, origin, grounds} = build_tile(await r.arrayBuffer());
-            self.postMessage({id, vertices, origin, grounds}, [vertices.buffer, grounds.buffer]);
+            const {vertices, origin} = build_tile(await r.arrayBuffer());
+            self.postMessage({id, vertices, origin}, [vertices.buffer]);
         } catch (err) {
             self.postMessage({id, error: String(err.message || err)});
         }
@@ -166,7 +160,6 @@ const BuildingRenderer = () => {
     const max_tiles = 400;          // tiles kept on the gpu
     const fade_ms = 500;
     const retry_ms = 30000;
-    const offset_interval_ms = 1000;
     const floats = 6;
     return {
         /** @type {WebGL2RenderingContext} */
@@ -182,13 +175,9 @@ const BuildingRenderer = () => {
         tiles: new Set(),       // nodes with content on the gpu (or fading)
         wanted: [],             // nodes selected in the last update, by distance
         on_change: null,        // called if a tile finished loading or a fade is running
-        terrain_height: null,   // (x, y) -> height of our terrain in meters, null if not loaded
-        height_offset: 0,       // added to the heights of the tileset (ellipsoid) to get ours (above the sea), median of our terrain minus the building grounds
-        offset_time: -Infinity,
 
-        init: function (gl, virtual_street_map, terrain_height) {
+        init: function (gl, virtual_street_map) {
             this.gl = gl;
-            this.terrain_height = terrain_height;
             this.create_program(virtual_street_map);
             this.worker = new Worker(URL.createObjectURL(new Blob([`(${bayern_3d_worker_main.toString()})()`], {type: "text/javascript"})));
             this.worker.onmessage = (e) => this.on_tile(e.data);
@@ -209,18 +198,17 @@ const BuildingRenderer = () => {
             uniform mat4 view_proj;
             uniform vec2 tile_origin;           // relative to grid_offset_pos
             uniform float fade;
-            uniform float height_offset;        // added to the heights of the tileset
             ${Util.glsl_virtual_texture_uniforms("streetmap", virtual_street_map)}
             ${Util.glsl_virtual_texture_load("streetmap")}
             ${Util.glsl_wgs_84_m_to_uv()}
             `;
             const vs = header + `
-            layout(location = 0) in vec3 pos;       // uv relative to the tile origin, height in the heights of the tileset in meters
+            layout(location = 0) in vec3 pos;       // uv relative to the tile origin, height above the sea in meters
             layout(location = 1) in vec3 normal;    // east, south, up
             out vec3 v_normal;
             out vec2 v_pos;
             void main() {
-                vec3 p = vec3(tile_origin + pos.xy, wgs_84_m_to_uv(pos.z + height_offset) * 1.4);
+                vec3 p = vec3(tile_origin + pos.xy, wgs_84_m_to_uv(pos.z) * 1.4);
                 v_normal = normal;
                 v_pos = p.xy;
                 gl_Position = view_proj * vec4(p, 1);
@@ -231,10 +219,12 @@ const BuildingRenderer = () => {
             in vec2 v_pos;
             out vec4 out_col;
             void main() {
-                // fading by dithering (4x4 bayer matrix), the buildings need no sorting
+                // fading by dithering (4x4 bayer matrix), the buildings need no sorting. Computed from the 2x2 matrix instead
+                // of a constant array, mobile chrome fails to compile dynamically indexed constant arrays
                 ivec2 q = ivec2(gl_FragCoord.xy) & 3;
-                const float bayer[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
-                if (fade < 1. && (bayer[q.y * 4 + q.x] + .5) / 16. > fade)
+                ivec2 lo = q & 1, hi = q >> 1;
+                int bayer = 4 * (2 * (lo.x ^ lo.y) + lo.y) + 2 * (hi.x ^ hi.y) + hi.y;
+                if (fade < 1. && (float(bayer) + .5) / 16. > fade)
                     discard;
                 vec3 n = normalize(v_normal);
                 float light = dot(vec3(0, .7, .7), n) * .5 + .5;    // as the terrain
@@ -252,7 +242,7 @@ const BuildingRenderer = () => {
             `;
             this.program = initShaderProgram(gl, vs, fs);
             const u = {};
-            for (const name of ["grid_offset_pos", "view_proj", "tile_origin", "fade", "height_offset", "virtual_streetmap_index", "virtual_streetmap"])
+            for (const name of ["grid_offset_pos", "view_proj", "tile_origin", "fade", "virtual_streetmap_index", "virtual_streetmap"])
                 u[name] = gl.getUniformLocation(this.program, name);
             u.streetmap_infos = gl.getUniformBlockIndex(this.program, "Infos_streetmap");
             this.u = u;
@@ -368,7 +358,6 @@ const BuildingRenderer = () => {
                 const gl = this.gl;
                 node.count = data.vertices.length / floats;
                 node.origin = data.origin;
-                node.grounds = data.grounds;
                 if (node.count) {
                     node.buffer = gl.createBuffer();
                     node.vao = gl.createVertexArray();
@@ -399,26 +388,6 @@ const BuildingRenderer = () => {
             node.fade = 0;
             this.tiles.delete(node);
         },
-        /**
-         * @brief the heights of the tileset differ a bit from our terrain, the offset is the median of our terrain minus the
-         * ground surfaces of the buildings (mostly the height of the geoid above the ellipsoid)
-         */
-        update_height_offset: function (nodes) {
-            this.offset_time = performance.now();
-            const d = [];
-            for (const node of nodes) {
-                const g = node.grounds;
-                for (let i = 0; i < g.length; i += 3) {
-                    const t = this.terrain_height(node.origin[0] + g[i], node.origin[1] + g[i + 1]);
-                    if (t !== null)
-                        d.push(t - g[i + 2]);
-                }
-            }
-            if (d.length < 8)
-                return;
-            d.sort((a, b) => a - b);
-            this.height_offset = d[d.length >> 1];
-        },
         /** @param {Object} p as for VectorRenderer.draw_lines, virtual_street_map */
         draw: function (p) {
             const gl = this.gl;
@@ -438,8 +407,6 @@ const BuildingRenderer = () => {
                 this.on_change();
             if (!drawn.length)
                 return;
-            if (now - this.offset_time > offset_interval_ms)
-                this.update_height_offset(drawn);
             const u = this.u;
             gl.useProgram(this.program);
             p.virtual_street_map.bind_to_shader(gl.TEXTURE0, gl.TEXTURE1, u.streetmap_infos);
@@ -448,7 +415,6 @@ const BuildingRenderer = () => {
             gl.uniformBlockBinding(this.program, u.streetmap_infos, u.streetmap_infos);
             gl.uniformMatrix4fv(u.view_proj, false, p.view_proj);
             gl.uniform2f(u.grid_offset_pos, p.grid_offset_pos.x, p.grid_offset_pos.y);
-            gl.uniform1f(u.height_offset, this.height_offset);
             gl.enable(gl.DEPTH_TEST);
             gl.depthFunc(gl.LESS);
             gl.depthMask(true);
