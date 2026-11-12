@@ -988,75 +988,6 @@ const MapProvider = () => {
         supports_point: function (lat, lon) { return lat >= this.min_lat && lat <= this.max_lat && lon >= this.min_lon && lon <= this.max_lon; }
     };
 };
-const MapProviders = {
-    // heightmap providers -------------------------------------------
-    height_minifuzi: MapProvider().init(
-        "https://minifuziserver.duckdns.org:12345/tiles",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    height_row: MapProvider().init(
-        "https://da kommt er",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    // satellite providers -------------------------------------------
-    satellite_bayernatlas: MapProvider().init(
-        "https://bayernatlas url",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    satellite_row: MapProvider().init(
-        "https://row",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    // street view providers -----------------------------------------
-    street_view_bayernatlas: MapProvider().init(
-        "https://bayernatlas url",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    street_view_row: MapProvider().init(
-        "https://row url",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-    // parcel borders providers --------------------------------------
-    parcel_borders_bayernatlas: MapProvider().init(
-        "https://bayernatlas url",
-        (lat, lon, width) => {
-            return "";
-        },
-        (width) => { return 0; },
-        0, 0, 0, 0
-    ),
-};
-
-const MapType = {
-    height: 0,
-    satellite: 1,
-    street_view: 2,
-    parcel_borders: 3,
-};
 
 const CoordinateMappings = {
     tile_request_from_global_coordinate: function (lat, lon, pref_width) {
@@ -1075,30 +1006,6 @@ const CoordinateMappings = {
      */
     coords_to_lookup_string: function (x, y, width) {
         return `${width}/${x}/${y}`;
-    },
-    /**
-     * @param {String} str String containing "lat/lon/width" in exactly this order
-     * @returns {Object} with member variables lat, lon, width filled
-     */
-    lookup_string_to_coords: function (str) {
-        let s = str.split("/");
-        return { lat: +s[0], lon: +s[1], width: +s[2] };
-    },
-    /**
-     * @brief Main function to map from world coordinate to the different map providers
-     * @param {int} lat 
-     * @param {int} lon 
-     * @param {int} width 
-     * @param {int} map_type A value of the MapType enum
-     * @return {String} with a full path to download the final image tile
-     */
-    global_coordinate_to_tile_url: function (lat, lon, width, map_type) {
-        let provider = this.global_coordinate_to_provider(lat, lon, map_type);
-        if (!provider) {
-            console.error("No provider found")
-            return "";
-        }
-        return provider.coords_to_path(lat, lon, width);
     },
 };
 
