@@ -20,8 +20,8 @@
 <script>
 "use strict";
 
-/* Server-side template injection */
-const file_path="/daten/{{&file_path}}?raw=true";
+/* page_info is injected by the server */
+const file_path="/daten/" + page_info.file_path + "?raw=true";
 
 const canvas=document.getElementById("view");
 const gl=canvas.getContext("webgl2",{antialias:true}) ||

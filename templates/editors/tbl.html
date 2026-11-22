@@ -15,9 +15,10 @@
             width: 100%;
             height: 100%;
             margin: 0px;
-        {{#editor}}
+        }
+
+        html.edit_mode, html.edit_mode body {
             overflow: hidden;
-        {{/editor}}
         }
 
         body {
@@ -107,21 +108,19 @@
             width: 50%;
         }
 
-        {{#editor}}
-        .table_field {
+        html.edit_mode .table_field {
             border-style: solid;
             border-width: 1px;
             border-color: lightgrey;
             user-select: none;
         }
 
-        .table_field_selected,
-        .table_field:hover,
-        .table_col_header:hover,
-        .table_row_header:hover {
+        html.edit_mode .table_field_selected,
+        html.edit_mode .table_field:hover,
+        html.edit_mode .table_col_header:hover,
+        html.edit_mode .table_row_header:hover {
             background-color: lightblue;
         }
-        {{/editor}}
 
         .table_col_header,
         .table_row_header {
@@ -226,11 +225,9 @@
             flex: 1 1 auto;
         }
 
-        {{^editor}}
-        #empty_cell, #column_labels, #row_labels, #tool_bar, #input_bar{
+        html:not(.edit_mode) :is(#empty_cell, #column_labels, #row_labels, #tool_bar, #input_bar) {
             display: none;
         }
-        {{/editor}}
 
         @media print{
             ::-webkit-scrollbar {
@@ -243,7 +240,7 @@
 <body>
     <div id="header">
         <div id="editor_header">
-            <p style="font-size:200%; text-align:center">{{file_name}}</p>
+            <p id="file_name" style="font-size:200%; text-align:center"></p>
             <div id="tool_bar" class="tool_bar">
                 <button id="save" class="tool_item" onclick="save();">&#128190;</button>
                 <div class="tool_bar_separator"></div>
@@ -301,13 +298,14 @@
 </body>
 <script>
     const a_code = "A".charCodeAt(0);
-    const file_path = '{{&file_path}}';
-    var file_revision = "{{&file_revision}}";
+    const file_path = page_info.file_path;
+    var file_revision = page_info.file_revision;
+    document.getElementById("file_name").textContent = page_info.file_name;
     const ballot_box = "&#9744;";
     const ballot_box_checked = "&#9745;";
 
     var table_data = {};
-    try {table_data = JSON.parse("{{&file_data}}");} catch {}
+    try {table_data = JSON.parse(page_info.file_data);} catch {}
     var next_end = false;
     var table_rows = 200;
 
@@ -483,16 +481,16 @@
         table_div.innerHTML = inner;
         column_labels.innerHTML = inner_cols;
         row_labels.innerHTML = inner_rows + "<div class='table_col_header col_width' style='height:40px'></div>";
-        {{#editor}}
-        for (let r = 0; r < num_rows; r++) {
-            let id = `${r + row_range[0]}:${r + row_range[0]}`;
-            new ResizeObserver((e) => resize_row(e)).observe(document.getElementById(id));
+        if (page_info.editor) {
+            for (let r = 0; r < num_rows; r++) {
+                let id = `${r + row_range[0]}:${r + row_range[0]}`;
+                new ResizeObserver((e) => resize_row(e)).observe(document.getElementById(id));
+            }
+            for (let c = 0; c < num_cols; c++) {
+                let id = `${String.fromCharCode(c + a_code)}:${String.fromCharCode(c + a_code)}`;
+                new ResizeObserver((e) => resize_col(e)).observe(document.getElementById(id));
+            }
         }
-        for (let c = 0; c < num_cols; c++) {
-            let id = `${String.fromCharCode(c + a_code)}:${String.fromCharCode(c + a_code)}`;
-            new ResizeObserver((e) => resize_col(e)).observe(document.getElementById(id));
-        }
-        {{/editor}}
     }
 
     function get_start_end_cell(cell_ids) {
@@ -919,43 +917,43 @@
     }
 
     var saved_table_data = structuredClone(table_data);
-    {{#editor}}
-    window.setInterval(() => {
-        if (!deepEqual(saved_table_data, table_data)) {
-            save();
-            delete saved_table_data;
-            saved_table_data = structuredClone(table_data);
-        }
-    }, 5000);
-
-
-    window.setInterval(async () => {
-        let res = await fetch(location.origin + "/check_file_revision", {
-            headers: { path: file_path, revision: file_revision },
-        });
-        res = await res.json();
-        if (res.file_revision && res.file_revision.length > 0) {
-            if(res.file_data !== JSON.stringify(table_data, null, "\t")) {
-                await save();
-                return;
+    if (page_info.editor) {
+        window.setInterval(() => {
+            if (!deepEqual(saved_table_data, table_data)) {
+                save();
+                delete saved_table_data;
+                saved_table_data = structuredClone(table_data);
             }
-            file_revision = res.file_revision;
-        }
-        if (res.file_data && res.file_data.length > 0) {
-            delete table_data;
-            delete saved_table_data;
-            table_data = JSON.parse(res.file_data);
-            saved_table_data = structuredClone(table_data);
-            update_functions();
-        }
-    }, 2000);
+        }, 5000);
+
+
+        window.setInterval(async () => {
+            let res = await fetch(location.origin + "/check_file_revision", {
+                headers: { path: file_path, revision: file_revision },
+            });
+            res = await res.json();
+            if (res.file_revision && res.file_revision.length > 0) {
+                if(res.file_data !== JSON.stringify(table_data, null, "\t")) {
+                    await save();
+                    return;
+                }
+                file_revision = res.file_revision;
+            }
+            if (res.file_data && res.file_data.length > 0) {
+                delete table_data;
+                delete saved_table_data;
+                table_data = JSON.parse(res.file_data);
+                saved_table_data = structuredClone(table_data);
+                update_functions();
+            }
+        }, 2000);
     
-    window.onresize = () => {
-        let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
-        document.getElementById("table_container").style.height = height;
-    };
-    window.onload = () => {window.onresize();};
-    {{/editor}}
+        window.onresize = () => {
+            let height = String(document.documentElement.clientHeight  - document.getElementById("header").clientHeight) + "px";
+            document.getElementById("table_container").style.height = height;
+        };
+        window.onload = () => {window.onresize();};
+    }
 </script>
 
 </html>

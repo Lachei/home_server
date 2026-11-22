@@ -5,7 +5,6 @@
 #include <fstream>
 #include <random>
 
-#include "crow/crow.h"
 #include "nlohmann/json.hpp"
 
 constexpr std::string_view admin_name{"admin"};
@@ -70,7 +69,6 @@ public:
     {
         if (!_credentials.contains(user))
             return false;
-        auto alt = crow::json::wvalue::object();
         _credentials.erase(user);
         safe_credentials();
         return true;

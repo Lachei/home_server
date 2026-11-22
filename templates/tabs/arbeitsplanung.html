@@ -193,8 +193,8 @@
 
     const divergingColors = generateDivergingColors();
     function db_event_to_cal_event(e) {
-        let working = e.people.slice(1, -1).split(',').includes("{{benutzername}}");
-        let editable = "{{benutzername}}" == e.creator || "{{benutzername}}" == "admin" || working;
+        let working = e.people.slice(1, -1).split(',').includes(parent_uname);
+        let editable = parent_uname == e.creator || parent_uname == "admin" || working;
         return {
             id: e.id,
             resourceIds: [],
@@ -346,7 +346,7 @@
             let selector_copy = document.getElementById("side_select_template").cloneNode(true);
             selector_copy.id = id;
             let available_values = users;
-            let selected_values = user == "admin" ? "[]": "[{{benutzername}}]";
+            let selected_values = user == "admin" ? "[]": "[" + parent_uname + "]";
             if (contains_all) {
                 available_values = available_values.slice(0, 1) + "Alle," + available_values.slice(1);
                 selected_values = "[Alle]";
@@ -383,9 +383,9 @@
             description: event_inputs.querySelector('#ne_description').value,
             start_time: start.toISOString(),
             end_time: end.toISOString(),
-            creator: creator == null ? '{{benutzername}}' : creator.innerHTML,
+            creator: creator == null ? parent_uname : creator.innerHTML,
             people: people,
-            people_status: '[{{benutzername}}, accepted]',
+            people_status: '[' + parent_uname + ', accepted]',
             visibility: visibility,
             expected_hours: parseFloat(event_inputs.querySelector('#ne_expected_hours').value),
             progress: 0.
@@ -405,7 +405,7 @@
         if ("error" in event)
             console.log(event["error"]);
         else {
-            let allowed_to_edit = "{{benutzername}}" == event.creator || "{{benutzername}}" == "admin" || event.people.slice(1, -1).split(',').includes("{{benutzername}}");
+            let allowed_to_edit = parent_uname == event.creator || parent_uname == "admin" || event.people.slice(1, -1).split(',').includes(parent_uname);
             let start = new Date(Date.parse(event.start_time));
             let end = new Date(Date.parse(event.end_time));
             start.setMinutes(start.getMinutes() - start.getTimezoneOffset());

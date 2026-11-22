@@ -416,7 +416,7 @@ void Database::Table::delete_rows(const std::span<ElementType> &ids)
     if (del_idx.empty())
         throw std::runtime_error{"The ids to delete were not in the table"};
     if (del_idx.size() != ids.size())
-        CROW_LOG_WARNING << "Not all ids to delete were found in the table";
+        LOG_WARNING << "Not all ids to delete were found in the table";
 
     for (auto &data : loaded_data)
     {

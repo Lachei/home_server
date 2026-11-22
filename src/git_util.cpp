@@ -4,7 +4,7 @@
 #include <utility>
 #include <filesystem>
 #include <fstream>
-#include "crow/crow.h"
+#include "page_util.hpp"
 #include "system_util.hpp"
 
 namespace git_util {
@@ -51,7 +51,7 @@ std::string get_latest_commit_hash(std::string_view file) {
     auto [status, output] = run_command("cd " + p.parent_path().string() + " && git rev-list -1 HEAD -- ./" + p.filename().string());
     if (status != EXIT_SUCCESS)
         throw std::runtime_error{"Getting latest commit failed with result string: " + output + " and exit code: " + std::to_string(status)};
-    while (output.size() && output.back() == ' ' || output.back() == '\n')
+    while (output.size() && (output.back() == ' ' || output.back() == '\n'))
         output.pop_back();
     return output;
 }
@@ -67,7 +67,7 @@ std::string commit_changes(std::string_view user, std::string_view path) {
     auto [status, output] = run_command("cd " + p.parent_path().string() + " && git add . > /dev/null && git commit -m " + change_msg + " > /dev/null && git rev-parse --verify HEAD");
     if (status != EXIT_SUCCESS)
         throw std::runtime_error{"Commiting git changes failed with result string: " + output + " and exit code: " + std::to_string(status)};
-    while (output.size() && output.back() == ' ' || output.back() == '\n')
+    while (output.size() && (output.back() == ' ' || output.back() == '\n'))
         output.pop_back();
     return output;
 }
@@ -88,15 +88,13 @@ std::string merge_strings(std::string_view base_version, std::string_view a, std
 }
 
 std::string get_history_response(std::string_view path) {
-    static const crow::mustache::template_t history_template{crow::mustache::load("history.html")};
+    static const std::string history_page{page_util::load_template("history.html")};
 
-    std::string history = get_history(path);
-
-    crow::mustache::context crow_context{};
-    crow_context["history"] = '"' + crow::json::escape(history) + '"';
-    crow_context["file_path"] = std::string(path);
-    crow_context["file_name"] = std::filesystem::path(path).stem();
-    return history_template.render_string(crow_context);
+    return page_util::render_page(history_page, {
+        {"history", get_history(path)},
+        {"file_path", std::string(path)},
+        {"file_name", std::filesystem::path(path).stem().string()},
+    });
 }
 
 std::string get_history(std::string_view path) {

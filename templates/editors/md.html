@@ -16,12 +16,10 @@
             resize: horizontal;
         }
 
-        {{#editor}}
-        body {
+        html.edit_mode body {
             max-width: 100%;
             width: auto;
         }
-        {{/editor}}
 
         #save {
             border: none;
@@ -32,17 +30,19 @@
         #content {
             width: 100%;
             height: 100%;
-            {{#editor}}
+        }
+
+        html.edit_mode #content {
             display: grid;
             grid-template-columns: auto auto;
-            {{/editor}}
         }
 
         #editor_text {
             width: 100%;
-            {{#editor}}
+        }
+
+        html.edit_mode #editor_text {
             height: 75vh;
-            {{/editor}}
         }
 
         #log_div {
@@ -53,10 +53,11 @@
 
         #preview {
             margin-left: 15px;
-            {{#editor}}
-            height: 88vh;
-            {{/editor}}
             overflow: scroll;
+        }
+
+        html.edit_mode #preview {
+            height: 88vh;
         }
 
         #title {
@@ -64,11 +65,9 @@
             font-weight: bold;
         }
 
-        {{^editor}}
-        .editor {
+        html:not(.edit_mode) .editor {
             display: none;
         }
-        {{/editor}}
 
         .log_line:nth-child(even) {
             background-color: lightgrey;
@@ -83,16 +82,14 @@
 </head>
 
 <body>
-    {{#editor}}
-    <div id="header">
+    <div id="header" class="edit_only">
         <center id="title">Markdown Editor</center>
         <button id="save" onclick="save();">&#128190;</button>
         <button id="d_html" onclick="download_html();">Html Herunterladen</button>
     </div>
-    {{/editor}}
     <div id="content">
         <div id="editor" class="editor">
-            <textarea id="editor_text" oninput="recompile();">{{file_data}}</textarea>
+            <textarea id="editor_text" oninput="recompile();"></textarea>
             <p><b>Compile log:</b></p>
             <div id="log_div"></div>
         </div>
@@ -102,8 +99,9 @@
     </div>
 </body>
 <script>
-    const file_path = "{{&file_path}}";
-    var file_revision = "{{&file_revision}}";
+    const file_path = page_info.file_path;
+    var file_revision = page_info.file_revision;
+    document.getElementById("editor_text").value = page_info.file_data;
 
     async function download_html() {
         let project_name = file_path.replace(/.*\//, '').replace(/\..*/, '');
@@ -247,13 +245,13 @@ ${document.getElementById("preview").innerHTML}
     }
 
     var saved_md_data = document.getElementById("editor_text").value;
-    {{#editor}}
-    window.setInterval(() => {
-        if (saved_md_data != document.getElementById("editor_text").value) {
-            save();
-        }
-    }, 5000);
-    {{/editor}}
+    if (page_info.editor) {
+        window.setInterval(() => {
+            if (saved_md_data != document.getElementById("editor_text").value) {
+                save();
+            }
+        }, 5000);
+    }
 
     window.setInterval(async () => {
         let res = await fetch(location.origin + "/check_file_revision", {

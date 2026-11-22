@@ -1,62 +1,69 @@
 #include <iostream>
 #include <regex>
-#include "crow/crow.h"
+#include <memory>
+#include <mutex>
+#include <span>
+#include <unordered_set>
+#include "httplib.h"
 
 #include "Credentials.hpp"
 #include "Database.hpp"
 #include "database_util.hpp"
 #include "data_util.hpp"
 #include "editor_util.hpp"
+#include "page_util.hpp"
 #include "string_split.hpp"
 #include "git_util.hpp"
 #include "system_util.hpp"
+#include "log.hpp"
 
-#define TRY(expr) try { expr; } catch (const std::exception &e) { CROW_LOG_WARNING << e.what(); }
+#define TRY(expr) try { expr; } catch (const std::exception &e) { LOG_WARNING << e.what(); }
+
+using httplib::Request;
+using httplib::Response;
+using httplib::StatusCode;
 
 static Credentials &credentials_singleton() {
     static Credentials credentials("credentials/cred.json");
     return credentials;
 }
 
-inline std::string_view safe_string_view(const char *c) { return c ? std::string_view{c}: std::string_view{}; }
+static void set_json(Response &res, const nlohmann::json &j) {
+    res.set_content(j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace), "application/json");
+}
 
-struct AuthMiddleWare {
-    struct context {
-        std::string cookie_content{};
-    };
-
-    void before_handle(crow::request& req, crow::response& res, context& ctx) {
-        auto login = req.headers.find("login");
-        if (login != req.headers.end()) {
-            req.add_header("credentials", login->second);
-            if (valid_credential(login->second, credentials_singleton()))
-                ctx.cookie_content = login->second;
-            return;
-        }
-
-        auto cookie = req.headers.find("Cookie");
-        if (cookie != req.headers.end() && valid_cookie_credential(cookie->second, credentials_singleton())) { // if credentials field is present, all done
-            req.add_header("credentials", cookie_extract_credential(cookie->second));
-            return;
-        }
-
-        auto authorization = req.headers.find("Authorization");
-        if (authorization == req.headers.end()) // if no Authorization filed given, cannot convert to credentials
-            return;
-        try {
-            std::string username = get_authorized_username(req, credentials_singleton());
-            std::string sha = credentials_singleton().get_credential(username);
-            req.add_header("credentials", username + ":" + sha);
-            ctx.cookie_content = username + ":" + sha;
-            return;
-        } catch (...) {}
+// Resolves the credentials of a request from the login header, the credentials cookie or a digest Authorization header
+// and stores them in the user_data of the response (read by get_authorized_username()).
+// If the credentials were freshly resolved from a login or Authorization header they are also stored for the
+// post routing handler which sets the credentials cookie.
+static constexpr std::string_view cookie_user_data_key{"cookie_content"};
+static void resolve_credentials(const Request &req, Response &res) {
+    const std::string cred_key{credentials_user_data_key};
+    if (req.has_header("login")) {
+        std::string login = req.get_header_value("login");
+        res.user_data.set(cred_key, login);
+        if (valid_credential(login, credentials_singleton()))
+            res.user_data.set(std::string(cookie_user_data_key), login);
+        return;
     }
 
-    void after_handle(crow::request& req, crow::response& res, context& ctx) {
-        if(ctx.cookie_content.size())
-            res.add_header("Set-Cookie", "credentials=" + ctx.cookie_content + "; Max-Age=31536000; SameSite=Strict; Path=/");
+    if (req.has_header("Cookie")) {
+        std::string cookie = req.get_header_value("Cookie");
+        if (valid_cookie_credential(cookie, credentials_singleton())) {
+            res.user_data.set(cred_key, cookie_extract_credential(cookie));
+            return;
+        }
     }
-};
+
+    if (!req.has_header("Authorization")) // if no Authorization filed given, cannot convert to credentials
+        return;
+    try {
+        std::string username = get_authorized_username(req, res, credentials_singleton());
+        std::string sha = credentials_singleton().get_credential(username);
+        res.user_data.set(cred_key, username + ":" + sha);
+        res.user_data.set(std::string(cookie_user_data_key), username + ":" + sha);
+    } catch (...) {}
+}
 
 struct default_groups{
     static constexpr std::string_view unauthorized_user{"unautorisierte_benutzer"};
@@ -82,221 +89,264 @@ void print_help()
 std::string_view get_parameter(std::span<const char*> args, std::string_view parameter) {
     if (!std::ranges::contains(args, parameter))
         return {};
-    
+
     auto e = std::ranges::find(args, parameter);
     if (e == args.end() || ++e == args.end())
         return {};
-    
+
     return *e;
+}
+
+// Creates the https server if certificates are found in the certificates folder, else a plain http server
+static std::unique_ptr<httplib::Server> create_server(std::string_view certificates_folder) {
+#ifdef CPPHTTPLIB_SSL_ENABLED
+    const std::string folder{certificates_folder};
+    const auto exists = [&folder](const char *file) { return std::filesystem::exists(folder + "/" + file); };
+    std::string cert, key;
+    if (exists("cert.pem") && exists("privkey.pem"))
+        cert = folder + "/cert.pem", key = folder + "/privkey.pem";
+    else if (exists("rsa.key") && exists("rsa.cert"))
+        cert = folder + "/rsa.cert", key = folder + "/rsa.key";
+    else if (exists("rsa.pem")) // certificate and private key in a single file
+        cert = folder + "/rsa.pem", key = folder + "/rsa.pem";
+
+    if (cert.size()) {
+        auto server = std::make_unique<httplib::SSLServer>(cert.c_str(), key.c_str());
+        if (server->is_valid())
+            return server;
+        LOG_ERROR << "Could not load the certificate files " << cert << " and " << key << ". Starting server without certs";
+    } else {
+        LOG_ERROR << "Could not find the certificates files in the given certificates folder: " << certificates_folder << ". Starting sever without certs";
+    }
+#else
+    LOG_WARNING << "Server was compiled without ssl support, starting server without certs";
+#endif
+    return std::make_unique<httplib::Server>();
 }
 
 using namespace std::string_view_literals;
 int main(int argc, const char** argv) {
     std::span<const char*> args(argv, argc);
     bool show_help = std::ranges::contains(args, "--help"sv);
-    
+
     std::string data_base_folder = std::string(get_parameter(args, "--data"));
     if (data_base_folder.empty()) {
-        CROW_LOG_WARNING << "Missing --data argument, setting it to 'daten/'.\n";
+        LOG_WARNING << "Missing --data argument, setting it to 'daten/'.";
         show_help = true;
         data_base_folder = "daten/";
     }
     if (data_base_folder.back() != '/') {
-        CROW_LOG_WARNING << "Data folder missing slash at the and, adding it automatically";
+        LOG_WARNING << "Data folder missing slash at the and, adding it automatically";
         data_base_folder += '/';
     }
 
     std::string_view certificates_folder = get_parameter(args, "--cert");
     if (certificates_folder.empty()) {
-        CROW_LOG_WARNING << "Missing --cert argument, defaulting to data/certificates/";
+        LOG_WARNING << "Missing --cert argument, defaulting to data/certificates/";
         show_help = true;
         certificates_folder = "data/certification/";
     }
 
     std::string_view databases_folder = get_parameter(args, "--databases");
     if (databases_folder.empty()) {
-        CROW_LOG_WARNING << "Missing --databases argument, defaulting to 'data/'";
+        LOG_WARNING << "Missing --databases argument, defaulting to 'data/'";
         databases_folder = "data/";
     }
- 
+
     if (show_help)
         print_help();
 
-    crow::App<AuthMiddleWare> app{};
-    app.exception_handler([](crow::response &res)->void{
-        try { 
-            throw; // rethrow current exception
-        } catch (const crow_status &e) {
+    std::unique_ptr<httplib::Server> server = create_server(certificates_folder);
+    httplib::Server &app = *server;
+    app.set_exception_handler([](const Request &req, Response &res, std::exception_ptr ep) {
+        try {
+            std::rethrow_exception(ep);
+        } catch (const http_status &e) {
             // special handle for unauthorized error
-            res = crow::response(e.status);
+            res.status = e.status;
             for (const auto &[key, val]: e.headers)
-                res.add_header(key, val);
-            CROW_LOG_ERROR << "Crow status error: " << e.what();
+                res.set_header(key, val);
+            LOG_ERROR << "Status error " << e.status << " for " << req.path << ": " << e.what();
+        } catch (const std::exception &e) {
+            res.status = StatusCode::InternalServerError_500;
+            res.set_content("500 Internal Server Error", "text/plain");
+            LOG_ERROR << "An uncaught exception occurred for " << req.path << ": " << e.what();
         } catch (...) {
-            crow::Router::default_exception_handler(res);
+            res.status = StatusCode::InternalServerError_500;
+            res.set_content("500 Internal Server Error", "text/plain");
+            LOG_ERROR << "An uncaught exception occurred for " << req.path;
         }
     });
-    
-    Credentials &credentials = credentials_singleton(); 
+    app.set_pre_routing_handler([](const Request &req, Response &res) {
+        resolve_credentials(req, res);
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+    app.set_post_routing_handler([](const Request &req, Response &res) {
+        if (const std::string *cookie = res.user_data.get<std::string>(std::string(cookie_user_data_key)); cookie && cookie->size())
+            res.set_header("Set-Cookie", "credentials=" + *cookie + "; Max-Age=31536000; SameSite=Strict; Path=/");
+    });
+    app.set_logger([](const Request &req, const Response &res) {
+        LOG_INFO << "Request: " << req.remote_addr << " " << req.method << " " << req.path << " " << res.status;
+    });
+
+    Credentials &credentials = credentials_singleton();
     Database database(std::string(databases_folder) + "events");
     database_util::setup_event_table(database);
     database_util::setup_shift_tables(database);
     data_util::setup_data(data_base_folder);
     TRY(git_util::init_git(data_base_folder));
-    
+
     std::mutex invoice_file_mutex{};
+
+    const auto authorized_user = [&credentials](const Request &req, Response &res) {
+        return get_authorized_username(req, res, credentials);
+    };
 
     // ------------------------------------------------------------------------------------------------
     // Login/authentication
     // ------------------------------------------------------------------------------------------------
-    const std::string main_page_text = crow::mustache::load_text("main.html");
-    CROW_ROUTE(app, "/")([&main_page_text](){
-        // crow::response res(crow::status::UNAUTHORIZED, main_page_text);
-        // res.add_header("WWW-Authenticate", "Digest realm=\"logout\"");
-        return main_page_text;
+    const std::string main_page_text = page_util::load_template("main.html");
+    app.Get("/", [&main_page_text](const Request &req, Response &res) {
+        res.set_content(main_page_text, "text/html");
     });
-    
-    CROW_ROUTE(app, "/login")([&credentials](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
-        return "";
+
+    app.Get("/login", [&](const Request &req, Response &res) {
+        authorized_user(req, res);
     });
-    
-    CROW_ROUTE(app, "/change_password/<string>")([&credentials](const crow::request& req, const std::string& user){
-        std::string username = get_authorized_username(req, credentials);
 
-        auto new_pwd = req.headers.find("new_pwd");
-        if (new_pwd == req.headers.end())
-            return crow::response{"Missing new_pwd in header infos"};
+    app.Get("/change_password/([^/]+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const std::string user = req.matches[1];
 
-        if(username != user && username != admin_name)
-            return crow::response{"Only admin can change password of other users"};
-
-        crow::response res{crow::status::OK};
-
-        bool success = credentials.set_credential(user, new_pwd->second);
-        if (success) {
-            res.body = "success";
-            if (user == username) // only if the password for the issuer is changed the cookie has to be reset
-                res.add_header("Set-Cookie", "credentials=" + user + ':' + new_pwd->second + "; Max-Age=31536000; SameSite=Strict; Path=/");
-        } else {
-            res.body = "failed";
+        if (!req.has_header("new_pwd")) {
+            res.set_content("Missing new_pwd in header infos", "text/plain");
+            return;
         }
-        return res;
+        const std::string new_pwd = req.get_header_value("new_pwd");
+
+        if(username != user && username != admin_name) {
+            res.set_content("Only admin can change password of other users", "text/plain");
+            return;
+        }
+
+        bool success = credentials.set_credential(user, new_pwd);
+        if (success) {
+            res.set_content("success", "text/plain");
+            if (user == username) // only if the password for the issuer is changed the cookie has to be reset
+                res.set_header("Set-Cookie", "credentials=" + user + ':' + new_pwd + "; Max-Age=31536000; SameSite=Strict; Path=/");
+        } else {
+            res.set_content("failed", "text/plain");
+        }
     });
 
-    CROW_ROUTE(app, "/delete_user/<string>")([&credentials](const crow::request& req, const std::string& user) -> crow::response{
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/delete_user/([^/]+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const std::string user = req.matches[1];
 
-        if (user == admin_name)
-            return crow::response{crow::status::FORBIDDEN};
+        if (user == admin_name) {
+            res.status = StatusCode::Forbidden_403;
+            return;
+        }
 
         bool success = credentials.delete_credential(user);
-        if (success)
-            return crow::response{"success"};
-        else
-            return crow::response{"error"};
+        res.set_content(success ? "success" : "error", "text/plain");
     });
 
-    CROW_ROUTE(app, "/get_all_users")([&credentials](const crow::request& req) -> std::string {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/get_all_users", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        nlohmann::json ret = credentials.get_user_list();
-        return ret.dump();
+        set_json(res, credentials.get_user_list());
     });
-
 
     // ------------------------------------------------------------------------------------------------
     // Group and file access changes
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/groups")([&credentials](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
-        if (username != admin_name)
-            return crow::response{crow::status::FORBIDDEN};
-        return crow::response{get_groups().dump()};
+    app.Get("/groups", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        if (username != admin_name) {
+            res.status = StatusCode::Forbidden_403;
+            return;
+        }
+        set_json(res, get_groups());
     });
-    CROW_ROUTE(app, "/add_group").methods("POST"_method)([&credentials](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
-        if (username != admin_name)
-            return crow::response{crow::status::FORBIDDEN};
-        auto group = req.headers.find("groupname");
-        if (group == req.headers.end())
+    app.Post("/add_group", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        if (username != admin_name) {
+            res.status = StatusCode::Forbidden_403;
+            return;
+        }
+        if (!req.has_header("groupname"))
             throw std::runtime_error{"Missing groupname header"};
-        add_group(group->second);
-        return crow::response{};
+        add_group(req.get_header_value("groupname"));
     });
-    CROW_ROUTE(app, "/delete_group").methods("POST"_method)([&credentials](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
-        if (username != admin_name)
-            return crow::response{crow::status::FORBIDDEN};
-        auto group = req.headers.find("groupname");
-        if (group == req.headers.end())
+    app.Post("/delete_group", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        if (username != admin_name) {
+            res.status = StatusCode::Forbidden_403;
+            return;
+        }
+        if (!req.has_header("groupname"))
             throw std::runtime_error{"Missing groupname header"};
-        delete_group(group->second);
-        return crow::response{};
+        delete_group(req.get_header_value("groupname"));
     });
 
     // ------------------------------------------------------------------------------------------------
     // Git information
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/git_history/<path>")([&credentials, &data_base_folder](const crow::request& req, std::string path) -> std::string {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/git_history/(.+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        return git_util::get_history_response(data_base_folder + path);
+        res.set_content(git_util::get_history_response(data_base_folder + std::string(req.matches[1])), "text/html");
     });
-    CROW_ROUTE(app, "/git_commit")([&credentials, &data_base_folder](const crow::request& req) -> std::string{
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/git_commit", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        auto file_path = req.headers.find("file_path");
-        if (file_path == req.headers.end())
-            return "missing file_path";
-        auto git_hash = req.headers.find("git_hash");
-        if (git_hash == req.headers.end())
-            return "missing git_hash";
+        if (!req.has_header("file_path"))
+            return res.set_content("missing file_path", "text/plain");
+        if (!req.has_header("git_hash"))
+            return res.set_content("missing git_hash", "text/plain");
 
-        return git_util::get_commit(file_path->second, git_hash->second);
+        res.set_content(git_util::get_commit(req.get_header_value("file_path"), req.get_header_value("git_hash")), "text/plain");
     });
 
-    
+
     // ------------------------------------------------------------------------------------------------
     // Event creation, editing, deletion, querying
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/get_events")([&credentials, &database](const crow::request& req) -> std::string {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/get_events", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        auto events = database_util::get_events(database, username);
-        return events.dump();
+        set_json(res, database_util::get_events(database, username));
     });
-    CROW_ROUTE(app, "/get_event/<int>")([&credentials, &database](const crow::request& req, uint64_t event_id) ->std::string {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get(R"(/get_event/(\d+))", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const uint64_t event_id = std::stoull(req.matches[1]);
 
-        auto event = database_util::get_event(database, username, event_id);
-        return event.dump();
+        set_json(res, database_util::get_event(database, username, event_id));
     });
     std::mutex update_cache_mutex;
     std::vector<std::pair<std::chrono::utc_clock::time_point, nlohmann::json>> update_cache;
-    CROW_ROUTE(app, "/add_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req) -> std::string {
-        std::string username = get_authorized_username(req, credentials);
-        
+    app.Post("/add_event", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
         try{
             const auto& event = nlohmann::json::parse(req.body);
             const auto& creator = event["creator"].get<std::string>();
             if (creator != username && username != admin_name)
-                return nlohmann::json{{"error", "can not create event for other users, only admin can do that"}}.dump();
-                
+                return set_json(res, {{"error", "can not create event for other users, only admin can do that"}});
+
             auto result = database_util::add_event(database, event);
             {
                 std::scoped_lock lock{update_cache_mutex};
                 update_cache.emplace_back(std::chrono::utc_clock::now(), result);
             }
-            return result.dump();
-        } catch(nlohmann::json::parse_error e){
-            return nlohmann::json{{"error", e.what()}}.dump();
+            set_json(res, result);
+        } catch(const nlohmann::json::parse_error &e){
+            set_json(res, {{"error", e.what()}});
         }
-        
-        return std::string{};
     });
-    CROW_ROUTE(app, "/update_event").methods("POST"_method)([&credentials, &database, &update_cache, &update_cache_mutex](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
+    app.Post("/update_event", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
         const auto event = nlohmann::json::parse(req.body);
         const auto& creator = event["creator"].get<std::string>();
@@ -305,18 +355,17 @@ int main(int argc, const char** argv) {
             if (user == username)
                 user_affected = true;
         if (!user_affected)
-            return nlohmann::json{{"error", "can not update an event from another user, only admin can do that"}}.dump();
+            return set_json(res, {{"error", "can not update an event from another user, only admin can do that"}});
         {
             std::scoped_lock lock{update_cache_mutex};
             update_cache.emplace_back(std::chrono::utc_clock::now(), event);
         }
 
-        auto result = database_util::update_event(database, event);
-        return result.dump();
+        set_json(res, database_util::update_event(database, event));
     });
-    CROW_ROUTE(app, "/get_updated_events")([&credentials, &update_cache, &update_cache_mutex](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
-        
+    app.Get("/get_updated_events", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
         // removing old entries
         nlohmann::json ret{};
         {
@@ -328,220 +377,199 @@ int main(int argc, const char** argv) {
                 ret.push_back(event);
         }
 
-        return ret.dump();
+        set_json(res, ret);
     });
-    CROW_ROUTE(app, "/delete_event/<int>")([&credentials, &database](const crow::request& req, uint64_t id){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get(R"(/delete_event/(\d+))", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const uint64_t id = std::stoull(req.matches[1]);
 
-        const auto result = database_util::delete_event(database, username, id);
-        return result.dump();
+        set_json(res, database_util::delete_event(database, username, id));
     });
 
     // ------------------------------------------------------------------------------------------------
     // Shift editing
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/start_shift/<string>")([&credentials, &database](const crow::request& req, const std::string &user){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/start_shift/([^/]+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const std::string user = req.matches[1];
 
         if (username != user && username != admin_name)
-            return nlohmann::json{{"error", "can not begin shift for another user, only admin can do that"}}.dump();
+            return set_json(res, {{"error", "can not begin shift for another user, only admin can do that"}});
 
-        std::string_view comment{};
-        auto comment_hdr = req.headers.find("comment");
-        if (comment_hdr != req.headers.end())
-            comment = comment_hdr->second;
-
-        auto result = database_util::start_shift(database, user, comment);
-        return result.dump();
+        const std::string comment = req.get_header_value("comment");
+        set_json(res, database_util::start_shift(database, user, comment));
     });
-    CROW_ROUTE(app, "/start_shift")([&credentials, &database](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/start_shift", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        std::string_view comment{};
-        auto comment_hdr = req.headers.find("comment");
-        if (comment_hdr != req.headers.end())
-            comment = comment_hdr->second;
-
-        auto result = database_util::start_shift(database, username, comment);
-        return result.dump();
+        const std::string comment = req.get_header_value("comment");
+        set_json(res, database_util::start_shift(database, username, comment));
     });
-    CROW_ROUTE(app, "/check_active_shift/<string>")([&credentials, &database](const crow::request& req, const std::string &user){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/check_active_shift/([^/]+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const std::string user = req.matches[1];
 
         if (username != user && username != admin_name)
-            return nlohmann::json{{"error", "can not check shift for another user, only admin can do that"}}.dump();
-        
-        auto result = database_util::check_active_shift(database, user);
-        return result.dump();
+            return set_json(res, {{"error", "can not check shift for another user, only admin can do that"}});
+
+        set_json(res, database_util::check_active_shift(database, user));
     });
-    CROW_ROUTE(app, "/end_shift/<string>")([&credentials, &database, &data_base_folder](const crow::request& req, const std::string& user){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/end_shift/([^/]+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const std::string user = req.matches[1];
 
         if (username != user && username != admin_name)
-            return nlohmann::json{{"error", "can not end shift for another user, only admin can do that"}}.dump();
-        
+            return set_json(res, {{"error", "can not end shift for another user, only admin can do that"}});
+
         const auto result = database_util::end_shift(database, user);
         data_util::try_add_shift_to_rech(username, data_base_folder, std::chrono::minutes(result["shift_length"].get<int>()), result["comment"].get<std::string>());
-        return result.dump();
+        set_json(res, result);
     });
-    CROW_ROUTE(app, "/end_shift")([&credentials, &database, &data_base_folder](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/end_shift", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
         const auto result = database_util::end_shift(database, username);
         data_util::try_add_shift_to_rech(username, data_base_folder, std::chrono::minutes(result["shift_length"].get<int>()), result["comment"].get<std::string>());
-        return result.dump();
+        set_json(res, result);
     });
-    CROW_ROUTE(app, "/get_shifts")([&credentials, &database](const crow::request& req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/get_shifts", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        const auto res = database_util::get_shifts_grouped(database);
-        return res.dump();
+        set_json(res, database_util::get_shifts_grouped(database));
     });
-    CROW_ROUTE(app, "/get_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
-        std::string username = get_authorized_username(req, credentials);
-        
-        const auto res = database_util::get_shift(database, shift_id);
-        return res.dump();
+    app.Get(R"(/get_shift/(\d+))", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const uint64_t shift_id = std::stoull(req.matches[1]);
+
+        set_json(res, database_util::get_shift(database, shift_id));
     });
-    CROW_ROUTE(app, "/update_shift").methods("POST"_method)([&credentials, &database](const crow::request& req) {
-        std::string username = get_authorized_username(req, credentials);
-        
+    app.Post("/update_shift", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
         const auto shift = nlohmann::json::parse(req.body);
         const auto& user = shift["user"].get<std::string>();
         if (user != username && username != admin_name)
-            return nlohmann::json{{"error", "can not update a shift of another person, only admin can do that"}}.dump();
+            return set_json(res, {{"error", "can not update a shift of another person, only admin can do that"}});
 
-        auto result = database_util::update_shift(database, shift);
-        return result.dump();
+        set_json(res, database_util::update_shift(database, shift));
     });
-    CROW_ROUTE(app, "/delete_shift/<int>")([&credentials, &database](const crow::request& req, uint64_t shift_id) {
-        std::string username = get_authorized_username(req, credentials);
-        
-        auto result = database_util::delete_shift(database, username, shift_id);
-        return result.dump();
+    app.Get(R"(/delete_shift/(\d+))", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+        const uint64_t shift_id = std::stoull(req.matches[1]);
+
+        set_json(res, database_util::delete_shift(database, username, shift_id));
     });
-    CROW_ROUTE(app, "/add_shift").methods("POST"_method)([&credentials, &database](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
-        
+    app.Post("/add_shift", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
         const auto shift = nlohmann::json::parse(req.body);
         if(shift["user"].get<std::string>() != username && username != admin_name)
-            return nlohmann::json{{"error", "can not insert a shift of another user, only admin can do that"}}.dump();
-            
-        auto result = database_util::add_shift(database, shift);
-        return result.dump();
+            return set_json(res, {{"error", "can not insert a shift of another user, only admin can do that"}});
+
+        set_json(res, database_util::add_shift(database, shift));
     });
-    
+
     // ------------------------------------------------------------------------------------------------
     // Data processing
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/daten/")([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/daten/", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        return data_util::get_dir_infos(data_base_folder, "").dump();
+        set_json(res, data_util::get_dir_infos(data_base_folder, ""));
     });
-    CROW_ROUTE(app, "/daten/<path>")([&credentials, &data_base_folder](const crow::request &req, const std::string& path) {
+    app.Get("/daten/(.+)", [&](const Request &req, Response &res) {
+        const std::string path = req.matches[1];
         // sanity check which avoids any .. in the path. This hinders users to get folders
         // outside of the data subfolder which would be a security violation
         if (path.find("..") != std::string::npos)
-            return crow::response{"{error: \".. is not allowed in the path.\"}"};
+            return set_json(res, {{"error", ".. is not allowed in the path."}});
 
         // fast allowed return for applications
-        crow::response res;
-        std::filesystem::path file_path = data_base_folder.data() + path;
+        std::filesystem::path file_path = data_base_folder + path;
         if (path.starts_with("Anwendungen/")) {
-            CROW_LOG_INFO << "No user check for file " << file_path;
+            LOG_INFO << "No user check for file " << file_path;
             if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path))
-                res.set_static_file_info(file_path.string());
+                res.set_file_content(file_path.string());
             else
-                res.body = data_util::get_dir_infos(data_base_folder, path).dump();
-            return res;
+                set_json(res, data_util::get_dir_infos(data_base_folder, path));
+            return;
         }
 
-        std::string username = get_authorized_username(req, credentials);
+        std::string username = authorized_user(req, res);
 
         if (std::filesystem::exists(file_path) && !std::filesystem::is_directory(file_path)) {
-            bool raw = safe_string_view(req.url_params.get("raw")) == "true";
-            bool edit = safe_string_view(req.url_params.get("edit")) == "true";
+            bool raw = req.get_param_value("raw") == "true";
+            bool edit = req.get_param_value("edit") == "true";
             std::string ext = file_path.extension().string();
             if (!raw && editor_util::is_extension_editor(ext))
-                res = editor_util::get_editor(edit, req, path, data_base_folder);
+                editor_util::get_editor(res, edit, path, data_base_folder);
             else
-                res.set_static_file_info(file_path.string());
+                res.set_file_content(file_path.string());
         }
         else
-            res.body = data_util::get_dir_infos(data_base_folder, path).dump();
-
-        return res;
+            set_json(res, data_util::get_dir_infos(data_base_folder, path));
     });
-    CROW_ROUTE(app, "/upload_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Post("/upload_daten", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        if (req.headers.find("path") == req.headers.end())
-            return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
-        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()});
-        return res.dump();
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header is missing in the request"}});
+        set_json(res, data_util::update_file(username, data_base_folder + req.get_header_value("path"), to_bin_span(req.body)));
     });
-    CROW_ROUTE(app, "/create_folder")([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/create_folder", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        if (req.headers.find("path") == req.headers.end())
-            return nlohmann::json{{"error", "The path header is missing in the request"}}.dump();
-        const auto res = data_util::create_dir(username, data_base_folder.data() + req.headers.find("path")->second);
-        return res.dump();
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header is missing in the request"}});
+        set_json(res, data_util::create_dir(username, data_base_folder + req.get_header_value("path")));
     });
-    CROW_ROUTE(app, "/create_file")([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/create_file", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        if (req.headers.find("path") == req.headers.end())
-            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second);
-        return res.dump();
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header field is missing in the reqeust"}});
+        set_json(res, data_util::update_file(username, data_base_folder + req.get_header_value("path")));
     });
-    CROW_ROUTE(app, "/update_file").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Post("/update_file", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        if (req.headers.find("path") == req.headers.end())
-            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        std::string base_revision{};
-        if (req.headers.contains("revision"))
-            base_revision = req.headers.find("revision")->second;
-        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(req.body.data()), req.body.size()}, base_revision);
-        return res.dump();
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header field is missing in the reqeust"}});
+        const std::string base_revision = req.get_header_value("revision");
+        set_json(res, data_util::update_file(username, data_base_folder + req.get_header_value("path"), to_bin_span(req.body), base_revision));
     });
-    CROW_ROUTE(app, "/check_file_revision")([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Get("/check_file_revision", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        if (!req.headers.contains("path"))
-            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        if (!req.headers.contains("revision"))
-            return nlohmann::json{{"error", "The path revision field is missing in the reqeust"}}.dump();
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header field is missing in the reqeust"}});
+        if (!req.has_header("revision"))
+            return set_json(res, {{"error", "The path revision field is missing in the reqeust"}});
 
-        std::string path{data_base_folder + req.headers.find("path")->second};
-        std::string client_revision{req.headers.find("revision")->second};
-        
-        return data_util::check_file_revision(path, client_revision);
+        std::string path{data_base_folder + req.get_header_value("path")};
+        std::string client_revision{req.get_header_value("revision")};
+
+        res.set_content(data_util::check_file_revision(path, client_revision), "application/json");
     });
-    CROW_ROUTE(app, "/move_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Post("/move_daten", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
         const auto move_infos = nlohmann::json::parse(req.body);
-        const auto res = data_util::move_files(username, data_base_folder, move_infos);
-        return res.dump();
+        set_json(res, data_util::move_files(username, data_base_folder, move_infos));
     });
-    CROW_ROUTE(app, "/delete_daten").methods("POST"_method)([&credentials, &data_base_folder](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
+    app.Post("/delete_daten", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
         const auto delete_files = nlohmann::json::parse(req.body);
-        const auto res = data_util::delete_files(username, data_base_folder, delete_files);
-        return res.dump();
+        set_json(res, data_util::delete_files(username, data_base_folder, delete_files));
     });
-    
-    CROW_ROUTE(app, "/create_rech")([&credentials, &data_base_folder, &invoice_file_mutex](const crow::request &req) {
-        std::string username = get_authorized_username(req, credentials);
 
-        if (req.headers.find("path") == req.headers.end())
-            return nlohmann::json{{"error", "The path header field is missing in the reqeust"}}.dump();
-        
+    app.Get("/create_rech", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
+        if (!req.has_header("path"))
+            return set_json(res, {{"error", "The path header field is missing in the reqeust"}});
+
         // atomically increment the invoice cache id
         const std::string invoice_cache_path = std::string(data_base_folder) + "rechnungs_cache.json";
         nlohmann::json invoice_cache{};
@@ -563,14 +591,13 @@ int main(int argc, const char** argv) {
         }
         const std::string file_data = invoice.dump();
 
-        const auto res = data_util::update_file(username, data_base_folder.data() + req.headers.find("path")->second, {reinterpret_cast<const std::byte*>(file_data.data()), file_data.size()});
-        return res.dump();
+        set_json(res, data_util::update_file(username, data_base_folder + req.get_header_value("path"), to_bin_span(file_data)));
     });
-    
+
     // ------------------------------------------------------------------------------------------------
     // Map loading (read only and currently does not need authentication)
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/heightmap/meta")([](const crow::request& req) {
+    app.Get("/heightmap/meta", [](const Request &req, Response &res) {
         // the available tiles are sent as a quadtree coverage {"level/x/y": max_level}: all descendants of the tile down
         // to max_level exist. A tile exists if an ancestor (or the tile itself) is listed with max_level >= its level.
         // The plain tile list has millions of entries (~40 MB json for bavaria) which is too much for mobile browsers
@@ -634,144 +661,101 @@ int main(int argc, const char** argv) {
             return nlohmann::json{{"coverage", std::move(coverage)}}.dump();
         }();
 
-        crow::response res{meta};
-        res.set_header("Content-Type", "application/json");
-        return res;
+        res.set_content(meta, "application/json");
     });
-    CROW_ROUTE(app, "/heightmap/<path>")([](const crow::request& req, const std::string& tile) {
+    app.Get("/heightmap/(.+)", [](const Request &req, Response &res) {
+        const std::string tile = req.matches[1];
+        if (tile.find("..") != std::string::npos) {
+            res.status = StatusCode::BadRequest_400;
+            return set_json(res, {{"error", ".. is not allowed in the path."}});
+        }
         std::string filepath = "data/tiles/" + tile + ".png";
-        if (!std::filesystem::exists(filepath))
-            return crow::response{404, "{error: \"The heightmap could not be found\"}"};
+        if (!std::filesystem::exists(filepath)) {
+            res.status = StatusCode::NotFound_404;
+            return set_json(res, {{"error", "The heightmap could not be found"}});
+        }
 
-        crow::response res;
-        res.set_static_file_info(filepath);
-        return res;
+        res.set_file_content(filepath, "image/png");
     });
 
     // ------------------------------------------------------------------------------------------------
     // File editing
     // ------------------------------------------------------------------------------------------------
-    CROW_ROUTE(app, "/edit_tbl/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        std::string username = get_authorized_username(req, credentials);
+    for (const char *route: {"/edit_tbl/(.+)", "/edit_md/(.+)", "/edit_gpx/(.+)"}) {
+        app.Get(route, [&](const Request &req, Response &res) {
+            std::string username = authorized_user(req, res);
 
-        return editor_util::get_editor(true, req, path, data_base_folder);
+            editor_util::get_editor(res, true, std::string(req.matches[1]), data_base_folder);
+        });
+    }
+    app.Get("/edit_rech/(.+)", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
+        editor_util::get_editor(res, true, std::string(req.matches[1]), data_base_folder, username);
     });
-    CROW_ROUTE(app, "/edit_md/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        std::string username = get_authorized_username(req, credentials);
-        
-        return editor_util::get_editor(true, req, path, data_base_folder);
+    app.Get("/edit_gpx", [&](const Request &req, Response &res) {
+        editor_util::get_editor(res, false, "test.gpx", data_base_folder);
     });
-    CROW_ROUTE(app, "/edit_rech/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        std::string username = get_authorized_username(req, credentials);
-        
-        return editor_util::get_editor(true, req, path, data_base_folder, username);
-    });
-    CROW_ROUTE(app, "/edit_gpx/<path>")([&credentials, &data_base_folder](const crow::request& req, const std::string& path) {
-        std::string username = get_authorized_username(req, credentials);
-        
-        return editor_util::get_editor(true, req, path, data_base_folder);
-    });
-    CROW_ROUTE(app, "/edit_gpx")([&credentials, &data_base_folder](const crow::request& req) {
-        // EXTRACT_CHECK_CREDENTIALS_T(req, credentials, crow::response);
-        
-        return editor_util::get_editor(false, req, "test.gpx", data_base_folder);
-    });
-    
+
     // ------------------------------------------------------------------------------------------------
     // General page loading
     // ------------------------------------------------------------------------------------------------
-    const auto overview_page = crow::mustache::load("overview.html");
-    CROW_ROUTE(app, "/overview")([&credentials, &main_page_text, &overview_page](const crow::request& req){
-        std::string username = get_authorized_username(req, credentials);
+    const std::string overview_page = page_util::load_template("overview.html");
+    app.Get("/overview", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
 
-        bool is_admin = username == admin_name;
-        crow::mustache::context crow_context{};
-        if (is_admin) {
-            crow_context["benutzername"] = "admin";
-            crow_context["user_specific_css"] = "admin.css";
-            return overview_page.render_string(crow_context);
-        }
-        else {
-            crow_context["benutzername"] = std::string(username);
-            crow_context["user_specific_css"] = "user.css";
-            return overview_page.render_string(crow_context);
-        }
+        const bool is_admin = username == admin_name;
+        res.set_content(page_util::render_page(overview_page, {{"username", is_admin ? std::string("admin") : username}}), "text/html");
     });
-    
-    const std::string admin_css = crow::mustache::load_text("admin.css");
-    CROW_ROUTE(app, "/admin.css")([&admin_css](){return admin_css;});
-    const std::string md_css = crow::mustache::load_text("editors/md_default.css");
-    CROW_ROUTE(app, "/md_default.css")([&md_css](){return md_css;});
-    const std::string user_css = crow::mustache::load_text("user.css");
-    CROW_ROUTE(app, "/user.css")([&user_css](){return user_css;});
-    const std::string drawdown_js = crow::mustache::load_text("drawdown.js");
-    CROW_ROUTE(app, "/drawdown.js")([&drawdown_js](){crow::response r(drawdown_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string katex_js = crow::mustache::load_text("katex.js");
-    CROW_ROUTE(app, "/katex.js")([&katex_js](){crow::response r(katex_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string ling_alg_js = crow::mustache::load_text("lin_alg.js");
-    CROW_ROUTE(app, "/lin_alg.js")([&ling_alg_js](){crow::response r(ling_alg_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string virtual_texture_js = crow::mustache::load_text("virtual_texture.js");
-    CROW_ROUTE(app, "/virtual_texture.js")([&virtual_texture_js](){crow::response r(virtual_texture_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string gpx_track_js = crow::mustache::load_text("gpx_track.js");
-    CROW_ROUTE(app, "/gpx_track.js")([&gpx_track_js](){crow::response r(gpx_track_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string vector_tiles_js = crow::mustache::load_text("vector_tiles.js");
-    CROW_ROUTE(app, "/vector_tiles.js")([&vector_tiles_js](){crow::response r(vector_tiles_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string bayern_3d_js = crow::mustache::load_text("bayern_3d.js");
-    CROW_ROUTE(app, "/bayern_3d.js")([&bayern_3d_js](){crow::response r(bayern_3d_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string qr_js = crow::mustache::load_text("qrcode.min.js");
-    CROW_ROUTE(app, "/qrcode.min.js")([&qr_js](){crow::response r(qr_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string canvas_renderer_js = crow::mustache::load_text("stl_viewer/CanvasRenderer.js");
-    CROW_ROUTE(app, "/CanvasRenderer.js")([&canvas_renderer_js](){crow::response r(canvas_renderer_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string orbit_controls_js = crow::mustache::load_text("stl_viewer/OrbitControls.js");
-    CROW_ROUTE(app, "/OrbitControls.js")([&orbit_controls_js](){crow::response r(orbit_controls_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string projector_js = crow::mustache::load_text("stl_viewer/Projector.js");
-    CROW_ROUTE(app, "/Projector.js")([&projector_js](){crow::response r(projector_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string trackball_controls_js = crow::mustache::load_text("stl_viewer/TrackballControls.js");
-    CROW_ROUTE(app, "/TrackballControls.min.js")([&trackball_controls_js](){crow::response r(trackball_controls_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string load_stl_js = crow::mustache::load_text("stl_viewer/load_stl.min.js");
-    CROW_ROUTE(app, "/load_stl.min.js")([&load_stl_js](){crow::response r(load_stl_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string parser_js = crow::mustache::load_text("stl_viewer/parser.min.js");
-    CROW_ROUTE(app, "/parser.min.js")([&parser_js](){crow::response r(parser_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string stl_viewer_js = crow::mustache::load_text("stl_viewer/stl_viewer.min.js");
-    CROW_ROUTE(app, "/stl_viewer.min.js")([&stl_viewer_js](){crow::response r(stl_viewer_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string three_js = crow::mustache::load_text("stl_viewer/three.min.js");
-    CROW_ROUTE(app, "/three.min.js")([&three_js](){crow::response r(three_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
-    const std::string webgl_detector_js = crow::mustache::load_text("stl_viewer/webgl_detector.js");
-    CROW_ROUTE(app, "/webgl_detector.js")([&webgl_detector_js](){crow::response r(webgl_detector_js); r.add_header("Content-Type", crow::mime_types.at("js")); return r;});
 
-    const std::string tab_arbeitsplanung = crow::mustache::load_text("tabs/arbeitsplanung.html");
-    CROW_ROUTE(app, "/tabs/arbeitsplanung.html")([&tab_arbeitsplanung](){return tab_arbeitsplanung;});
-    const std::string tab_stempeluhr = crow::mustache::load_text("tabs/stempeluhr.html");
-    CROW_ROUTE(app, "/tabs/stempeluhr.html")([&tab_stempeluhr](){return tab_stempeluhr;});
-    const std::string tab_data = crow::mustache::load_text("tabs/data.html");
-    CROW_ROUTE(app, "/tabs/daten.html")([&tab_data](){return tab_data;});
-    const std::string tab_einstellungen = crow::mustache::load_text("tabs/einstellungen.html");
-    CROW_ROUTE(app, "/tabs/einstellungen.html")([&tab_einstellungen](){return tab_einstellungen;});
-    CROW_ROUTE(app, "/favicon.ico")([]{ crow::response res; res.set_static_file_info("templates/server_logo.png"); return res; });
-    
-    // checking the certificates folder
-#ifdef CROW_ENABLE_SSL
-    if (std::filesystem::exists(std::string(certificates_folder) + "/cert.pem") &&
-        std::filesystem::exists(std::string(certificates_folder) + "/privkey.pem"))
-        app.ssl_file(std::string(certificates_folder) + "/cert.pem",
-                     std::string(certificates_folder) + "/privkey.pem");
-    else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.key") &&
-             std::filesystem::exists(std::string(certificates_folder) + "/rsa.cert"))
-        app.ssl_file(std::string(certificates_folder) + "/rsa.cert", 
-                     std::string(certificates_folder) + "/rsa.key");
-    else if (std::filesystem::exists(std::string(certificates_folder) + "/rsa.pem"))
-        app.ssl_file(std::string(certificates_folder) + "/rsa.pem");
-    else {
-        std::cout << "[error] Could not find the certificates files in the given"
-                     "certificates folder: " << certificates_folder << ". Starting sever without certs\n";
+    const std::string admin_css = page_util::load_template("admin.css");
+    const std::string user_css = page_util::load_template("user.css");
+    app.Get("/user_specific.css", [&](const Request &req, Response &res) {
+        std::string username = authorized_user(req, res);
+
+        res.set_content(username == admin_name ? admin_css : user_css, "text/css");
+    });
+
+    // static files which are loaded once at startup, {route, template file, content type}
+    struct static_file { std::string_view route, file, content_type; };
+    constexpr std::array static_files{
+        static_file{"/admin.css", "admin.css", "text/css"},
+        static_file{"/user.css", "user.css", "text/css"},
+        static_file{"/md_default.css", "editors/md_default.css", "text/css"},
+        static_file{"/drawdown.js", "drawdown.js", "text/javascript"},
+        static_file{"/katex.js", "katex.js", "text/javascript"},
+        static_file{"/lin_alg.js", "lin_alg.js", "text/javascript"},
+        static_file{"/virtual_texture.js", "virtual_texture.js", "text/javascript"},
+        static_file{"/gpx_track.js", "gpx_track.js", "text/javascript"},
+        static_file{"/vector_tiles.js", "vector_tiles.js", "text/javascript"},
+        static_file{"/bayern_3d.js", "bayern_3d.js", "text/javascript"},
+        static_file{"/qrcode.min.js", "qrcode.min.js", "text/javascript"},
+        static_file{"/tabs/arbeitsplanung.html", "tabs/arbeitsplanung.html", "text/html"},
+        static_file{"/tabs/stempeluhr.html", "tabs/stempeluhr.html", "text/html"},
+        static_file{"/tabs/daten.html", "tabs/data.html", "text/html"},
+        static_file{"/tabs/einstellungen.html", "tabs/einstellungen.html", "text/html"},
+    };
+    for (const static_file &f: static_files) {
+        // the route is used as regex, so the dots have to be escaped
+        const std::string route = std::regex_replace(std::string(f.route), std::regex{R"(\.)"}, R"(\.)");
+        app.Get(route, [content = page_util::load_template(f.file), content_type = std::string(f.content_type)](const Request &req, Response &res) {
+            res.set_content(content, content_type);
+        });
     }
-#endif
-    
+    app.Get("/favicon.ico", [](const Request &req, Response &res) {
+        res.set_file_content(std::string(page_util::templates_folder) + "server_logo.png", "image/png");
+    });
+
     if (!credentials.contains(std::string{admin_name})){
-        std::cout << "[error] Missing admin credentials, add with the set_password.sh script\n";
+        LOG_ERROR << "Missing admin credentials, add with the set_password.sh script";
         return -1;
     }
 
-    app.port(12345).multithreaded().run();
+    constexpr int port = 12345;
+    LOG_INFO << "Starting server on port " << port;
+    if (!app.listen("0.0.0.0", port)) {
+        LOG_ERROR << "Could not start the server on port " << port;
+        return -1;
+    }
     return 0;
 }

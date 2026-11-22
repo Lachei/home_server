@@ -6,7 +6,8 @@
     <meta http-equiv="x-ua-compatible" content="ie=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <meta charset="utf-8">
-    <title>{{file_name}}</title>
+    <title></title>
+    <script>document.title = page_info.file_name;</script>
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
@@ -220,13 +221,9 @@
             <div id="header" class="float_panel">
                 <div class="gpx_row">
                     <button id="header_toggle" type="button" title="Einstellungen ein-/ausklappen" aria-expanded="true">&#9776;</button>
-                    <span id="title">{{file_name}}</span>
-                    {{#editor}}
-                    <button id="save" type="button" title="Speichern" onclick="save();">&#128190;</button>
-                    {{/editor}}
-                    {{^editor}}
-                    <a id="open_editor" href="?edit=true" title="Bearbeiten">&#9997;</a>
-                    {{/editor}}
+                    <span id="title"></span>
+                    <button id="save" class="edit_only" type="button" title="Speichern" onclick="save();">&#128190;</button>
+                    <a id="open_editor" class="view_only" href="?edit=true" title="Bearbeiten">&#9997;</a>
                 </div>
                 <div id="header_controls" class="gpx_row">
                     <fieldset><legend>Karte</legend>
@@ -347,8 +344,9 @@
     // spector.displayUI();
     // spector.spyCanvases();
 
-    const file_path = "{{&file_path}}";
-    var file_revision = "{{&file_revision}}";
+    const file_path = page_info.file_path;
+    var file_revision = page_info.file_revision;
+    document.getElementById("title").textContent = page_info.file_name;
 
     let canvas3d = document.getElementById("canvas3d");
     let canvas_tile_ids_2d_ctx = null;
@@ -508,7 +506,8 @@
         else {
             // exponential in the distance to the point below the mouse: zooming in and out is equally fast, fast
             // scrolling never jumps onto or past the point
-            camera_center.add(map_drag_start.subtract(camera_center).mul(1 - Math.exp(cam_dir_speed * 80000 * e.deltaY)));
+            var mul = 80000 * (e.deltaY < 0 ? .5: 1);
+            camera_center.add(map_drag_start.subtract(camera_center).mul(1 - Math.exp(cam_dir_speed * mul * e.deltaY)));
         }
         clamp_camera_above_terrain();
         camera_updated = true;
@@ -1155,10 +1154,10 @@
     // ----------------------------------------------------------------------------------------
     // gpx editing, recording and follow animation
     // ----------------------------------------------------------------------------------------
-    const is_editor = "{{#editor}}1{{/editor}}" == "1";
+    const is_editor = page_info.editor;
     const is_touch = 'ontouchstart' in document.documentElement;
     const gpx_backup_key = "gpx_backup:" + file_path;
-    const gpx_doc = GpxDocument().load("{{&file_data}}");
+    const gpx_doc = GpxDocument().load(page_info.file_data);
     const gpx_recorder = GpsRecorder(own_position);
     const gpx_follower = TrackFollower();
     /** @type {TrackRenderer} */

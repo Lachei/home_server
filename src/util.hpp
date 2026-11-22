@@ -4,18 +4,33 @@
 #include <source_location>
 #include <chrono>
 #include <filesystem>
+#include <format>
+#include <mutex>
+#include <shared_mutex>
+#include <span>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
 
-#include "crow/crow.h"
+#include "log.hpp"
 #include "date.h"
 #include "string_view_stream.hpp"
 #include "Credentials.hpp"
 
-struct crow_status: public std::runtime_error {
+namespace httplib {
+struct Request;
+struct Response;
+}
+
+// Exception which is turned into a http response with the given status code and headers by the server
+struct http_status: public std::runtime_error {
     using header_vec = std::vector<std::pair<std::string, std::string>>;
-    crow_status(crow::status st, const header_vec &headers = {}, const std::string &what = {}): 
+    http_status(int st, const header_vec &headers = {}, const std::string &what = {}): 
         std::runtime_error(what), status{st}, headers{headers} {}
 
-    crow::status status{crow::status::OK};
+    int status{200};
     header_vec headers{};
 };
 
@@ -53,7 +68,11 @@ inline std::pair<std::string_view, std::string_view> extract_credentials(std::st
 bool valid_credential(const std::string &credential, const Credentials& credentials);
 std::string cookie_extract_credential(const std::string &cookie);
 bool valid_cookie_credential(const std::string &cookie, const Credentials& credentials);
-std::string get_authorized_username(const crow::request &req, const Credentials &credentials);
+// The credential ("username:sha") resolved by the auth pre routing handler of the server is stored in the
+// user_data of the response under this key
+inline constexpr std::string_view credentials_user_data_key{"credentials"};
+// Returns the username if the request is authorized, otherwise throws an http_status (401 with digest challenge or 403)
+std::string get_authorized_username(const httplib::Request &req, httplib::Response &res, const Credentials &credentials);
 
 #define DATE_FORMAT "%Y-%m-%d %T"
 constexpr std::string_view date_dump_format = "{:" DATE_FORMAT "}";

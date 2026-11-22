@@ -1,5 +1,7 @@
 #include "util.hpp"
 
+#include "httplib.h"
+
 #include <openssl/sha.h>
 #include "system_util.hpp"
 #include <unistd.h>    // For setuid, setgid, getuid
@@ -8,9 +10,9 @@
 
 constexpr std::string_view AUTH_ALG{"SHA-256"};
 constexpr std::string_view AUTH_REALM{"user@minifuziserver.duckdns.org"};
-static crow_status unauthorized_err(const std::string &msg = {}) {
-	return crow_status{crow::status::UNAUTHORIZED, 
-		crow_status::header_vec{{"WWW-Authenticate", std::format(R"(Digest algorithm="{}",nonce="{:x}",realm="{}",qop="auth")", AUTH_ALG, std::chrono::system_clock::now().time_since_epoch().count(), AUTH_REALM)}}, msg};
+static http_status unauthorized_err(const std::string &msg = {}) {
+	return http_status{httplib::StatusCode::Unauthorized_401, 
+		http_status::header_vec{{"WWW-Authenticate", std::format(R"(Digest algorithm="{}",nonce="{:x}",realm="{}",qop="auth")", AUTH_ALG, std::chrono::system_clock::now().time_since_epoch().count(), AUTH_REALM)}}, msg};
 }
 bool valid_credential(const std::string &credential, const Credentials& credentials) {
 	size_t colon = credential.find_first_of(':');
@@ -73,17 +75,17 @@ void change_system_user(const std::string &username) {
 		// 	throw unauthorized_err("Could not set the user");
 	}
 }
-std::string get_authorized_username(const crow::request &req, const Credentials &credentials) {
-	auto cred = req.headers.find("credentials");
-	if (cred != req.headers.end() && valid_credential(cred->second, credentials)) {
-		std::string username = cred->second.substr(0, cred->second.find_first_of(':'));
+std::string get_authorized_username(const httplib::Request &req, httplib::Response &res, const Credentials &credentials) {
+	const std::string *cred = res.user_data.get<std::string>(std::string(credentials_user_data_key));
+	if (cred && valid_credential(*cred, credentials)) {
+		std::string username = cred->substr(0, cred->find_first_of(':'));
 		change_system_user(username);
 		return username;
 	}
 
 	auto login = req.headers.find("login");
 	if (login != req.headers.end())
-		throw crow_status{crow::status::FORBIDDEN, {}, "Login auth failed"};
+		throw http_status{httplib::StatusCode::Forbidden_403, {}, "Login auth failed"};
 
 	auto auth = req.headers.find("Authorization");
 	if (auth == req.headers.end())
@@ -125,7 +127,7 @@ std::string get_authorized_username(const crow::request &req, const Credentials 
 		else if (key == "uri")
 			uri = cur;
 		else
-			CROW_LOG_WARNING << "check_authorization_header(): unkwnown key '"  << key << ',';
+			LOG_WARNING << "check_authorization_header(): unkwnown key '"  << key << '\'';
 	}
 	// calculate reference sha256 for digest auth according to standard digest auth: H(H(username:realm:password):nonce:nonceCount:cnonce:qop:H(method:digestURI))
 	// with H(username:realm:password) is the stored password
@@ -134,7 +136,7 @@ std::string get_authorized_username(const crow::request &req, const Credentials 
 		throw unauthorized_err("Username not registered" + username);
 	// h2 calculation: H(method:digestURI)
 	std::string h2(SHA256_DIGEST_LENGTH, ' ');
-	std::string data = crow::method_name(req.method) + ':' + uri;
+	std::string data = req.method + ':' + uri;
 	SHA256((uint8_t*)data.data(), data.size(), (uint8_t*)h2.data());
 	h2 = to_hex_string(h2);
 

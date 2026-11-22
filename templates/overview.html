@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8">
-    <link rel="stylesheet" href="{{user_specific_css}}">
+    <link rel="stylesheet" href="/user_specific.css">
     <style>
         html * {
             font-family: Arial, Helvetica, sans-serif;
@@ -134,7 +134,7 @@
     </style>
 
     <script>
-        const parent_uname = "{{benutzername}}";
+        const parent_uname = page_info.username;
 
         const openTab = function (event, tab_id) {
             // disabling all tabs
@@ -155,7 +155,8 @@
 <body>
     <div style="contain: content;">
         <div id="logout">
-            <p style="margin-top: 1.3em;">Eingeloggt als <b style="float:none;">{{benutzername}}</b></p>
+            <p style="margin-top: 1.3em;">Eingeloggt als <b id="logged_in_user" style="float:none;"></b></p>
+            <script>document.getElementById("logged_in_user").textContent = parent_uname;</script>
             <div style="width: 10px"></div>
             <button onclick="window.location = window.location.origin;">Logout</button>
         </div>
@@ -191,8 +192,7 @@
             .then(contents => {
                 for (let i = 0; i < tabcontents.length; ++i) {
                     contents[i].text().then(t => {
-                        // replacing all instances of username in t
-                        tabcontents[i].innerHTML = t.replaceAll("{" + "{benutzername}}", parent_uname);
+                        tabcontents[i].innerHTML = t;
                         scripts = [...tabcontents[i].getElementsByTagName('script')];
                         scripts.map(
                             s => reattach_script(s)

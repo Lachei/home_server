@@ -150,16 +150,15 @@ std::string read_file(std::string_view file)
 
 
 std::string check_file_revision(std::string_view path, std::string_view client_revision) {
-    crow::mustache::template_t json_template{"{\"file_revision\":\"{{&file_revision}}\",\"file_data\":\"{{&file_data}}\"}"};
-    crow::mustache::context crow_context{};
+    nlohmann::json ret{{"file_revision", ""}, {"file_data", ""}};
 
     std::string server_revision = git_util::get_latest_commit_hash(path);
     if (server_revision != client_revision) {
-        crow_context["file_data"] = crow::json::escape(read_file(path));
-        crow_context["file_revision"] = server_revision;
+        ret["file_data"] = read_file(path);
+        ret["file_revision"] = server_revision;
     }
 
-    return json_template.render_string(crow_context);
+    return ret.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 
 void try_add_shift_to_rech(std::string_view user, std::string_view data_folder, std::chrono::minutes shift_length, std::string_view comment) {

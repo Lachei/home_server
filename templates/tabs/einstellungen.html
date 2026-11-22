@@ -2,7 +2,7 @@
     async function change_pwd(){
         let username = document.getElementById("uname").value;
         if (!username || username.length === 0)
-            username = "{{benutzername}}";
+            username = parent_uname;
         let password = document.getElementById("password").value;
         let passwordw = document.getElementById("passwordw").value;
         if (password.length === 0 || passwordw !== password) {

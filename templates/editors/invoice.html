@@ -150,88 +150,88 @@
             size: auto;
             margin: 10mm 0 20mm 0;
         }
-        
-        {{#editor}}
-        @media print {
-        {{/editor}}
-            /* Disables all input things */
-            input {
-                font-size: 4mm;
-                border: 0;
-                pointer-events: none;
-            }
-            input[type=date] {
-                font-size: 4mm;
-            }
-            input[type=date]::-webkit-inner-spin-button,
-            input[type=date]::-webkit-calendar-picker-indicator {
-                display: none;
-                -webkit-appearance: none;
-            }
-            label{
-                display: none;
-            }
-            address {
-                grid-template-columns: 0 auto;
-            }
-            contact {
-                grid-template-columns: 0 auto;
-            }
-            select {
-                display: none;
-            }
-            textarea {
-                border: none;
-            }
-            
-            #footer {
-                margin: 0;
-                position: fixed;
-                bottom: 0mm;
-                left: 20mm;
-                width: 100%;
-                display: block;
-                font-size: 70%;
-                color: rgb(50, 50, 50);
-            }
-            #footer div {
-                float: left;
-            }
-            #footer input {
-                display: none;
-            }
-            
-            #table_settings {
-                display: none;
-            }
-
-
-            #items_table {
-                display: grid;   
-                grid-template-columns: 0 min-content min-content auto min-content min-content min-content min-content;
-            }
-            
-            #editor_header {
-                display: none;
-            }
-            
-            .insert_row {
-                display:none;
-            }
-
-            .print_footer_input {
-                display: block;
-                width: 35mm;
-            }
-        {{#editor}}
-        }
-        {{/editor}}
     </style>
+    <!-- print layout: only used for printing in edit mode, always used in view mode -->
+    <style id="print_style" media="print">
+        /* Disables all input things */
+        input {
+            font-size: 4mm;
+            border: 0;
+            pointer-events: none;
+        }
+        input[type=date] {
+            font-size: 4mm;
+        }
+        input[type=date]::-webkit-inner-spin-button,
+        input[type=date]::-webkit-calendar-picker-indicator {
+            display: none;
+            -webkit-appearance: none;
+        }
+        label{
+            display: none;
+        }
+        address {
+            grid-template-columns: 0 auto;
+        }
+        contact {
+            grid-template-columns: 0 auto;
+        }
+        select {
+            display: none;
+        }
+        textarea {
+            border: none;
+        }
+        
+        #footer {
+            margin: 0;
+            position: fixed;
+            bottom: 0mm;
+            left: 20mm;
+            width: 100%;
+            display: block;
+            font-size: 70%;
+            color: rgb(50, 50, 50);
+        }
+        #footer div {
+            float: left;
+        }
+        #footer input {
+            display: none;
+        }
+        
+        #table_settings {
+            display: none;
+        }
+
+
+        #items_table {
+            display: grid;   
+            grid-template-columns: 0 min-content min-content auto min-content min-content min-content min-content;
+        }
+        
+        #editor_header {
+            display: none;
+        }
+        
+        .insert_row {
+            display:none;
+        }
+
+        .print_footer_input {
+            display: block;
+            width: 35mm;
+        }
+    </style>
+    <script>
+        if (!page_info.editor)
+            document.getElementById("print_style").media = "all";
+    </script>
 </head>
 <body>
     <div id="content">
         <div id="editor_header">
-            <p style="font-size:200%; text-align: center;">{{file_name}}</p>
+            <p id="file_name" style="font-size:200%; text-align: center;"></p>
             <button id="save" onclick="save();">&#128190;</button>
             <button id="start_shift" onclick="start_shift();">Schicht starten</button>
             <hr>
@@ -322,13 +322,14 @@
     </contact>
 </div>
 <script>
-    const file_path = "{{&file_path}}";
+    const file_path = page_info.file_path;
+    document.getElementById("file_name").textContent = page_info.file_name;
     
     var file_data = {};
-    try {file_data = JSON.parse('{{&file_data}}');} catch {}
-    var file_revision = "{{&file_revision}}";
+    try {file_data = JSON.parse(page_info.file_data);} catch {}
+    var file_revision = page_info.file_revision;
     let prev_data = structuredClone(file_data);
-    const username = "{{username}}";
+    const username = page_info.username;
     /**
      * Structure of file data:
      * id: number,
@@ -572,14 +573,14 @@
                 return isEqual && deepEqual(x[key], y[key]);
             }, true) : (x === y);
     }
-    {{#editor}}
-    window.setInterval(() => {
-        if (!deepEqual(file_data, prev_data)) {
-            save();
-            prev_data = structuredClone(file_data);
-        }
-    }, 5000);
-    {{/editor}}
+    if (page_info.editor) {
+        window.setInterval(() => {
+            if (!deepEqual(file_data, prev_data)) {
+                save();
+                prev_data = structuredClone(file_data);
+            }
+        }, 5000);
+    }
 
     window.setInterval(async () => {
         let res = await fetch(location.origin + "/check_file_revision", {
